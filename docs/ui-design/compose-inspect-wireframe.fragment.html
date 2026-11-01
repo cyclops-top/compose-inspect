@@ -1,0 +1,202 @@
+<div id="ci-wireframe" aria-label="ComposeInspect macOS 静态线框图：上方组件树、截图与右侧参数选择，下方左侧多问题列表、右侧问题输入和精简 AI 文本">
+  <style>
+    #ci-wireframe{--ci-bg:light-dark(#fff,#242426);--ci-chrome:light-dark(#f4f4f4,#2c2c2e);--ci-sidebar:light-dark(#ededee,#29292b);--ci-canvas:light-dark(#e5e5e7,#1d1d1f);--ci-text:light-dark(#252527,#ededee);--ci-sub:light-dark(#747478,#a4a4aa);--ci-line:light-dark(#d6d6d9,#454548);--ci-selected:light-dark(#dadadd,#48484d);--ci-ink:light-dark(#424247,#e0e0e4);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC",sans-serif;font-size:13px;line-height:1.5;color:var(--ci-text);width:100%;color-scheme:light dark}
+    #ci-wireframe *{box-sizing:border-box}
+    #ci-wireframe .window{background:var(--ci-bg);border:1px solid var(--ci-line);border-radius:12px;overflow:hidden;box-shadow:0 12px 34px #00000012}
+    #ci-wireframe .titlebar{min-height:44px;background:var(--ci-chrome);display:flex;align-items:center;gap:12px;padding:6px 15px;border-bottom:1px solid var(--ci-line);flex-wrap:wrap}
+    #ci-wireframe .traffic{display:flex;gap:7px;margin-right:7px}
+    #ci-wireframe .traffic b{height:11px;width:11px;border:1px solid var(--ci-sub);border-radius:50%;opacity:.65}
+    #ci-wireframe .divider{width:1px;height:25px;background:var(--ci-line)}
+    #ci-wireframe button{font:inherit;color:var(--ci-text);background:var(--ci-bg);border:1px solid var(--ci-line);border-radius:6px;padding:5px 10px;display:inline-flex;gap:7px;align-items:center;justify-content:center;white-space:nowrap}
+    #ci-wireframe button.icon{background:transparent;border:0;padding:4px}
+    #ci-wireframe svg{width:15px;height:15px;stroke-width:1.5;flex-shrink:0}
+    #ci-wireframe .toolbar-end{display:flex;align-items:center;gap:10px;margin-left:auto}
+    #ci-wireframe .muted{color:var(--ci-sub)}
+    #ci-wireframe .layout{display:grid;grid-template-columns:206px minmax(230px,1fr) 292px;min-height:0}
+    #ci-wireframe .sidebar{background:var(--ci-sidebar);border-right:1px solid var(--ci-line);padding:17px 10px 12px;display:flex;flex-direction:column}
+    #ci-wireframe .section-title{font-size:11px;font-weight:600;color:var(--ci-sub);letter-spacing:.04em}
+    #ci-wireframe .sidebar-heading{padding:0 9px 12px;display:flex;justify-content:space-between;align-items:center}
+    #ci-wireframe .search{display:flex;align-items:center;gap:7px;border:1px solid var(--ci-line);border-radius:6px;background:var(--ci-bg);padding:6px 8px;color:var(--ci-sub);font-size:12px;margin:0 3px 18px}
+    #ci-wireframe .tree-row{display:flex;align-items:center;gap:6px;min-height:31px;font-size:12px;border-radius:5px;padding:5px 7px;white-space:nowrap}
+    #ci-wireframe .tree-row .node{font-family:"SFMono-Regular",Consolas,monospace;font-size:11px}
+    #ci-wireframe .tree-row .kind{color:var(--ci-sub);font-size:10px;border:1px solid var(--ci-line);border-radius:3px;line-height:13px;width:14px;text-align:center;flex-shrink:0}
+    #ci-wireframe .depth1{padding-left:16px}#ci-wireframe .depth2{padding-left:29px}#ci-wireframe .depth3{padding-left:42px}#ci-wireframe .depth4{padding-left:64px}
+    #ci-wireframe .tree-row.selected{background:var(--ci-selected);font-weight:600}
+    #ci-wireframe .tree-label{padding:0 10px 8px;font-size:11px;color:var(--ci-sub)}
+    #ci-wireframe .sidebar-footer{margin-top:auto;padding:18px 9px 0;font-size:11px;color:var(--ci-sub)}
+    #ci-wireframe .canvas{background:var(--ci-canvas);display:flex;flex-direction:column;min-width:0}
+    #ci-wireframe .canvas-tools{position:absolute;right:14px;bottom:14px;z-index:2;display:flex;align-items:center;flex-wrap:wrap;justify-content:flex-end;gap:9px;max-width:calc(100% - 28px);padding:6px 8px;border:1px solid var(--ci-line);border-radius:10px;font-size:11px;background:var(--ci-bg);box-shadow:0 3px 12px #00000014}
+    #ci-wireframe .canvas-tools button{border:0;background:transparent;padding:4px;gap:5px;font-size:11px}
+    #ci-wireframe .canvas-tools .selection-mode{background:var(--ci-selected);border-radius:5px}
+    #ci-wireframe .canvas-tools .wireframe-switch{gap:5px}
+    #ci-wireframe .wireframe-switch{display:flex;align-items:center;gap:7px;font-size:11px;white-space:nowrap}
+    #ci-wireframe .wireframe-switch input{appearance:none;width:26px;height:16px;margin:0;border:1px solid var(--ci-ink);border-radius:10px;background:var(--ci-ink);position:relative;opacity:1}
+    #ci-wireframe .wireframe-switch input::after{content:"";position:absolute;width:12px;height:12px;top:1px;right:1px;border-radius:50%;background:var(--ci-bg)}
+    #ci-wireframe .phone.show-wireframes .app-mark,#ci-wireframe .phone.show-wireframes .welcome,#ci-wireframe .phone.show-wireframes .welcome-sub,#ci-wireframe .phone.show-wireframes .phone-field,#ci-wireframe .phone.show-wireframes .signup{outline:1px dashed var(--ci-sub);outline-offset:3px}
+    #ci-wireframe .selection-mode{display:flex;align-items:center;gap:7px;font-weight:500}
+    #ci-wireframe .stage{position:relative;flex:1;display:flex;align-items:center;justify-content:center;padding:14px 18px 56px}
+    #ci-wireframe .phone{width:204px;height:400px;border:1px solid var(--ci-sub);background:var(--ci-bg);border-radius:18px;padding:12px 15px;position:relative;box-shadow:0 5px 14px #0000000a}
+    #ci-wireframe .phone-status{display:flex;justify-content:space-between;align-items:center;font-size:10px;margin-bottom:14px;padding:0 2px}
+    #ci-wireframe .status-icons{display:flex;gap:5px}#ci-wireframe .status-icons svg{width:12px;height:12px}
+    #ci-wireframe .app-mark{width:28px;height:28px;background:var(--ci-chrome);border:1px solid var(--ci-line);border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:8px}
+    #ci-wireframe .app-mark svg{width:21px;height:21px}
+    #ci-wireframe .welcome{font-size:20px;font-weight:600;letter-spacing:-.7px}
+    #ci-wireframe .welcome-sub{font-size:11px;color:var(--ci-sub);margin:3px 0 12px}
+    #ci-wireframe .field-label{font-size:10px;color:var(--ci-sub);margin-bottom:6px}
+    #ci-wireframe .phone-field{height:29px;border:1px solid var(--ci-line);border-radius:6px;font-size:11px;color:var(--ci-sub);display:flex;align-items:center;padding:0 8px;margin-bottom:9px;background:var(--ci-chrome)}
+    #ci-wireframe .selected-button{position:relative;margin-top:22px;height:29px;outline:2px solid var(--ci-ink);outline-offset:4px;border-radius:5px;background:var(--ci-selected);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
+    #ci-wireframe .selection-tag{position:absolute;left:-6px;bottom:calc(100% + 7px);font-family:"SFMono-Regular",monospace;font-size:10px;background:var(--ci-ink);color:var(--ci-bg);padding:2px 6px;border-radius:3px;font-weight:400;white-space:nowrap}
+    #ci-wireframe .handle{position:absolute;width:5px;height:5px;background:var(--ci-bg);border:1px solid var(--ci-ink)}
+    #ci-wireframe .tl{left:-7px;top:-7px}#ci-wireframe .tr{right:-7px;top:-7px}#ci-wireframe .bl{left:-7px;bottom:-7px}#ci-wireframe .br{right:-7px;bottom:-7px}
+    #ci-wireframe .signup{text-align:center;font-size:10px;color:var(--ci-sub);margin-top:16px}
+    #ci-wireframe .gesture{position:absolute;width:75px;height:3px;background:var(--ci-line);border-radius:3px;bottom:10px;left:calc(50% - 37px)}
+    #ci-wireframe .breadcrumb{border-top:1px solid var(--ci-line);padding:6px 14px;font-size:11px;background:var(--ci-chrome);color:var(--ci-sub);display:flex;gap:7px;flex-wrap:wrap}
+    #ci-wireframe .breadcrumb strong{color:var(--ci-text);font-weight:500}
+    #ci-wireframe .inspector{border-left:1px solid var(--ci-line);display:flex;flex-direction:column;min-width:0}
+    #ci-wireframe .inspector-header{height:35px;padding:8px 14px;border-bottom:1px solid var(--ci-line);font-size:12px;font-weight:500;display:flex;justify-content:space-between}
+    #ci-wireframe .properties{padding:10px 14px}
+    #ci-wireframe .node-heading{display:flex;align-items:center;gap:9px;margin-bottom:4px;font-weight:600;font-size:16px}
+    #ci-wireframe .node-id{font-size:11px;color:var(--ci-sub);margin-bottom:8px}
+    #ci-wireframe .source{border:1px solid var(--ci-line);border-radius:6px;display:flex;gap:7px;align-items:center;padding:6px 8px;margin:4px 0 9px;background:var(--ci-chrome);font-size:12px}
+    #ci-wireframe .source small{display:none}
+    #ci-wireframe .kv{display:grid;grid-template-columns:79px minmax(0,1fr);gap:5px;font-size:11px;margin:5px 0 9px}
+    #ci-wireframe .kv .key{color:var(--ci-sub)}#ci-wireframe .mono{font-family:"SFMono-Regular",Consolas,monospace;overflow-wrap:anywhere}
+    #ci-wireframe .property-group{border-top:1px solid var(--ci-line);padding-top:8px}
+    #ci-wireframe .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+    #ci-wireframe .chip{font-size:10px;background:var(--ci-chrome);border:1px solid var(--ci-line);border-radius:4px;padding:3px 6px}
+    #ci-wireframe .compose-prompt{padding:10px 14px;background:var(--ci-bg);min-width:0}
+    #ci-wireframe .prompt-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-size:12px;font-weight:600}
+    #ci-wireframe textarea{resize:none;width:100%;font:inherit;font-size:12px;line-height:1.65;color:var(--ci-text);border:1px solid var(--ci-line);border-radius:6px;background:var(--ci-bg);padding:9px 10px;height:61px;display:block}
+    #ci-wireframe .preview-title{display:flex;justify-content:space-between;align-items:center;margin:15px 0 8px;font-size:11px;color:var(--ci-sub)}
+    #ci-wireframe .preview{margin:0;border:1px solid var(--ci-line);background:var(--ci-bg);border-radius:6px;padding:10px;font-size:11px;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere;font-family:"SFMono-Regular","PingFang SC",monospace}
+    #ci-wireframe .copy{background:var(--ci-ink);color:var(--ci-bg);border-color:var(--ci-ink);font-weight:500;min-height:32px}
+    #ci-wireframe .copy .shortcut{opacity:.65;margin-left:auto;font-size:10px}
+    #ci-wireframe .statusbar{min-height:27px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 13px;border-top:1px solid var(--ci-line);background:var(--ci-chrome);font-size:10px;color:var(--ci-sub);flex-wrap:wrap}
+    #ci-wireframe .connected{display:flex;align-items:center;gap:6px}#ci-wireframe .dot{width:5px;height:5px;border-radius:50%;background:var(--ci-sub)}
+    @media(max-width:850px){#ci-wireframe .layout{grid-template-columns:170px minmax(220px,1fr) 264px}#ci-wireframe .depth3{padding-left:25px}#ci-wireframe .depth4{padding-left:44px}#ci-wireframe .properties,#ci-wireframe .compose-prompt{padding-left:13px;padding-right:13px}#ci-wireframe .titlebar{gap:10px}#ci-wireframe .stage{padding-left:10px;padding-right:10px}#ci-wireframe .phone{width:222px}}
+    #ci-wireframe .param-hint{font-size:11px;color:var(--ci-sub);margin:4px 0 6px}
+    #ci-wireframe .param-group{font-size:11px;font-weight:500;margin:8px 0 3px}
+    #ci-wireframe .param-row{display:grid;grid-template-columns:15px minmax(0,1fr) auto;align-items:center;gap:7px;padding:4px 0;border-bottom:1px solid var(--ci-line);font-size:11px}
+    #ci-wireframe .param-row input{width:13px;height:13px;margin:0;accent-color:var(--ci-ink);opacity:1}
+    #ci-wireframe .param-row .param-value{font-family:"SFMono-Regular",monospace;color:var(--ci-sub);overflow-wrap:anywhere}
+    #ci-wireframe .param-summary{padding:7px 14px;margin-top:auto;border-top:1px solid var(--ci-line);background:var(--ci-chrome);font-size:11px;display:flex;gap:7px;align-items:center}
+    #ci-wireframe .issues-workspace{display:grid;grid-template-columns:256px minmax(0,1fr);border-top:1px solid var(--ci-line);min-height:0}
+    #ci-wireframe .issues-list{background:var(--ci-sidebar);border-right:1px solid var(--ci-line);padding:9px 10px}
+    #ci-wireframe .issues-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:0 6px 11px;font-size:12px;font-weight:500}
+    #ci-wireframe .issues-heading button{padding:2px 5px;background:transparent;border:0}
+    #ci-wireframe .issue-row{padding:6px 9px;display:flex;gap:9px;border-radius:6px;margin-bottom:2px}
+    #ci-wireframe .issue-row.active{background:var(--ci-selected)}
+    #ci-wireframe .issue-number{font-family:"SFMono-Regular",monospace;font-size:11px;color:var(--ci-sub);padding-top:1px}
+    #ci-wireframe .issue-component{font-size:12px;font-weight:500}
+    #ci-wireframe .issue-excerpt{font-size:11px;color:var(--ci-sub);margin-top:3px;overflow-wrap:anywhere}
+    #ci-wireframe .issue-meta{font-size:11px;color:var(--ci-sub);margin-left:6px;font-weight:400}
+    #ci-wireframe .editor-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+    #ci-wireframe .editor-title{font-size:12px;font-weight:600}
+    #ci-wireframe .issue-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+    #ci-wireframe .issue-actions button{font-size:11px}
+    #ci-wireframe .editor-body{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    #ci-wireframe .input-pane,#ci-wireframe .preview-pane{min-width:0}
+    #ci-wireframe .target-line{display:flex;align-items:center;justify-content:space-between;gap:7px;font-size:11px;margin-bottom:9px;flex-wrap:wrap}
+    #ci-wireframe .target-line button{font-size:11px;padding:3px 6px;background:var(--ci-chrome)}
+    #ci-wireframe .compose-prompt textarea{height:66px}
+    #ci-wireframe .compose-prompt .preview-title{margin:0 0 9px}
+    #ci-wireframe .editor-note{font-size:11px;color:var(--ci-sub);margin-top:6px}
+    #ci-wireframe .preview{min-height:105px;padding:8px;line-height:1.75}
+    @media(max-width:850px){#ci-wireframe .issues-workspace{grid-template-columns:216px minmax(0,1fr)}#ci-wireframe .editor-body{grid-template-columns:1fr}#ci-wireframe .preview{min-height:0}}
+    @media(max-width:680px){#ci-wireframe .layout{grid-template-columns:155px minmax(0,1fr)}#ci-wireframe .inspector{grid-column:1/-1;border-left:0;border-top:1px solid var(--ci-line)}#ci-wireframe .titlebar .divider{display:none}#ci-wireframe .toolbar-end{margin-left:0}#ci-wireframe .layout{min-height:0}#ci-wireframe .sidebar-footer{padding-left:3px}#ci-wireframe .zoom{gap:4px}#ci-wireframe .issues-workspace{grid-template-columns:180px minmax(0,1fr)}}
+    @media(max-width:430px){#ci-wireframe .layout{grid-template-columns:1fr}#ci-wireframe .sidebar{border-right:0;border-bottom:1px solid var(--ci-line)}#ci-wireframe .sidebar .tree-row,#ci-wireframe .sidebar .tree-label,#ci-wireframe .sidebar .search,#ci-wireframe .sidebar-footer{display:none}#ci-wireframe .sidebar .selected{display:flex;padding-left:12px}#ci-wireframe .sidebar-heading{padding-bottom:5px}#ci-wireframe .inspector{grid-template-columns:1fr}#ci-wireframe .compose-prompt{border-left:0;border-top:1px solid var(--ci-line)}#ci-wireframe .phone{width:250px}#ci-wireframe .titlebar{padding:12px}#ci-wireframe .stage{padding:28px 10px}}
+    @media(max-width:430px){#ci-wireframe .issues-workspace{grid-template-columns:1fr}#ci-wireframe .issues-list{border-right:0}#ci-wireframe .editor-top{align-items:flex-start}#ci-wireframe .titlebar{padding:6px 12px}#ci-wireframe .stage{padding:14px 10px 56px}#ci-wireframe .phone{width:204px}}
+  </style>
+  <div class="window">
+    <header class="titlebar">
+      <div class="traffic" aria-hidden="true"><b></b><b></b><b></b></div>
+      <button type="button"><i data-lucide="smartphone" aria-hidden="true"></i> Pixel 9 <span class="muted">⌄</span></button>
+      <button type="button"><i data-lucide="app-window" aria-hidden="true"></i> com.example.app <span class="muted">⌄</span></button>
+      <div class="toolbar-end"><button type="button"><i data-lucide="scan-line" aria-hidden="true"></i> 获取界面</button></div>
+    </header>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-heading"><span class="section-title">组件树</span><i data-lucide="panel-left" aria-hidden="true"></i></div>
+        <div class="search"><i data-lucide="search" aria-hidden="true"></i> 查找组件</div>
+        <div class="tree-label">当前界面</div>
+        <div class="tree-row"><span class="muted">⌄</span><span class="kind">V</span><span class="node">ComposeView</span></div>
+        <div class="tree-row depth1"><span class="muted">⌄</span><span class="kind">C</span><span class="node">AppTheme</span></div>
+        <div class="tree-row depth2"><span class="muted">⌄</span><span class="kind">C</span><span class="node">LoginScreen</span></div>
+        <div class="tree-row depth3"><span class="muted">⌄</span><span class="kind">C</span><span class="node">Column</span></div>
+        <div class="tree-row depth4"><span class="kind">C</span><span class="node">Icon</span></div>
+        <div class="tree-row depth4"><span class="kind">C</span><span class="node">Text</span></div>
+        <div class="tree-row depth4"><span class="kind">C</span><span class="node">TextField</span></div>
+        <div class="tree-row depth4"><span class="kind">C</span><span class="node">TextField</span></div>
+        <div class="tree-row selected depth3"><span class="muted">⌄</span><span class="kind">C</span><span class="node">Button</span></div>
+        <div class="tree-row depth4"><span class="kind">C</span><span class="node">Text · 登录</span></div>
+        <div class="tree-row depth4"><span class="kind">C</span><span class="node">Text</span></div>
+        <div class="sidebar-footer">C Compose 节点 &nbsp; V View 节点</div>
+      </aside>
+      <main class="canvas">
+        <div class="stage">
+          <div class="phone show-wireframes" aria-label="登录界面截图示意，组件线框已显示，登录按钮已选中">
+            <div class="phone-status"><span>9:41</span><span class="status-icons"><i data-lucide="signal" aria-hidden="true"></i><i data-lucide="wifi" aria-hidden="true"></i><i data-lucide="battery-full" aria-hidden="true"></i></span></div>
+            <div class="app-mark"><i data-lucide="layers" aria-hidden="true"></i></div>
+            <div class="welcome">欢迎回来</div><div class="welcome-sub">登录，继续你的工作。</div>
+            <div class="field-label">邮箱</div><div class="phone-field">hello@example.com</div>
+            <div class="field-label">密码</div><div class="phone-field">••••••••</div>
+            <div class="selected-button"><span class="selection-tag">Button · #42</span>登录<span class="handle tl"></span><span class="handle tr"></span><span class="handle bl"></span><span class="handle br"></span></div>
+            <div class="signup">还没有账号？ 创建账号</div><div class="gesture"></div>
+          </div>
+          <div class="canvas-tools" role="group" aria-label="预览区右下角悬浮工具">
+            <button type="button" class="selection-mode" aria-pressed="true"><i data-lucide="mouse-pointer-2" aria-hidden="true"></i>选择</button>
+            <label class="wireframe-switch"><input type="checkbox" role="switch" checked disabled aria-label="显示线框，静态示意为开启状态">线框</label>
+            <button type="button" aria-label="缩放至适合窗口"><i data-lucide="maximize" aria-hidden="true"></i>适合窗口</button>
+          </div>
+        </div>
+        <div class="breadcrumb"><span>LoginScreen</span><span>›</span><span>Column</span><span>›</span><strong>Button</strong><span>›</span><span>Text</span></div>
+      </main>
+      <aside class="inspector">
+        <div class="inspector-header"><span>组件与参数选择</span><i data-lucide="panel-right" aria-hidden="true"></i></div>
+        <div class="properties">
+          <div class="node-heading"><i data-lucide="component" aria-hidden="true"></i> Button</div><div class="node-id">Compose · #42 · “登录”</div>
+          <div class="section-title">源码位置</div>
+          <div class="source"><i data-lucide="file-code-2" aria-hidden="true"></i><div>LoginScreen.kt:86<small>LoginScreen › Column › Button</small></div></div>
+          <div class="section-title">布局</div>
+          <div class="kv"><span class="key">坐标 / px</span><span class="mono">x: 72 &nbsp; y: 1032</span><span class="key">尺寸 / px</span><span class="mono">936 × 144</span></div>
+          <div class="property-group">
+            <div class="section-title">选择要提供给 AI 的参数</div>
+            <div class="param-hint">当前关联：问题 01 · Button「登录」</div>
+            <div class="param-group">修饰符</div>
+            <label class="param-row"><input type="checkbox" checked disabled><span class="mono">height</span><span class="param-value">48 dp</span></label>
+            <label class="param-row"><input type="checkbox" disabled><span class="mono">fillMaxWidth</span><span class="param-value">true</span></label>
+            <div class="param-group">组件参数</div>
+            <label class="param-row"><input type="checkbox" disabled><span class="mono">enabled</span><span class="param-value">true</span></label>
+            <label class="param-row"><input type="checkbox" disabled><span class="mono">shape</span><span class="param-value">RoundedCorner</span></label>
+            <div class="param-group muted">› 语义 <span class="muted">· 2 项</span></div>
+          </div>
+        </div>
+        <div class="param-summary"><i data-lucide="list-checks" aria-hidden="true"></i>已选 1 项参数 · 仅加入当前问题</div>
+      </aside>
+    </div>
+    <section class="issues-workspace" aria-label="当前界面的多问题工作区">
+      <aside class="issues-list">
+        <div class="issues-heading"><span>问题列表 <span class="muted">3</span></span><span class="muted" style="font-size:11px;font-weight:400">点击定位控件</span></div>
+        <div class="issue-row active"><span class="issue-number">01</span><div><div class="issue-component">Button「登录」<span class="issue-meta">1 项</span></div><div class="issue-excerpt">将登录按钮高度改为 56dp。</div></div></div>
+        <div class="issue-row"><span class="issue-number">02</span><div><div class="issue-component">TextField「邮箱」<span class="issue-meta">1 项</span></div><div class="issue-excerpt">字号改为 16sp。</div></div></div>
+        <div class="issue-row"><span class="issue-number">03</span><div><div class="issue-component">Text「创建账号」<span class="issue-meta">1 项</span></div><div class="issue-excerpt">与上方按钮的间距改为 24dp。</div></div></div>
+      </aside>
+      <section class="compose-prompt">
+        <div class="editor-top"><span class="editor-title">当前组件 · Button「登录」</span><div class="issue-actions"><button type="button"><i data-lucide="copy" aria-hidden="true"></i>复制全部 3 个问题</button><button type="button" class="copy"><i data-lucide="copy" aria-hidden="true"></i>复制当前问题</button></div></div>
+        <div class="editor-body">
+          <div class="input-pane">
+            <div class="target-line"><span>LoginScreen.kt:86</span><span class="muted">已自动记录 · 问题 01</span></div>
+            <div class="prompt-heading"><label for="ci-request">问题描述 / 期望修改</label><i data-lucide="pencil-line" aria-hidden="true"></i></div>
+            <textarea id="ci-request" readonly placeholder="描述这个组件的问题或期望修改，留空不记录">将登录按钮高度改为 56dp。</textarea>
+            <div class="editor-note">输入即记录为该组件的问题，留空不记录。</div>
+          </div>
+          <div class="preview-pane"><div class="preview-title"><span>当前问题 · AI 文本预览</span><span>1 项参数</span></div><pre class="preview">LoginScreen.kt:86
+Button「登录」
+height=48dp
+将登录按钮高度改为 56dp。</pre><div class="editor-note">定位信息 + 勾选参数 + 修改描述</div></div>
+        </div>
+      </section>
+    </section>
+    <footer class="statusbar"><span class="connected"><span class="dot"></span>已连接 · Pixel 9 · com.example.app</span><span>当前界面快照 · 14:32:08</span></footer>
+  </div>
+</div>

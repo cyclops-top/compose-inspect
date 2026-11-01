@@ -1,0 +1,12 @@
+#!/bin/sh
+set -eu
+PROJECT_ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+export JAVA_HOME="$PROJECT_ROOT/vendor/android/prebuilts/studio/jdk/jbr25/mac-arm64/Contents/Home"
+export ANDROID_HOME="$PROJECT_ROOT/vendor/android/prebuilts/studio/sdk/darwin"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export PATH="$ANDROID_HOME/platform-tools:$JAVA_HOME/bin:$PATH"
+JAVA="$JAVA_HOME/bin/java"
+if [ ! -f "$PROJECT_ROOT/lib/ui-inspector.jar" ]; then
+  "$PROJECT_ROOT/build.sh"
+fi
+exec "$JAVA" -jar "$PROJECT_ROOT/lib/ui-inspector.jar" "$@"

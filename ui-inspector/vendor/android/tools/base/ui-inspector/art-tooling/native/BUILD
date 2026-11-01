@@ -1,0 +1,68 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_files", "strip_prefix")
+load("//tools/base/bazel:android.bzl", "ANDROID_COPTS", "ANDROID_LINKOPTS", "android_cc_binary")
+
+cc_library(
+    name = "agent_options",
+    srcs = ["agent_options.cc"],
+    hdrs = [
+        "agent_options.h",
+        "art_tooling_constants.h",
+    ],
+)
+
+cc_binary(
+    name = "arttooling_agent_native",
+    srcs = [
+        "agent.cc",
+        "array_params_entry_hook.cc",
+        "array_params_entry_hook.h",
+        "art_tooling_constants.h",
+        "art_tooling_jni.cc",
+        "art_tooling_jni.h",
+        "art_tooling_transform.h",
+        "jvmti_art_tooling.cc",
+        "jvmti_art_tooling.h",
+    ],
+    copts = ANDROID_COPTS,
+    linkopts = ANDROID_LINKOPTS,
+    linkshared = 1,
+    target_compatible_with = select({
+        "@platforms//os:windows": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":agent_options",
+        "//prebuilts/studio/jdk:jni_headers",
+        "//tools/base/transport/native/agent:jni_wrappers",
+        "//tools/base/transport/native/jvmti",
+        "//tools/base/transport/native/utils:base",
+        "@slicer",
+    ],
+)
+
+android_cc_binary(
+    name = "libarttooling_agent.so",
+    binary = ":arttooling_agent_native.stripped",
+    filename = "libarttooling_agent.so",
+    visibility = ["//tools/base/ui-inspector:__subpackages__"],
+)
+
+# The agent of each ABI at <abi>/libarttooling_agent.so, for //tools/base/ui-inspector/core:device_artifacts_pkg_files:
+# android_cc_binary writes one output per ABI at libarttooling_agent.so/<abi>/libarttooling_agent.so.
+pkg_files(
+    name = "libarttooling_agent_files",
+    srcs = [":libarttooling_agent.so"],
+    strip_prefix = strip_prefix.from_pkg("libarttooling_agent.so"),
+    visibility = ["//tools/base/ui-inspector:__subpackages__"],
+)
+
+cc_test(
+    name = "agent_options_test",
+    srcs = ["agent_options_test.cc"],
+    linkstatic = 1,
+    deps = [
+        ":agent_options",
+        "@googletest//:gtest_main",
+    ],
+)

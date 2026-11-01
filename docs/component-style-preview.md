@@ -1,0 +1,91 @@
+# 当前组件的分层样式预览
+
+右侧「当前组件 · 分层样式」显示当前组件对应布局的外框、内容尺寸，以及从外到内的 padding、background、clip。透明部分使用棋盘格，不绘制父背景及子组件内容，方便与真实截图的叠加结果对照。
+
+- 每层 padding 单独保留（上、右、下、左，dp）；合计是各层声明值之和，不跨子组件累计，也不代替实际测量尺寸。
+- 背景保留顺序、ARGB 色值及独立 alpha；背景形状与 clip 分开显示。
+- RectangleShape、RoundedCornerShape 支持绘制。圆角解析实际尺寸、density、布局方向和百分比 CornerSize，按 Compose 规则归一化。
+- 异形或无法识别的 Shape 显示「未知的 shape」及完整运行时类名。匿名类保留其运行时名称。未知背景形状不伪造为矩形；未知 clip 后的背景不进行猜测绘制。
+- brush、DrawBehind、其他可识别到但尚未解析的绘制层显示未解析标记及类名。预览是布局样式示意，不是组件离屏渲染或所有自定义绘制的重放。
+
+## 采集及关联
+
+Android View inspector 在主线程遍历 AndroidComposeView 的 LayoutNode，通过 Compose tooling 的 `getModifierInfo()` 获取有序 Modifier 及每层 LayoutCoordinates。读取内容坐标和 outerCoordinator 坐标，把角点映射到屏幕，分别保存 `contentBounds` 和 `outerBounds`。不根据 padding 值反推外框。
+
+扩展通过 AndroidComposeView 的字符串属性 `composeinspect.styleLayers.v1` 传输，结构为：
+
+```json
+{
+  "version": 1,
+  "density": 2.625,
+  "records": [{
+    "contentBounds": {"x": 106, "y": 1492, "width": 868, "height": 520},
+    "outerBounds": {"x": 53, "y": 1439, "width": 974, "height": 626},
+    "layers": []
+  }],
+  "diagnostics": []
+}
+```
+
+每层有 `name`、`kind`、实际屏幕 `bounds`，并携带相应的 `padding`、`argb`、`alpha`、`shape` 或 `unsupported`。`shape.radiiPx` 使用物理像素；padding 使用 dp。原始扩展始终留在完整 JSON 中，不作为巨大的普通参数行显示。
+
+macOS 仅在同一个 AndroidComposeView 内按完整内容矩形关联记录；存在多个不同候选时不猜测。业务包装 Composable（例如 GlassCard）与其发出的 Column 可以对应同一个 LayoutNode，因此显示同一套布局样式。没有单一对应布局的组合、版本不兼容及采集失败时，保留原边界并显示样式未取得；诊断保留在原始扩展中。
+
+成功关联后，应用的 InspectorNode.bounds 使用 outerBounds，截图高亮、线框及点击候选统一使用该外框；上游原始 JSON 的 bounds 不覆盖，内容坐标及完整原文继续保留。
+
+## 验证
+
+- 模拟器 Compose 1.10.6：GlassCard 内容框 868×520 px，外框 974×626 px，四边 padding 20 dp、clip 圆角 24 dp、背景 #D9F7F9F4。
+- UI 实测：连续点击卡片 padding 留白可以循环选到 GlassCard，蓝框覆盖完整卡片；右侧只显示自身圆角背景及内边距。
+- Core 测试覆盖多层背景/padding 顺序、透明度、未知 Shape 名称、外框命中范围、过滤后的样式保留、歧义关联回退和完整 JSON 保留。
+- 可选实时测试 `COMPOSEINSPECT_EXPECT_STYLES=1` 验证实际采集返回 padding、背景及圆角，并确实扩大到测量外框。
+
+## 列表组合包装节点的范围
+
+`Item`、`LazyLayoutPinnableItem`、相关 `SaveableStateProvider`、`ReusableContent` 和 `SkippableItem` 通过已知框架调用文件识别。它们没有独立测量布局，选框从内向外取原始范围与子组件修正外框的并集，因此标题及卡片的 padding 都被包含。右侧标记为「组合范围」，不把匹配到的子布局背景冒充此包装自身的样式。
+
+普通 Box、滚动视口、裁剪布局及业务中同名的 Item 不采用此规则：子内容越界不意味着父布局自身尺寸应被扩张。原始 JSON 不改写。
+
+## 精简树与参数展示
+
+处理顺序为完整 JSON → 完整解析（含布局优化）→ 结构筛选 → 展示结果。新快照加载时生成完整、精简及仅可点击索引并缓存，点击、展开、输入描述和切换开关不重建索引。搜索框下直接显示“精简”和“仅可点击”勾选项；仅可点击开启时自动勾选并锁定精简，关闭后精简保持开启且可手动取消。精简会提升已知列表组合包装及 Android FrameLayout、ComposeView、AndroidComposeView 等宿主容器的子节点，窗口根节点始终保留。其他业务源码节点、普通布局和未知节点不因参数为空而删除。仅可点击保留各窗口根节点及具有 OnClick 语义或 clickable=true View 属性的节点，不按组件名或普通 onClick 回调参数猜测点击能力；被跳过节点的后代继续筛选并提升。截图候选、线框和组件树统一使用结果索引，原始路径继续用于 AI 定位及完整 JSON。问题记录稳定绑定解析优化后的节点及原始 ID；点击被筛掉节点的问题仅显示其定位框，不退出筛选、不清空搜索、不跳转组件树。搜索按后序一次计算匹配集合，保留命中节点的可见祖先。
+
+padding 用盒模型示意图表示四边数值与内容区（示意间距不按比例）。只有一层时仅显示一份；多层时展示合计和各层。四个圆角使用对应位置的圆弧图标和数值，保留无障碍名称。
+
+参数中的「尺寸」组可勾选外框宽高及已采集到的内容区宽高。可用 density 时使用 dp，否则明确使用 px。仅勾选的尺寸写入 AI 文本；尺寸为应用计算参数，不覆盖原始 Inspector 参数。
+
+## 参数过滤与颜色
+
+参数面板自动隐藏空字符串、null 及无内容的参数组；组内存在可用子项时仍保留该组。0、false、空集合、截断参数及可继续读取的参数继续显示。已勾选的参数保留显示，避免过滤后无法取消选择；原始参数和 JSON 不删除。
+
+标准 #RRGGBB / #AARRGGBB 色值旁显示色块，保留原色值和独立勾选。色块下方有棋盘格，透明色和半透明色也可辨认。不把普通整数或 Unspecified 当成颜色。
+
+
+### 可配置精简规则
+
+组件树“精简”旁的齿轮打开规则配置，修改立即应用到当前快照并自动保存至 UserDefaults 的 `tree.filterConfiguration.v1`。规则改变时重建精简、仅可点击索引，组件树和线框通过展示版本同步刷新；普通选择、展开、问题编辑不重建索引。
+
+默认勾选的 View 类名：
+
+- Android 布局：`android.widget.FrameLayout`、`LinearLayout`、`RelativeLayout`、`GridLayout`、`TableLayout`、`TableRow`。
+- AndroidX 布局：`androidx.constraintlayout.widget.ConstraintLayout`、`androidx.coordinatorlayout.widget.CoordinatorLayout`。
+- 占位组件：`android.view.ViewStub`、`androidx.appcompat.widget.ViewStubCompat`。
+- Compose 宿主：`androidx.compose.ui.platform.ComposeView`、`AndroidComposeView`、`AbstractComposeView`。
+
+`android.widget.ScrollView`、`android.widget.HorizontalScrollView`、`androidx.core.widget.NestedScrollView` 预置但默认不勾选。Text 的 BasicText、已知 Layout / ReusableComposeNode、无独立内容的组合包装各有独立开关，默认开启并保留现有源码及语义判断。
+
+可以逐项勾选、移除，或添加自定义 View 类名；添加时自动勾选，重复添加启用原有条目。完整类名精确匹配，不匹配业务同名类或子类；简单类名匹配各包下的同名 View。采集只提供简单类名时，也兼容完整规则的类名部分。规则仅作用于 ViewNode，不误删同名 Compose 节点。恢复默认会重置所有规则及勾选状态，移除自定义项，不改变精简/仅可点击开关、原始树或问题记录。
+
+
+### 自定义布局向外扩展的选择范围
+
+`outerBounds` 保留组件对外报告的布局占位，`contentBounds` 和各修饰符层仍保留采集器的原始实测坐标。`ComponentStyle.selectionBounds` 对当前组件自身的上述非空矩形求并集，用于解析后的节点 bounds。该范围直接进入完整/精简/仅可点击结果索引，选框、线框及截图命中共享同一范围；缩放和平移只做坐标变换。
+
+这覆盖了自定义 `.layout` 报告较窄宽度、内部 clip/click/padding 向左右偏移扩展的情况。计算不再额外添加 padding 数值，不借用父布局或业务子节点边界；普通 padding 的选框不会重复增大，已有的歧义关联回退规则保持不变。分层预览按同一选择范围适配，若选择范围不同于布局占位，则分别展示“外框”和“布局占位”尺寸。原始 JSON 和采集层数据不被改写。
+
+
+### 圆角轮廓与 padding 填充
+
+总预览的选中轮廓、线框和右侧分层预览共享实测 shape 绘制。若当前边界对应已知 clip，则使用该 clip 的四角半径；无 clip 时可使用同边界背景 shape。内部 clip 不套用到更外侧的 padding，未知形状继续使用矩形测量边界，不猜测圆角。透明组件也单独绘制裁剪轮廓，圆角不再依赖背景填色才能看见。矩形尺寸和点击候选范围保持实测 envelope。
+
+Padding 以半透明橙色边带显示，数值为 0 的边不填色，四角交叉区域留空。实际分层图按每层 padding 的 dp 值乘以采集 density，结合该层屏幕像素边界生成边带；多层 padding 也按最终内容区限制边带长度，防止相邻层把整体四角填满。不把其他 layout/offset 的留白推断为 padding，也不重复累加边带厚度。合计和单层的数值示意图采用同样的四边填色、零值透明和四角留空规则。
