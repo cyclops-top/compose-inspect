@@ -27,11 +27,16 @@ struct InspectorView: View {
                             Text("\(node.kind) · #\(node.rawID)\(node.label.map { " · \($0)" } ?? "")")
                                 .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
                         }
+                        Button { store.copyCurrentLocator() } label: {
+                            Label("复制 AI 定位信息", systemImage: "doc.on.doc")
+                                .frame(maxWidth: .infinity)
+                        }.buttonStyle(.borderedProminent)
+                            .help("⌘⌥C · 描述可选，复制当前组件及已选参数")
                         VStack(alignment: .leading, spacing: 5) {
-                            SectionCaption(text: "源码位置")
+                            SectionCaption(text: "源码定位线索")
                             HStack(spacing: 7) {
                                 Image(systemName: "doc.text").foregroundStyle(.secondary)
-                                Text(node.source?.text ?? "此节点没有源码位置")
+                                Text(store.sourceSummary)
                                     .font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
                                 Spacer(minLength: 0)
                             }.padding(8).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
@@ -45,7 +50,7 @@ struct InspectorView: View {
                             }.font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                         }
                         if let text = TextComponentPreview(node: node) { TextComponentPreviewView(preview: text) }
-                        ComponentStylePreview(node: node)
+                        ComponentStylePreview(node: node, ancestors: Array(store.snapshotIndex.path(to: node.id).dropLast()))
                         Divider()
                         if node.idResource != nil || node.layoutResource != nil {
                             VStack(alignment: .leading, spacing: 4) {
@@ -127,6 +132,18 @@ struct InspectorView: View {
 
 private struct ComponentStylePreview: View {
     let node: InspectorNode
+    let ancestors: [InspectorNode]
+    private var relatedShape: (InspectorNode, ComponentStyle, ComponentStyle.Layer)? {
+        for ancestor in ancestors.reversed() {
+            guard let style = ancestor.style, style.contentBounds == node.bounds else { continue }
+            for kind in ["clip", "background"] {
+                if let layer = style.layers.first(where: { $0.kind == kind && $0.bounds == node.bounds && ["rounded", "cut"].contains($0.shape?.kind ?? "") }) {
+                    return (ancestor, style, layer)
+                }
+            }
+        }
+        return nil
+    }
     private func number(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(0...1))) }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -170,8 +187,8 @@ private struct ComponentStylePreview: View {
                                     if shape.kind == "unknown" {
                                         Text("未知的 shape").foregroundStyle(.orange)
                                         Text(shape.name).textSelection(.enabled).foregroundStyle(.secondary)
-                                    } else if shape.kind == "rounded" {
-                                        CornerRadiiDiagram(shape: shape, density: style.density)
+                                    } else if ["rounded", "cut"].contains(shape.kind) {
+                                        CornerRadiiDiagram(shape: shape, density: style.density, bounds: layer.bounds)
                                     } else { Text("矩形").foregroundStyle(.secondary) }
                                 }
                                 if let unsupported = layer.unsupported { Text(unsupported).foregroundStyle(.orange).textSelection(.enabled) }
@@ -186,8 +203,15 @@ private struct ComponentStylePreview: View {
                 Text("组合包装节点：选框包含子组件外框；此节点没有独立背景或 padding。")
                     .foregroundStyle(.secondary)
             } else {
-                Text("未取得可可靠关联的分层样式，请使用内置采集器重新获取界面。")
+                Text("未取得可可靠关联的自身分层样式。")
                     .foregroundStyle(.secondary)
+                if let (ancestor, style, layer) = relatedShape, let shape = layer.shape {
+                    Text("同边界外层形状参考 · " + ancestor.name).fontWeight(.medium)
+                    if let source = ancestor.source { Text(source.text).foregroundStyle(.secondary) }
+                    CornerRadiiDiagram(shape: shape, density: style.density, bounds: layer.bounds)
+                    Text("以上来自外层组件，不计入当前节点的样式或 padding。")
+                        .foregroundStyle(.secondary)
+                }
             }
         }.font(.system(size: 10, design: .monospaced)).fixedSize(horizontal: false, vertical: true)
     }
@@ -293,40 +317,46 @@ private struct PaddingBoxDiagram: View {
 private struct CornerRadiiDiagram: View {
     let shape: ComponentStyle.Shape
     let density: Double
+    let bounds: CGRect
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text("圆角 · dp").foregroundStyle(.secondary)
+            Text("\(shape.title(in: bounds)) · 实际 dp").foregroundStyle(.secondary)
             Grid(horizontalSpacing: 16, verticalSpacing: 6) {
                 GridRow {
-                    corner("左上", value: shape.topLeft, rotation: 0)
-                    corner("右上", value: shape.topRight, rotation: 90)
+                    corner("左上", key: "topLeft", value: shape.topLeft, rotation: 0)
+                    corner("右上", key: "topRight", value: shape.topRight, rotation: 90)
                 }
                 GridRow {
-                    corner("左下", value: shape.bottomLeft, rotation: 270)
-                    corner("右下", value: shape.bottomRight, rotation: 180)
+                    corner("左下", key: "bottomLeft", value: shape.bottomLeft, rotation: 270)
+                    corner("右下", key: "bottomRight", value: shape.bottomRight, rotation: 180)
                 }
             }
         }
     }
-    private func corner(_ name: String, value: Double, rotation: Double) -> some View {
+    private func corner(_ name: String, key: String, value: Double, rotation: Double) -> some View {
         let text = (value / density).formatted(.number.precision(.fractionLength(0...1)))
         return HStack(spacing: 5) {
-            CornerRadiusGlyph().stroke(.secondary, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+            CornerRadiusGlyph(cut: shape.kind == "cut").stroke(.secondary, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
                 .frame(width: 13, height: 13).rotationEffect(.degrees(rotation))
-            Text(text).monospacedDigit()
+            VStack(alignment: .leading, spacing: 2) {
+                Text(text).monospacedDigit()
+                if let input = shape.corners?[key] { Text("配置 " + input.label).foregroundStyle(.secondary) }
+            }
         }.frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .ignore).accessibilityLabel("\(name)圆角 \(text) dp")
+            .accessibilityElement(children: .ignore).accessibilityLabel("\(name)\(shape.kind == "cut" ? "切角" : "圆角") \(text) dp \(shape.corners?[key].map { "配置 " + $0.label } ?? "")")
             .help("\(name)圆角")
     }
 }
 
 private struct CornerRadiusGlyph: Shape {
+    var cut = false
     func path(in rect: CGRect) -> Path {
         var path = Path()
         path.move(to: CGPoint(x: rect.minX + rect.width * 0.15, y: rect.minY + rect.height * 0.9))
         path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.15, y: rect.minY + rect.height * 0.6))
-        path.addQuadCurve(to: CGPoint(x: rect.minX + rect.width * 0.6, y: rect.minY + rect.height * 0.15),
-                         control: CGPoint(x: rect.minX + rect.width * 0.15, y: rect.minY + rect.height * 0.15))
+        if cut { path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.6, y: rect.minY + rect.height * 0.15)) }
+        else { path.addQuadCurve(to: CGPoint(x: rect.minX + rect.width * 0.6, y: rect.minY + rect.height * 0.15),
+                         control: CGPoint(x: rect.minX + rect.width * 0.15, y: rect.minY + rect.height * 0.15)) }
         path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.9, y: rect.minY + rect.height * 0.15))
         return path
     }

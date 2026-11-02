@@ -9,10 +9,26 @@ public struct ComponentStyle: Codable, Equatable, Sendable {
             self.left = left; self.top = top; self.right = right; self.bottom = bottom
         }
     }
+    public struct CornerConfiguration: Codable, Equatable, Sendable {
+        public let value: Double
+        public let unit: String
+        public var label: String { value.formatted(.number.precision(.fractionLength(0...2))) + unit }
+    }
     public struct Shape: Codable, Equatable, Sendable {
         public let name: String
         public let kind: String
         public let topLeft: Double, topRight: Double, bottomLeft: Double, bottomRight: Double
+        public var corners: [String: CornerConfiguration]? = nil
+        public func title(in bounds: CGRect) -> String {
+            if kind == "rectangle" { return "矩形" }
+            if kind == "cut" { return "切角" }
+            guard kind == "rounded" else { return "未知形状" }
+            let half = min(bounds.width, bounds.height) / 2
+            if half > 0 && [topLeft, topRight, bottomLeft, bottomRight].allSatisfy({ abs($0 - half) < 0.01 }) {
+                return abs(bounds.width - bounds.height) < 0.01 ? "圆形" : "胶囊形"
+            }
+            return "圆角"
+        }
     }
     public struct Layer: Codable, Equatable, Identifiable, Sendable {
         public let id: Int
@@ -63,9 +79,19 @@ struct ComponentStyleCatalog {
                 let padding = raw["padding"].flatMap { Self.insets($0) }
                 let shape = raw["shape"].map { value in
                     let radii = value["radiiPx"]
-                    return ComponentStyle.Shape(name: value["name"]?.string ?? "未提供名称", kind: value["kind"]?.string ?? "unknown",
+                    var shape = ComponentStyle.Shape(name: value["name"]?.string ?? "未提供名称", kind: value["kind"]?.string ?? "unknown",
                         topLeft: radii?["topLeft"]?.double ?? 0, topRight: radii?["topRight"]?.double ?? 0,
                         bottomLeft: radii?["bottomLeft"]?.double ?? 0, bottomRight: radii?["bottomRight"]?.double ?? 0)
+                    var corners: [String: ComponentStyle.CornerConfiguration] = [:]
+                    for key in ["topLeft", "topRight", "bottomLeft", "bottomRight"] {
+                        if let item = value["corners"]?[key], let number = item["value"]?.double,
+                           number.isFinite, number >= 0, let unit = item["unit"]?.string,
+                           ["dp", "px", "%"].contains(unit), unit != "%" || number <= 100 {
+                            corners[key] = .init(value: number, unit: unit)
+                        }
+                    }
+                    shape.corners = corners.isEmpty ? nil : corners
+                    return shape
                 }
                 return ComponentStyle.Layer(id: index, name: name, kind: kind, bounds: bounds, padding: padding,
                     argb: raw["argb"]?.string, alpha: raw["alpha"]?.double ?? 1, shape: shape,
@@ -76,10 +102,73 @@ struct ComponentStyleCatalog {
             return ComponentStyle(density: density, contentBounds: content, outerBounds: outer, layers: layers)
         }
     }
-    func style(for bounds: CGRect) -> ComponentStyle? {
+    func style(for bounds: CGRect, node: InspectorJSON? = nil) -> ComponentStyle? {
         let matches = records.filter { $0.contentBounds == bounds }
-        guard let first = matches.first, matches.allSatisfy({ $0 == first }) else { return nil }
+        if let first = matches.first, matches.allSatisfy({ $0 == first }) { return first }
+        // Equal content rectangles are common for a padded wrapper and its Surface. Only the
+        // node's own shape can disambiguate them; merged semantics may describe a descendant.
+        let ownShapes = node?["unmergedSemantics"]?.array?.filter { $0["name"]?.string == "Shape" } ?? []
+        let arguments = node?["parameters"]?.array?.filter { $0["name"]?.string == "shape" } ?? []
+        guard let evidence = (ownShapes.isEmpty ? arguments : ownShapes).first else { return nil }
+        let supported = matches.filter { style in
+            style.layers.contains { layer in
+                ["clip", "background"].contains(layer.kind) && Self.matchesShape(evidence, layer: layer, density: style.density)
+            }
+        }
+        guard let first = supported.first, supported.allSatisfy({ $0 == first }) else { return nil }
         return first
+    }
+
+    private static func matchesShape(_ evidence: InspectorJSON, layer: ComponentStyle.Layer, density: Double) -> Bool {
+        guard evidence["isTruncated"]?.boolean != true, let name = evidence["value"]?.string,
+              let shape = layer.shape else { return false }
+        if name == "RectangleShape" { return shape.kind == "rectangle" }
+        let size = min(layer.bounds.width, layer.bounds.height)
+        guard size > 0 else { return false }
+        let expected: [Double]
+        if name == "CircleShape", shape.kind == "rounded" {
+            expected = Array(repeating: size / 2, count: 4)
+        } else if ["RoundedCornerShape", "AbsoluteRoundedCornerShape", "CutCornerShape", "AbsoluteCutCornerShape"].contains(name),
+                  shape.kind == (name.contains("Cut") ? "cut" : "rounded"), let elements = evidence["elements"]?.array {
+            var corners: [Double] = []
+            let keys = name.hasPrefix("Absolute") && elements.contains(where: { $0["name"]?.string == "topLeft" }) ? ["topLeft", "topRight", "bottomLeft", "bottomRight"] : ["topStart", "topEnd", "bottomStart", "bottomEnd"]
+            for key in keys {
+                guard let corner = elements.first(where: { $0["name"]?.string == key }),
+                      corner["isTruncated"]?.boolean != true,
+                      let pixels = Self.cornerPixels(corner["value"], density: density, size: size) else { return false }
+                corners.append(pixels)
+            }
+            let start = corners[0] + corners[2], end = corners[1] + corners[3]
+            let startScale = start > size ? size / start : 1
+            let endScale = end > size ? size / end : 1
+            expected = [corners[0] * startScale, corners[1] * endScale,
+                        corners[2] * startScale, corners[3] * endScale]
+        } else { return false }
+        let actual = [shape.topLeft, shape.topRight, shape.bottomLeft, shape.bottomRight]
+        func equal(_ values: [Double]) -> Bool {
+            zip(actual, values).allSatisfy { abs($0 - $1) < 0.01 }
+        }
+        // The catalog stores physical corners; Shape semantics use start/end. If both directions
+        // match different records, the caller keeps the association ambiguous rather than guessing.
+        return equal(expected) || (!name.hasPrefix("Absolute") && equal([expected[1], expected[0], expected[3], expected[2]]))
+    }
+    private static func cornerPixels(_ raw: InspectorJSON?, density: Double, size: Double) -> Double? {
+        var value = raw?["value"]?.double
+        var unit = raw?["unit"]?.string?.lowercased()
+        // Compose exposes PercentCornerSize/PxCornerSize as InspectableValue strings.
+        if let text = raw?.string {
+            for suffix in ["%", "px", "dp"] where text.hasSuffix(suffix) {
+                value = Double(text.dropLast(suffix.count)); unit = suffix
+            }
+            if text == "ZeroCornerSize" { return 0 }
+        }
+        guard let value, value.isFinite, value >= 0, let unit else { return nil }
+        switch unit {
+        case "dp": return value * density
+        case "px": return value
+        case "%", "percent": return value <= 100 ? size * value / 100 : nil
+        default: return nil
+        }
     }
     private static func rect(_ value: InspectorJSON?) -> CGRect? {
         guard let value, let x = value["x"]?.double, let y = value["y"]?.double,

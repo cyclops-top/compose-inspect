@@ -27,6 +27,9 @@ final class ToolchainSettings {
     private(set) var loadingEnvironment = false
     private var environmentTask: Task<[String: String], Error>?
     private var hasLoadedEnvironment = false
+    private var hasCheckedStartup = false
+    var showEnvironmentSetup = false
+    nonisolated static let minimumJavaVersion = 25
     private let inheritedEnvironment: [String: String]
     private(set) var results: [ToolKind: ToolProbeResult] = [:]
     private(set) var checking: Set<ToolKind> = []
@@ -34,6 +37,9 @@ final class ToolchainSettings {
     private let defaults: UserDefaults
     var inspectorJarOverride: String {
         didSet { defaults.set(inspectorJarOverride, forKey: "toolchain.inspectorJar") }
+    }
+    var verifyCaptureConsistency: Bool {
+        didSet { defaults.set(verifyCaptureConsistency, forKey: "capture.verifyConsistency") }
     }
     var includeResolutionStack: Bool {
         didSet { defaults.set(includeResolutionStack, forKey: "capture.resolutionStack") }
@@ -46,6 +52,7 @@ final class ToolchainSettings {
         adbOverride = defaults.string(forKey: "toolchain.adbPath") ?? ""
         javaOverride = defaults.string(forKey: "toolchain.javaPath") ?? ""
         inspectorJarOverride = defaults.string(forKey: "toolchain.inspectorJar") ?? ""
+        verifyCaptureConsistency = defaults.bool(forKey: "capture.verifyConsistency")
         includeResolutionStack = defaults.bool(forKey: "capture.resolutionStack")
     }
 
@@ -122,7 +129,11 @@ final class ToolchainSettings {
     }
 
     func validate(_ tool: ToolKind) async {
-        guard !checking.contains(tool), let location = resolution(for: tool).location else { return }
+        guard !checking.contains(tool) else { return }
+        guard let location = resolution(for: tool).location else {
+            results[tool] = ToolProbeResult(succeeded: false, message: resolution(for: tool).error ?? "未找到工具")
+            return
+        }
         let revision = UUID()
         revisions[tool] = revision
         checking.insert(tool)
@@ -135,6 +146,29 @@ final class ToolchainSettings {
         guard revisions[tool] == revision else { return }
         results[tool] = result
         checking.remove(tool)
+    }
+
+    var environmentProblems: [String] {
+        var problems = ToolKind.allCases.compactMap { tool -> String? in
+            guard let result = results[tool], !result.succeeded else { return nil }
+            return "\(tool.displayName)：\(result.message)"
+        }
+        if inspectorJar.map({ FileManager.default.isReadableFile(atPath: $0.path) }) != true {
+            problems.append("未找到可读取的 ui-inspector.jar，请在“检查”页选择 JAR 或重新构建应用。")
+        }
+        return problems
+    }
+
+    func checkStartupEnvironment() async {
+        guard !hasCheckedStartup else { return }
+        hasCheckedStartup = true
+        await validateEnvironment()
+        showEnvironmentSetup = !environmentProblems.isEmpty
+    }
+
+    func validateEnvironment() async {
+        await validate(.adb)
+        await validate(.java)
     }
 
     private func invalidate(_ tool: ToolKind) {
@@ -179,6 +213,19 @@ final class ToolchainSettings {
                 return ToolProbeResult(succeeded: false, message: text.isEmpty ? "检测失败，退出码 \(process.terminationStatus)。" : text)
             }
             guard !text.isEmpty else { return ToolProbeResult(succeeded: false, message: "没有返回版本信息，请确认工具路径。") }
+            if tool == .java {
+                let expression = try NSRegularExpression(pattern: #"version\s+"([0-9]+)(?:\.([0-9]+))?"#)
+                let range = NSRange(text.startIndex..., in: text)
+                guard let match = expression.firstMatch(in: text, range: range),
+                      let majorRange = Range(match.range(at: 1), in: text),
+                      let first = Int(text[majorRange]) else {
+                    return ToolProbeResult(succeeded: false, message: "无法识别 Java 版本，请选择 Java \(minimumJavaVersion) 或更新版本。\n\(text)")
+                }
+                let major = first == 1 ? Range(match.range(at: 2), in: text).flatMap { Int(text[$0]) } ?? first : first
+                if major < minimumJavaVersion {
+                    return ToolProbeResult(succeeded: false, message: "当前 Java \(major)，UI Inspector 抓取需要 Java \(minimumJavaVersion) 或更新版本。请选择兼容的 Java 安装目录或 bin/java。")
+                }
+            }
             return ToolProbeResult(succeeded: true, message: text)
         } catch { return ToolProbeResult(succeeded: false, message: error.localizedDescription) }
     }

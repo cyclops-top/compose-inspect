@@ -4,7 +4,7 @@ import XCTest
 @testable import ComposeInspectCore
 
 final class FilterConfigurationTests: XCTestCase {
-    @MainActor func testRuleChangesPersistRebuildAllResultsAndPreserveIssueBindings() throws {
+    @MainActor func testRuleChangesPersistRebuildAllResultsAndPreserveIssueBindings() async throws {
         _ = NSApplication.shared
         let suite = "ComposeInspect-filter-test-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -29,7 +29,7 @@ final class FilterConfigurationTests: XCTestCase {
                                      samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
                                      bytesPerRow: 4, bitsPerPixel: 32)!
         bitmap.bitmapData?.initialize(repeating: 0, count: 4)
-        try store.applyCapture(CapturedSnapshot(snapshot: snapshot,
+        try await store.applyCapture(CapturedSnapshot(snapshot: snapshot,
             imageData: XCTUnwrap(bitmap.representation(using: .png, properties: [:])), aligned: true))
         store.select("layout")
         let key = try XCTUnwrap(store.selectedKey)
@@ -37,6 +37,7 @@ final class FilterConfigurationTests: XCTestCase {
         let issue = try XCTUnwrap(store.currentIssue)
         let revision = store.presentationRevision
         XCTAssertTrue(store.filterConfiguration.addViewRule("example.CustomLayout"))
+        await store.waitForFilterIndexes()
         XCTAssertGreaterThan(store.presentationRevision, revision)
         XCTAssertEqual(store.presentationIndex.nodes.map(\.id), ["root", "text"])
         XCTAssertFalse(store.visibleBounds.contains(bounds))
@@ -51,6 +52,7 @@ final class FilterConfigurationTests: XCTestCase {
         XCTAssertEqual(store.snapshotIndex.byID["layout"], layout)
         XCTAssertEqual(WorkspaceStore(filterDefaults: defaults).filterConfiguration, store.filterConfiguration)
         store.restoreDefaultFilters()
+        await store.waitForFilterIndexes()
         XCTAssertEqual(store.filterConfiguration, .defaults)
         XCTAssertNotNil(store.presentationIndex.byID["layout"])
         XCTAssertTrue(store.visibleBounds.contains(bounds))

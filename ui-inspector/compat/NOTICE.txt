@@ -1,0 +1,9 @@
+ComposeInspect compatibility build: Compose UI inspector 1.12.1 / Kotlin metadata 2.4.21.
+Original inspector: Android Open Source Project / AndroidX contributors, Apache License 2.0.
+Source artifact: https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-android/1.12.1/ui-android-1.12.1.aar
+Replacement library: kotlin-metadata-jvm 2.4.21, JetBrains contributors, Apache License 2.0.
+Source artifact: https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-metadata-jvm/2.4.21/kotlin-metadata-jvm-2.4.21.jar
+Modification: replace only deps.ui.inspection.kotlin.metadata.* and its service provider metadata.
+Inspector implementation, JNI libraries and protocol remain those of Compose 1.12.1.
+Strict metadata version checks are retained. No target application classes or metadata are modified.
+Build-time tools: ASM (BSD-3-Clause), dexlib2 (BSD-3-Clause), D8 (BSD-3-Clause).

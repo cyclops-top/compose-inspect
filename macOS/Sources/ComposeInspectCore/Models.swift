@@ -139,7 +139,14 @@ public struct InspectorNode: Identifiable, Codable, Equatable, Sendable {
         return semantics.contains { $0.name == "OnClick" && $0.value != "null" && $0.value != "false" }
     }
     public var displayName: String { label.map { "\(shortName)「\($0)」" } ?? shortName }
-    public var flattened: [InspectorNode] { [self] + children.flatMap(\.flattened) }
+    public var flattened: [InspectorNode] {
+        var result: [InspectorNode] = [], pending = [self]
+        while let node = pending.popLast() {
+            result.append(node)
+            pending.append(contentsOf: node.children.reversed())
+        }
+        return result
+    }
     public func path(to key: String) -> [InspectorNode]? {
         if id == key { return [self] }
         for child in children { if let path = child.path(to: key) { return [self] + path } }
@@ -170,6 +177,15 @@ public struct InspectorSnapshot: Identifiable, Codable, Equatable, Sendable {
         self.pixelSize = pixelSize; self.roots = roots; self.isDemo = isDemo
         self.document = document; self.captureMetadata = captureMetadata; self.parameterReads = nil
     }
+    /// Attach capture diagnostics without parsing the original document or rebuilding its tree.
+    public func withCaptureContext(deviceName: String, metadata: CaptureMetadata) -> InspectorSnapshot {
+        var result = InspectorSnapshot(id: id, capturedAt: capturedAt, packageName: packageName,
+                                       deviceName: deviceName, pixelSize: pixelSize, roots: roots,
+                                       isDemo: isDemo, document: document, captureMetadata: metadata)
+        result.parameterReads = parameterReads
+        return result
+    }
+
     public var nodes: [InspectorNode] { roots.flatMap(\.flattened) }
     public func node(_ key: String) -> InspectorNode? { nodes.first { $0.id == key } }
     public func path(to key: String) -> [InspectorNode] { roots.compactMap { $0.path(to: key) }.first ?? [] }
@@ -188,25 +204,34 @@ public struct InspectorSnapshotIndex: Sendable {
 
     public init(_ snapshot: InspectorSnapshot, hidingInternals: Bool = false, onlyClickable: Bool = false,
                 configuration: NodeFilterConfiguration = .defaults) {
+        self.init(snapshot, hidingInternals: hidingInternals, onlyClickable: onlyClickable,
+                  configuration: configuration, checkpoint: {})
+    }
+
+    public init(_ snapshot: InspectorSnapshot, hidingInternals: Bool = false, onlyClickable: Bool = false,
+                configuration: NodeFilterConfiguration = .defaults, checkpoint: () throws -> Void) rethrows {
+        try checkpoint()
         let presentedRoots = hidingInternals || onlyClickable
-            ? ComposeNodeFilter.roots(snapshot.roots, onlyClickable: onlyClickable, configuration: configuration) : snapshot.roots
+            ? try ComposeNodeFilter.roots(snapshot.roots, onlyClickable: onlyClickable,
+                                          configuration: configuration, checkpoint: checkpoint) : snapshot.roots
         var nodes: [InspectorNode] = [], byID: [String: InspectorNode] = [:]
         var parents: [String: String] = [:], roots: [String: String] = [:]
         var depths: [String: Int] = [:]
         var grouped: [String: [InspectorNode]] = [:], bounds: [String: [CGRect]] = [:]
         var seenBounds: [String: Set<[CGFloat]>] = [:]
-        func visit(_ node: InspectorNode, parent: String?, root: String) {
+        var pending = presentedRoots.reversed().map { (node: $0, parent: Optional<String>.none, root: $0.id, depth: 0) }
+        while let (node, parent, root, depth) = pending.popLast() {
+            try checkpoint()
             nodes.append(node); byID[node.id] = node; parents[node.id] = parent; roots[node.id] = root
-            depths[node.id] = parent.flatMap { depths[$0] }.map { $0 + 1 } ?? 0
+            depths[node.id] = depth
             grouped[root, default: []].append(node)
             let rect = node.bounds.standardized
             if !rect.isEmpty,
                seenBounds[root, default: []].insert([rect.minX, rect.minY, rect.width, rect.height]).inserted {
                 bounds[root, default: []].append(rect)
             }
-            for child in node.children { visit(child, parent: node.id, root: root) }
+            pending.append(contentsOf: node.children.reversed().map { ($0, node.id, root, depth + 1) })
         }
-        for root in presentedRoots { visit(root, parent: nil, root: root.id) }
         self.roots = presentedRoots
         self.nodes = nodes; self.byID = byID; parentIDs = parents; rootIDs = roots
         self.depths = depths
@@ -241,7 +266,22 @@ public struct InspectorSnapshotIndex: Sendable {
 public enum ComposeNodeFilter {
     public static func roots(_ roots: [InspectorNode], onlyClickable: Bool = false,
                              configuration: NodeFilterConfiguration = .defaults) -> [InspectorNode] {
-        func project(_ node: InspectorNode, insideText: Bool, isRoot: Bool = false) -> [InspectorNode] {
+        self.roots(roots, onlyClickable: onlyClickable, configuration: configuration, checkpoint: {})
+    }
+
+    public static func roots(_ roots: [InspectorNode], onlyClickable: Bool = false,
+                             configuration: NodeFilterConfiguration = .defaults,
+                             checkpoint: () throws -> Void) rethrows -> [InspectorNode] {
+        var pending = roots.reversed().map { (node: $0, insideText: false, isRoot: true, ready: false) }
+        var projected: [String: [InspectorNode]] = [:]
+        while let (node, insideText, isRoot, ready) = pending.popLast() {
+            try checkpoint()
+            if !ready {
+                pending.append((node, insideText, isRoot, true))
+                let childInsideText = insideText || (node.kind == "ComposeNode" && node.shortName == "Text")
+                pending.append(contentsOf: node.children.reversed().map { ($0, childInsideText, false, false) })
+                continue
+            }
             let name = node.shortName
             let compose = node.kind == "ComposeNode"
             let file = node.source?.file.components(separatedBy: "/").last
@@ -249,7 +289,7 @@ public enum ComposeNodeFilter {
             let layoutImplementation = configuration.hideLayoutImplementation && compose && (
                 (name == "ReusableComposeNode" && (file == nil || file == "Layout.kt" || file == "SubcomposeLayout.kt"))
                 || (name == "Layout" && file.map { layoutCallSites.contains($0) } == true))
-            let children = node.children.flatMap { project($0, insideText: insideText || (compose && name == "Text")) }
+            let children = node.children.flatMap { projected.removeValue(forKey: $0.id) ?? [] }
             // Known composition wrappers have no independent layout. Keep any identity or
             // semantics attached to them, but don't retain bookkeeping parameters as UI rows.
             let meaningfulIdentity = node.label?.isEmpty == false || node.idResource != nil || node.layoutResource != nil
@@ -258,12 +298,15 @@ public enum ComposeNodeFilter {
             let compositionWrapper = configuration.hideCompositionWrappers && node.isVirtualLayoutGroup && !meaningfulIdentity
             let androidWrapper = configuration.viewRules.contains { $0.matches(node) }
             if !isRoot && (textImplementation || layoutImplementation || compositionWrapper || androidWrapper
-                || (onlyClickable && !node.isClickable)) { return children }
-            return [InspectorNode(id: node.id, rawID: node.rawID, name: node.name, kind: node.kind, label: node.label,
+                || (onlyClickable && !node.isClickable)) {
+                projected[node.id] = children
+                continue
+            }
+            projected[node.id] = [InspectorNode(id: node.id, rawID: node.rawID, name: node.name, kind: node.kind, label: node.label,
                                   bounds: node.bounds, source: node.source, parameters: node.parameters, children: children,
                                   idResource: node.idResource, layoutResource: node.layoutResource, style: node.style)]
         }
-        return roots.flatMap { project($0, insideText: false, isRoot: true) }
+        return roots.flatMap { projected.removeValue(forKey: $0.id) ?? [] }
     }
     private static let layoutCallSites: Set<String> = [
         "Layout.kt", "Text.kt", "BasicText.kt", "Box.kt", "Row.kt", "Column.kt", "Spacer.kt",
@@ -306,33 +349,60 @@ public struct IssueLedger: Codable, Sendable {
 }
 
 public enum LocatorTextBuilder {
-    public static func text(for issue: ComponentIssue, in snapshot: InspectorSnapshot) -> String? {
-        guard issue.component.snapshotID == snapshot.id, let node = snapshot.node(issue.component.nodeID) else { return nil }
-        let path = snapshot.path(to: node.id)
+    /// A reported callsite is a search anchor, never a verified declaration.
+    public static func usableSource(_ source: SourceAnchor?) -> SourceAnchor? {
+        guard let source else { return nil }
+        let file = source.file.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !file.isEmpty else { return nil }
+        return SourceAnchor(file: file, line: source.line.flatMap { $0 > 0 ? $0 : nil })
+    }
+
+    public static func sourceSummary(for nodeID: String, index: InspectorSnapshotIndex) -> String {
+        guard let node = index.byID[nodeID] else { return "未找到组件" }
+        if let source = usableSource(node.source) {
+            return "自身采集位置：" + source.text + (source.line == nil ? "（行号未知）" : "")
+        }
+        if let ancestor = index.path(to: nodeID).dropLast().reversed().first(where: { usableSource($0.source) != nil }),
+           let source = usableSource(ancestor.source) {
+            return "祖先定位线索：\(source.text) · \(ancestor.shortName)（非当前组件位置）"
+        }
+        return "无源码位置：请按组件名、文字及资源线索搜索"
+    }
+
+    public static func text(for issue: ComponentIssue, in snapshot: InspectorSnapshot,
+                            index suppliedIndex: InspectorSnapshotIndex? = nil) -> String? {
+        let index = suppliedIndex ?? InspectorSnapshotIndex(snapshot)
+        guard issue.component.snapshotID == snapshot.id, let node = index.byID[issue.component.nodeID] else { return nil }
+        let path = index.path(to: node.id)
         let location: String
-        if let source = node.source { location = source.text }
-        else if let ancestor = path.dropLast().reversed().first(where: { $0.source != nil }), let source = ancestor.source {
+        if let source = usableSource(node.source) { location = source.text }
+        else if let ancestor = path.dropLast().reversed().first(where: { usableSource($0.source) != nil }), let source = usableSource(ancestor.source) {
             location = "位于 \(source.text) 的 \(ancestor.shortName) 内"
         } else { location = path.map(\.shortName).joined(separator: " > ") }
         // A source callsite can have multiple runtime instances. Keep the shortest useful ancestor label.
-        let duplicates = snapshot.nodes.filter { $0.source == node.source && $0.displayName == node.displayName }
+        let duplicates = index.nodes.filter { usableSource($0.source) == usableSource(node.source) && $0.displayName == node.displayName }
         let context = duplicates.count > 1 ? path.dropLast().reversed().first(where: { $0.label != nil })?.displayName : nil
         let target = context.map { "\($0) > \(node.displayName)" } ?? node.displayName
         let parameters = node.selectableParameters.filter { issue.parameterIDs.contains($0.id) }.map {
             "\($0.name)=\($0.value)\($0.isTruncated ? "（截断值）" : "")"
         }
         let ancestors = path.dropLast().filter { ancestor in
-            ancestor.kind == "ComposeNode" && ancestor.source != nil && !contextWrappers.contains(ancestor.shortName)
+            ancestor.kind == "ComposeNode" && usableSource(ancestor.source) != nil && !contextWrappers.contains(ancestor.shortName)
         }
         // Keep the nearest screen and the business components below it. sourceLocation is a
         // reported callsite, not a verified function declaration or a JVM/Kotlin stack frame.
         let screen = ancestors.lastIndex { $0.shortName.hasSuffix("Screen") }
         let contextual = screen.map { Array(ancestors[$0...]) } ?? Array(ancestors.suffix(3))
-        let route = contextual.map { "\($0.source!.text) · \($0.displayName)" }
+        let route = contextual.map { "\(usableSource($0.source)!.text) · \($0.displayName)" }
             + ["\(location) · \(target)"]
-        let locator = ["请按以下要求修改：", "组件路径（采集，省略包装）："]
+        let hasRequest = !issue.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let locator = [hasRequest ? "请按以下要求修改：" : "请定位以下界面组件：", "组件路径（采集，省略包装）："]
             + route.enumerated().map { $0.offset == 0 ? $0.element : "  → " + $0.element }
-        return (locator + parameters + ["修改要求：", issue.description]).joined(separator: "\n")
+        var clues = [sourceSummary(for: node.id, index: index),
+                     "位置来自运行时采集，表示调用位置线索，不是已验证的函数声明；请结合项目代码确认。"]
+        if let resource = node.idResource { clues.append("资源 ID：" + resource) }
+        if let resource = node.layoutResource { clues.append("布局资源：" + resource) }
+        return (locator + clues + parameters + (hasRequest ? ["修改要求：", issue.description] : [])).joined(separator: "\n")
     }
 
     private static let contextWrappers: Set<String> = [

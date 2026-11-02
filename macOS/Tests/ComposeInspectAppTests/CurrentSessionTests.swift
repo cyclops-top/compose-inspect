@@ -8,7 +8,7 @@ final class CurrentSessionTests: XCTestCase {
     @MainActor func testSwitchAfterCutRejectsPreviousEditorCallbacksIncludingAfterReselection() async throws {
         _ = NSApplication.shared
         let store = WorkspaceStore()
-        try store.applyCapture(captured())
+        try await store.applyCapture(captured())
         store.select("login")
         let child = try XCTUnwrap(store.selectedKey)
         let revision = store.issueEditRevision
@@ -31,7 +31,7 @@ final class CurrentSessionTests: XCTestCase {
     @MainActor func testCutThenPasteIntoAncestorRecordsSelectedComponent() async throws {
         _ = NSApplication.shared
         let store = WorkspaceStore()
-        try store.applyCapture(captured())
+        try await store.applyCapture(captured())
         store.select("login")
         let host = NSHostingController(rootView: IssuesWorkspaceView(store: store).environment(ToolchainSettings()))
         let window = NSWindow(contentViewController: host)
@@ -91,12 +91,12 @@ final class CurrentSessionTests: XCTestCase {
         let store = WorkspaceStore()
         XCTAssertTrue(store.snapshot.nodes.isEmpty)
         XCTAssertTrue(store.issues.isEmpty)
-        try store.applyCapture(captured())
+        try await store.applyCapture(captured())
         store.select("login")
         let oldKey = try XCTUnwrap(store.selectedKey), oldRevision = store.issueEditRevision
         store.edit("修改按钮", for: oldKey, revision: oldRevision)
         XCTAssertEqual(store.issues.count, 1)
-        try store.applyCapture(captured())
+        try await store.applyCapture(captured())
         XCTAssertTrue(store.issues.isEmpty)
         XCTAssertEqual(store.snapshots.count, 1)
         XCTAssertEqual(store.images.count, 1)
@@ -109,7 +109,7 @@ final class CurrentSessionTests: XCTestCase {
     @MainActor func testClearSelectionPreservesIssueAndResetsHitCycle() async throws {
         _ = NSApplication.shared
         let store = WorkspaceStore()
-        try store.applyCapture(captured())
+        try await store.applyCapture(captured())
         store.select("login")
         let key = try XCTUnwrap(store.selectedKey), revision = store.issueEditRevision
         store.edit("保留修改要求", for: key, revision: revision)
@@ -127,7 +127,7 @@ final class CurrentSessionTests: XCTestCase {
     @MainActor func testClickOutsideScreenshotClearsSelectionEvenWhenPickingDisabled() async throws {
         _ = NSApplication.shared
         let store = WorkspaceStore()
-        try store.applyCapture(captured())
+        try await store.applyCapture(captured())
         store.select("login")
         store.selectionEnabled = false
         let size = store.snapshot.pixelSize
@@ -140,7 +140,7 @@ final class CurrentSessionTests: XCTestCase {
     @MainActor func testDeleteAndClearImmediatelyEmptyEditorAndCannotResurrectIssues() async throws {
         _ = NSApplication.shared
         let store = WorkspaceStore()
-        try store.applyCapture(captured())
+        try await store.applyCapture(captured())
         store.select("login")
         let key = try XCTUnwrap(store.selectedKey), revision = store.issueEditRevision
         store.edit("修改按钮", for: key, revision: revision)
@@ -169,7 +169,7 @@ final class CurrentSessionTests: XCTestCase {
         let store = WorkspaceStore()
         store.onlyClickableNodes = false
         store.hideInternalNodes = false
-        try store.applyCapture(captured())
+        try await store.applyCapture(captured())
         store.select("login")
         let key = try XCTUnwrap(store.selectedKey)
         store.edit("保留按钮问题", for: key, revision: store.issueEditRevision)
@@ -199,6 +199,52 @@ final class CurrentSessionTests: XCTestCase {
         store.hideInternalNodes = false
         XCTAssertFalse(store.hideInternalNodes)
         XCTAssertNotNil(store.presentationIndex.byID["login"])
+    }
+
+    @MainActor func testCopyWithoutDescriptionIncludesSelectedParametersAndCreatesNoIssue() async throws {
+        _ = NSApplication.shared
+        let store = WorkspaceStore()
+        try await store.applyCapture(captured())
+        store.select("login")
+        store.toggleParameter("修饰符.height", enabled: true)
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        store.copyCurrentLocator(to: board)
+        let copied = try XCTUnwrap(board.string(forType: .string))
+        XCTAssertEqual(copied, store.currentText)
+        XCTAssertTrue(copied.contains("height=48dp"))
+        XCTAssertFalse(copied.contains("enabled="))
+        XCTAssertFalse(copied.contains("修改要求："))
+        XCTAssertTrue(store.issues.isEmpty)
+        XCTAssertTrue(store.description.isEmpty)
+        store.clearSelection()
+        store.copyCurrentLocator(to: board)
+        XCTAssertEqual(board.string(forType: .string), copied, "No selection must not erase the clipboard")
+    }
+
+    @MainActor func testOverlapNavigationPreservesCandidatesAndOrdinarySelectionClearsThem() async throws {
+        _ = NSApplication.shared
+        let store = WorkspaceStore()
+        try await store.applyCapture(captured())
+        let size = store.snapshot.pixelSize
+        let mapper = CoordinateMapper(imageSize: size, canvasSize: size)
+        let bounds = try XCTUnwrap(store.snapshotIndex.byID["login-text"]).bounds
+        store.selectImage(at: CGPoint(x: bounds.midX, y: bounds.midY), mapper: mapper)
+        let hits = store.hitCandidates
+        XCTAssertGreaterThan(hits.count, 1)
+        XCTAssertEqual(store.selectedNodeID, hits.first)
+        store.cycleHitCandidate(1)
+        XCTAssertEqual(store.selectedNodeID, hits[1])
+        XCTAssertEqual(store.hitCandidates, hits)
+        store.cycleHitCandidate(-1)
+        XCTAssertEqual(store.selectedNodeID, hits.first)
+        store.cycleHitCandidate(-1)
+        XCTAssertEqual(store.selectedNodeID, hits.last)
+        store.selectHitCandidate("not-a-candidate")
+        XCTAssertEqual(store.selectedNodeID, hits.last)
+        store.select("login-text")
+        XCTAssertTrue(store.hitCandidates.isEmpty)
+        XCTAssertEqual(store.selectedParentID, "login")
     }
 
 }

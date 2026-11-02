@@ -5,6 +5,7 @@ import SwiftUI
 struct PreviewView: View {
     @Bindable var store: WorkspaceStore
     @GestureState private var dragTranslation: CGSize = .zero
+    @State private var hoverPoint: CGPoint?
     private var imagePan: CGSize {
         CGSize(width: store.imagePan.width + dragTranslation.width, height: store.imagePan.height + dragTranslation.height)
     }
@@ -12,6 +13,10 @@ struct PreviewView: View {
         VStack(spacing: 0) {
             GeometryReader { geometry in
                 let mapper = CoordinateMapper(imageSize: store.snapshot.pixelSize, canvasSize: geometry.size, zoom: store.zoom, pan: imagePan)
+                let hovered = store.selectionEnabled && store.canPickImage ? hoverPoint.flatMap {
+                    mapper.candidates(at: $0, in: store.presentationIndex, imageSize: store.snapshot.pixelSize,
+                                      rootID: store.visibleRoot?.id).first
+                } : nil
                 ZStack(alignment: .topLeading) {
                     AppStyle.canvas
                     if let image = store.image {
@@ -31,6 +36,10 @@ struct PreviewView: View {
                                 .equatable().allowsHitTesting(false)
                         }
                         Canvas { context, _ in
+                            if let hovered, hovered.id != store.selectedNodeID {
+                                context.stroke(Path(mapper.display(hovered.bounds)), with: .color(.orange),
+                                               style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                            }
                             if store.canPickImage, let node = store.highlightedNode,
                                store.isInVisibleWindow(node.id) {
                                 let rect = mapper.display(node.bounds)
@@ -56,11 +65,31 @@ struct PreviewView: View {
                                           y: max(12, rect.minY - 12))
                                 .allowsHitTesting(false)
                         }
+                        if let hovered, let point = hoverPoint, hovered.id != store.selectedNodeID {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(hovered.displayName).fontWeight(.medium)
+                                Text(LocatorTextBuilder.sourceSummary(for: hovered.id, index: store.snapshotIndex))
+                                    .foregroundStyle(.secondary)
+                            }.font(.system(size: 10)).lineLimit(2).padding(6)
+                                .frame(width: min(240, geometry.size.width - 12), alignment: .leading)
+                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
+                                .position(x: min(max(point.x, 126), max(126, geometry.size.width - 126)),
+                                          y: min(max(point.y + 40, 30), geometry.size.height - 30))
+                                .allowsHitTesting(false)
+                        }
                     } else {
                         EmptyState(icon: "camera", title: "尚未获取界面", subtitle: "选择设备和应用，点击右上角相机。")
                     }
                 }
                 .contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let point): hoverPoint = point
+                    case .ended: hoverPoint = nil
+                    }
+                }
+                .onChange(of: store.snapshot.id) { _, _ in hoverPoint = nil }
+                .onChange(of: store.presentationRevision) { _, _ in hoverPoint = nil }
                 .gesture(SpatialTapGesture().onEnded { event in
                     store.selectImage(at: event.location, mapper: mapper)
                 })
@@ -80,14 +109,26 @@ struct PreviewView: View {
             .overlay(alignment: .bottomTrailing) { floatingTools.padding(12) }
             .overlay(alignment: .bottomLeading) {
                 if store.hitCandidates.count > 1 {
-                    Menu {
-                        ForEach(store.hitCandidates, id: \.self) { id in
-                            if let node = store.presentationIndex.byID[id] {
-                                Button(node.displayName) { store.select(id) }
+                    HStack(spacing: 6) {
+                        Button { store.cycleHitCandidate(-1) } label: { Image(systemName: "chevron.left") }
+                            .help("上一个重叠组件（⌘⌥[）").accessibilityLabel("上一个重叠组件")
+                        Menu {
+                            ForEach(store.hitCandidates, id: \.self) { id in
+                                if let node = store.presentationIndex.byID[id] {
+                                    Button {
+                                        store.selectHitCandidate(id)
+                                    } label: {
+                                        Text((id == store.selectedNodeID ? "✓ " : "") + node.displayName)
+                                        Text(LocatorTextBuilder.sourceSummary(for: id, index: store.snapshotIndex))
+                                    }
+                                }
                             }
-                        }
-                    } label: { Text("\(store.hitCandidates.count) 个候选") }
-                        .menuStyle(.borderlessButton).font(.system(size: 10)).fixedSize()
+                        } label: {
+                            Text("\((store.selectedNodeID.flatMap { store.hitCandidates.firstIndex(of: $0) } ?? 0) + 1)/\(store.hitCandidates.count) 重叠组件")
+                        }.menuStyle(.borderlessButton).fixedSize()
+                        Button { store.cycleHitCandidate(1) } label: { Image(systemName: "chevron.right") }
+                            .help("下一个重叠组件（⌘⌥]）").accessibilityLabel("下一个重叠组件")
+                    }.buttonStyle(.plain).font(.system(size: 10))
                         .padding(7).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6)).padding(12)
                 }
             }
@@ -124,6 +165,9 @@ struct PreviewView: View {
                 }.disabled(!store.canPickImage)
             }
             toolGroup {
+                toolButton("选择父组件（⌘⌥↑）", icon: "arrow.up.to.line") {
+                    if let id = store.selectedParentID { store.select(id) }
+                }.disabled(store.selectedParentID == nil)
                 toolButton("线框", icon: "square.dashed", active: store.showWireframes) {
                     store.showWireframes.toggle()
                 }.disabled(!store.canPickImage)

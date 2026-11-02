@@ -161,7 +161,7 @@ public struct InspectorClient: Sendable {
         return String(text[range])
     }
 
-    public func capture(serial: String, package: String, deviceName: String,
+    public func capture(serial: String, package: String, deviceName: String, verifyConsistency: Bool = false,
                         progress: @escaping @Sendable (String) async -> Void = { _ in }) async throws -> CapturedSnapshot {
         guard Self.validPackage(package) else { throw CommandFailure.configuration("请输入合法的 Android 包名。") }
         guard FileManager.default.fileExists(atPath: tools.jar.path) else { throw CommandFailure.configuration("ui-inspector.jar 不存在，请重新构建应用或在设置中选择 JAR。") }
@@ -175,12 +175,23 @@ public struct InspectorClient: Sendable {
         await progress("连接 inspector，读取组件树…")
         let first = try await dump(serial: serial, package: package, output: directory.appendingPathComponent("first.json"))
         logs.append(first.log)
-        await progress("获取截图并校验界面…")
+        await progress(verifyConsistency ? "获取截图并校验界面…" : "获取截图…")
         // shell v2 with no PTY keeps PNG bytes and remote stderr on separate streams.
         // exec-out merges remote warnings into stdout on some Android versions.
         let screen1 = try await adb(["-s", serial, "shell", "-T", "screencap", "-p"])
         let image1 = screen1.stdout
         logs.append(String(decoding: screen1.stderr, as: UTF8.self))
+        if !verifyConsistency {
+            let size = try Self.imageSize(image1)
+            let candidate = try SnapshotImporter.decode(first.data, imageSize: size, packageName: package)
+            logs.append("未启用采集一致性校验，仅采集一轮节点树和截图。")
+            let metadata = CaptureMetadata(serial: serial, packageName: package, startedAt: started, finishedAt: Date(),
+                                           includeFacets: facets, stableLayout: false, stableImage: false,
+                                           diagnostics: logs, baselineJSON: first.data)
+            try Task.checkCancellation()
+            return CapturedSnapshot(snapshot: candidate.withCaptureContext(deviceName: deviceName, metadata: metadata),
+                                    imageData: image1, aligned: false)
+        }
         let second = try await dump(serial: serial, package: package, output: directory.appendingPathComponent("tree.json"))
         logs.append(second.log)
         let screen2 = try await adb(["-s", serial, "shell", "-T", "screencap", "-p"])
@@ -190,20 +201,28 @@ public struct InspectorClient: Sendable {
         guard size1 == size2 else { throw CommandFailure.failed("采集期间屏幕方向或分辨率变化，请停留后重新获取。") }
         let baseline = try SnapshotImporter.decode(first.data, imageSize: size1, packageName: package)
         let candidate = try SnapshotImporter.decode(second.data, imageSize: size2, packageName: package)
-        func geometry(_ snapshot: InspectorSnapshot) -> [String] {
-            snapshot.nodes.map { "\($0.id)|\($0.kind)|\($0.name)|\($0.bounds)|\($0.label ?? "")" }
-        }
-        let stableLayout = geometry(baseline) == geometry(candidate)
+        let stableLayout = Self.hasSameGeometry(baseline, candidate)
         let ambiguousDisplay = logs.contains { $0.contains("Multiple displays") }
         let stableImage = image1 == image2 && !ambiguousDisplay
         let metadata = CaptureMetadata(serial: serial, packageName: package, startedAt: started, finishedAt: Date(),
                                        includeFacets: facets, stableLayout: stableLayout, stableImage: stableImage,
                                        diagnostics: logs, baselineJSON: first.data)
         try Task.checkCancellation()
-        let snapshot = try SnapshotImporter.decode(second.data, imageSize: size2, packageName: package,
-                                                  deviceName: deviceName, metadata: metadata)
+        let snapshot = candidate.withCaptureContext(deviceName: deviceName, metadata: metadata)
         return CapturedSnapshot(snapshot: snapshot, imageData: image2,
                                 aligned: stableLayout && stableImage && (snapshot.document?.displays.count ?? 0) <= 1)
+    }
+
+    /// Compare in tree order without flattening trees or allocating formatted geometry strings.
+    static func hasSameGeometry(_ lhs: InspectorSnapshot, _ rhs: InspectorSnapshot) -> Bool {
+        var left = Array(lhs.roots.reversed()), right = Array(rhs.roots.reversed())
+        while let a = left.popLast() {
+            guard let b = right.popLast(), a.id == b.id, a.kind == b.kind,
+                  a.name == b.name, a.bounds == b.bounds, (a.label ?? "") == (b.label ?? "") else { return false }
+            left.append(contentsOf: a.children.reversed())
+            right.append(contentsOf: b.children.reversed())
+        }
+        return right.isEmpty
     }
 
     public func parameter(serial: String, package: String, token: String) async throws -> InspectorDocument {

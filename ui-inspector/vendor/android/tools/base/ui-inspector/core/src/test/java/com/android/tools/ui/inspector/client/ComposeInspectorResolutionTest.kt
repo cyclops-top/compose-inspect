@@ -73,6 +73,43 @@ class ComposeInspectorResolutionTest {
   }
 
   @Test
+  fun testResolve_metadataCompatibilityRepairIsBundledAndDoesNotModifyOfficialCache() {
+    val cache = tempFolder.newFolder().toPath()
+    val official = cache.resolve("androidx.compose.ui-ui-android-1.12.1-inspector.jar")
+    official.writeText("official-cache-untouched")
+    val resolution = ComposeInspectorResolution(null, cache, noDownloads)
+    val jar = resolution.jarResolver(logger)("1.12.1")
+    assertThat(jar.fileName.toString()).isEqualTo("compose-1.12.1-metadata-2.4.21.jar")
+    java.util.zip.ZipFile(jar.toFile()).use { zip ->
+      assertThat(zip.getEntry("classes.dex")).isNotNull()
+      val notice = zip.getInputStream(zip.getEntry("META-INF/ComposeInspect-metadata-compat.txt")).bufferedReader().readText()
+      assertThat(notice).contains("Kotlin metadata 2.4.21")
+      assertThat(zip.getEntry("lib/arm64-v8a/libcompose_inspection_jni.so")).isNotNull()
+    }
+    assertThat(official.readText()).isEqualTo("official-cache-untouched")
+    val original = java.nio.file.Files.readAllBytes(jar)
+    jar.writeText("corrupt cached repair")
+    assertThat(java.nio.file.Files.readAllBytes(resolution.jarResolver(logger)("1.12.1"))).isEqualTo(original)
+    assertThat(official.readText()).isEqualTo("official-cache-untouched")
+  }
+
+  @Test
+  fun testResolve_explicitOverrideWinsOverBundledMetadataRepair() {
+    val jar = tempFolder.newFile("override.jar").toPath()
+    val resolution = ComposeInspectorResolution(jar, tempFolder.newFolder().toPath(), noDownloads)
+    assertThat(resolution.jarResolver(logger)("1.12.1")).isEqualTo(jar)
+  }
+
+  @Test
+  fun testMetadataRepairDoesNotOverrideOtherComposeVersions() {
+    val cache = tempFolder.newFolder().toPath()
+    for (version in listOf("1.10.6", "1.12.0", "1.12.2", "1.13.0", "../1.12.1")) {
+      assertThat(ComposeInspectorCompatibility.resolve(version, cache)).isNull()
+    }
+    assertThat(cache.listDirectoryEntries()).isEmpty()
+  }
+
+  @Test
   fun testResolve_overrideJar_isUsedWithoutLookingElsewhere() {
     val overrideJar = tempFolder.newFile("override.jar").toPath()
     val resolution = ComposeInspectorResolution(overrideJar, tempFolder.newFolder().toPath(), noDownloads)

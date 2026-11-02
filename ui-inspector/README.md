@@ -45,3 +45,9 @@ ComposeInspect 下的 UI Inspector 子项目，源码、依赖、构建和运行
 ## 版本控制范围
 
 主仓库保存 `vendor/android/tools/base/ui-inspector/` 的源码快照，包含 ComposeInspect 的分层样式采集扩展；原上游仓库保留在本地。上游来源为 `https://android.googlesource.com/platform/tools/base`，快照基于提交 `45628254f0f8a9bb3755d73f3d30ca78fbb2153d`。其余 Android 构建工作区、SDK/JDK、Bazel 缓存及生成的 JAR 不纳入主仓库，需要在本地另行准备。
+
+## Kotlin metadata 2.4 兼容
+
+Compose 1.12.1 的官方 inspector 内嵌 metadata 解析库最多接受 2.3，读取 Kotlin 2.4 应用参数时会失败。目前对 **Compose 1.12.1** 自动选择内置兼容版：保留原 inspector 与协议，只升级其隔离命名空间中的 `kotlin-metadata-jvm` 至 2.4.21，继续严格校验版本。其他 Compose 版本仍使用官方下载流程；显式 `--compose-inspector` 优先。官方缓存不覆盖，兼容版缓存损坏会重新提取。
+
+可复现构建、固定输入校验值和验证方式见 [compat/README.md](compat/README.md)。源码构建缺少兼容产物时会自动调用其构建脚本。

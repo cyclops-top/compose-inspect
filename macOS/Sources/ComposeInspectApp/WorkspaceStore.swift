@@ -4,17 +4,26 @@ import Observation
 
 @MainActor @Observable
 final class WorkspaceStore {
-    private(set) var snapshot: InspectorSnapshot {
-        didSet {
-            if oldValue.id != snapshot.id {
-                snapshotIndex = InspectorSnapshotIndex(snapshot)
-                compactIndex = InspectorSnapshotIndex(snapshot, hidingInternals: true, configuration: filterConfiguration)
-                clickableIndex = InspectorSnapshotIndex(snapshot, onlyClickable: true, configuration: filterConfiguration)
-                presentationIndex = onlyClickableNodes ? clickableIndex : (hideInternalNodes ? compactIndex : snapshotIndex)
-                selectedNodeID = nil
-                imageHitCycle.reset(); hitCandidates = []
-            }
+    private(set) var snapshot: InspectorSnapshot
+    private var captureRevision = UUID()
+
+    private struct PreparedIndexes: Sendable {
+        let full: InspectorSnapshotIndex
+        let compact: InspectorSnapshotIndex
+        let clickable: InspectorSnapshotIndex
+        init(_ snapshot: InspectorSnapshot, configuration: NodeFilterConfiguration,
+             fullIndex: InspectorSnapshotIndex? = nil, checkpoint: () throws -> Void) rethrows {
+            full = try fullIndex ?? InspectorSnapshotIndex(snapshot, checkpoint: checkpoint)
+            compact = try InspectorSnapshotIndex(snapshot, hidingInternals: true, configuration: configuration, checkpoint: checkpoint)
+            clickable = try InspectorSnapshotIndex(snapshot, onlyClickable: true, configuration: configuration, checkpoint: checkpoint)
         }
+    }
+
+    private func installIndexes(_ indexes: PreparedIndexes) {
+        snapshotIndex = indexes.full
+        compactIndex = indexes.compact
+        clickableIndex = indexes.clickable
+        updatePresentationIndex()
     }
     private(set) var snapshotIndex: InspectorSnapshotIndex
     private(set) var presentationIndex: InspectorSnapshotIndex
@@ -28,11 +37,53 @@ final class WorkspaceStore {
             if let data = try? JSONEncoder().encode(filterConfiguration) {
                 filterDefaults.set(data, forKey: "tree.filterConfiguration.v1")
             }
-            compactIndex = InspectorSnapshotIndex(snapshot, hidingInternals: true, configuration: filterConfiguration)
-            clickableIndex = InspectorSnapshotIndex(snapshot, onlyClickable: true, configuration: filterConfiguration)
-            updatePresentationIndex()
+            scheduleFilterIndexes()
         }
     }
+    @ObservationIgnored private var filterTask: Task<Void, Never>?
+    @ObservationIgnored private var filterWorker: Task<PreparedIndexes, Error>?
+    @ObservationIgnored private var captureWorker: Task<PreparedIndexes, Error>?
+    private var filterRevision = UUID()
+
+    private func scheduleFilterIndexes() {
+        filterTask?.cancel()
+        filterWorker?.cancel()
+        let revision = UUID()
+        filterRevision = revision
+        let source = snapshot, rules = filterConfiguration, full = snapshotIndex
+        filterTask = Task { [weak self] in
+            do {
+                // Coalesce rapid edits before starting the expensive traversal.
+                try await Task.sleep(for: .milliseconds(100))
+                let worker = Task.detached(priority: .userInitiated) {
+                    try PreparedIndexes(source, configuration: rules, fullIndex: full,
+                                        checkpoint: { try Task.checkCancellation() })
+                }
+                self?.filterWorker = worker
+                let indexes = try await withTaskCancellationHandler {
+                    try await worker.value
+                } onCancel: { worker.cancel() }
+                try Task.checkCancellation()
+                guard let self, self.filterRevision == revision, self.snapshot.id == source.id,
+                      self.filterConfiguration == rules else { return }
+                self.installIndexes(indexes)
+                self.filterWorker = nil
+            } catch is CancellationError {
+                // New rules or a new capture superseded this result.
+            } catch {
+                if let self, self.filterRevision == revision { self.errorMessage = error.localizedDescription }
+            }
+        }
+    }
+
+    func waitForFilterIndexes() async { await filterTask?.value }
+
+    private func cancelFilterIndexes() {
+        filterRevision = UUID()
+        filterTask?.cancel(); filterWorker?.cancel()
+        filterTask = nil; filterWorker = nil
+    }
+
     func restoreDefaultFilters() { filterConfiguration = .defaults }
     var hideInternalNodes = UserDefaults.standard.object(forKey: "onlyClickableNodes") as? Bool == true
         || (UserDefaults.standard.object(forKey: "hideInternalNodes") as? Bool ?? true) {
@@ -79,7 +130,15 @@ final class WorkspaceStore {
     private var transientParameters: [ComponentKey: Set<String>] = [:]
     let deviceSession = DeviceSession()
     var rawPresentation: RawJSONPresentation?
-    var readingParameters: Set<String> = []
+    private struct ParameterRequestKey: Hashable {
+        let component: ComponentKey
+        let parameterID: String
+    }
+    private var parameterRequests: [ParameterRequestKey: UUID] = [:]
+    var readingParameters: Set<String> {
+        guard let key = selectedKey else { return [] }
+        return Set(parameterRequests.keys.filter { $0.component == key }.map(\.parameterID))
+    }
     private var liveSnapshotIDs: Set<UUID> = []
     private(set) var issueEditRevision: UInt = 0
 
@@ -125,7 +184,29 @@ final class WorkspaceStore {
     var visibleBounds: [CGRect] { visibleRoot.flatMap { presentationIndex.boundsByRoot[$0.id] } ?? [] }
     func isInVisibleWindow(_ nodeID: String) -> Bool { snapshotIndex.rootIDs[nodeID] == visibleRoot?.id }
     var issues: [ComponentIssue] { ledger.issues }
-    var currentText: String { currentIssue.flatMap { LocatorTextBuilder.text(for: $0, in: snapshot) } ?? "" }
+    var currentText: String {
+        guard let key = selectedKey else { return "" }
+        let target = ComponentIssue(component: key, description: description, parameterIDs: selectedParameters)
+        return LocatorTextBuilder.text(for: target, in: snapshot, index: snapshotIndex) ?? ""
+    }
+    var sourceSummary: String {
+        selectedNodeID.map { LocatorTextBuilder.sourceSummary(for: $0, index: snapshotIndex) } ?? "未选择组件"
+    }
+    var selectedParentID: String? { path.dropLast().last?.id }
+
+    func selectHitCandidate(_ id: String) {
+        guard hitCandidates.contains(id), presentationIndex.byID[id] != nil, isInVisibleWindow(id) else { return }
+        let candidates = hitCandidates
+        select(id)
+        hitCandidates = candidates
+    }
+
+    func cycleHitCandidate(_ direction: Int) {
+        guard !hitCandidates.isEmpty else { return }
+        let current = selectedNodeID.flatMap { hitCandidates.firstIndex(of: $0) } ?? 0
+        let next = (current + direction % hitCandidates.count + hitCandidates.count) % hitCandidates.count
+        selectHitCandidate(hitCandidates[next])
+    }
     var batchText: String? { LocatorTextBuilder.batch(issues, snapshots: snapshots) }
     var path: [InspectorNode] { selectedNodeID.map { presentationIndex.path(to: $0) } ?? [] }
 
@@ -137,6 +218,7 @@ final class WorkspaceStore {
     private func selectNode(_ nodeID: String) {
         imageHitCycle.reset()
         guard snapshotIndex.byID[nodeID] != nil else { return }
+        hitCandidates = []
         if !search.isEmpty, let visible = presentationIndex.byID[nodeID], !visible.matches(search) { search = "" }
         selectionRevision &+= 1
         guard selectedNodeID != nodeID || !isInVisibleWindow(nodeID) else { return }
@@ -218,10 +300,23 @@ final class WorkspaceStore {
         deviceSession.cancel()
         clearIssues()
         let empty = Self.emptySnapshot()
-        snapshot = empty; snapshots = [empty.id: empty]; images = [:]; liveSnapshotIDs = []
+        captureRevision = UUID()
+        captureWorker?.cancel()
+        cancelFilterIndexes()
+        snapshot = empty
+        installIndexes(PreparedIndexes(empty, configuration: filterConfiguration, checkpoint: {}))
+        snapshots = [empty.id: empty]; images = [:]; liveSnapshotIDs = []
         selectedNodeID = nil; expandedNodes = []; windowRootID = nil; search = ""; fitImage()
-        rawPresentation = nil; readingParameters = []
+        rawPresentation = nil; parameterRequests = [:]
         notice = "等待获取界面"
+    }
+
+    func copyCurrentLocator(to pasteboard: NSPasteboard = .general) {
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        let text = currentText
+        guard !text.isEmpty else { return }
+        pasteboard.clearContents()
+        if pasteboard.setString(text, forType: .string) { notice = "已复制当前组件的 AI 定位信息" }
     }
 
     func copyAllIssues() {
@@ -236,24 +331,57 @@ final class WorkspaceStore {
     }
 
     func capture(settings: ToolchainSettings) async {
+        guard !deviceSession.capturing, !deviceSession.resolvingCaptureTarget else { return }
         NSApp.keyWindow?.makeFirstResponder(nil)
         do {
+            try await deviceSession.prepareCaptureTarget(settings: settings)
+            targetChanged()
             let captured = try await deviceSession.capture(settings: settings)
             let source = captured.snapshot
             guard source.captureMetadata?.serial == deviceSession.selectedSerial,
                   source.packageName == deviceSession.packageName else { return }
-            try applyCapture(captured)
+            try await applyCapture(captured, requiringCurrentTarget: true)
         } catch is CancellationError { notice = "已取消抓取，保留上次快照。" }
         catch { errorMessage = error.localizedDescription }
     }
 
-    func applyCapture(_ captured: CapturedSnapshot) throws {
+    func applyCapture(_ captured: CapturedSnapshot, requiringCurrentTarget: Bool = false) async throws {
+        try Task.checkCancellation()
+        let revision = UUID()
+        captureRevision = revision
+        captureWorker?.cancel()
+        defer { if captureRevision == revision { captureWorker = nil } }
+        // Configuration can change while preparing; publish only indexes for the latest rules.
+        var configuration = filterConfiguration
+        var indexes: PreparedIndexes
+        while true {
+            let source = captured.snapshot
+            let rules = configuration
+            let worker = Task.detached(priority: .userInitiated) {
+                try PreparedIndexes(source, configuration: rules, checkpoint: { try Task.checkCancellation() })
+            }
+            captureWorker = worker
+            indexes = try await withTaskCancellationHandler {
+                try await worker.value
+            } onCancel: { worker.cancel() }
+            try Task.checkCancellation()
+            guard captureRevision == revision else { return }
+            if requiringCurrentTarget {
+                guard source.captureMetadata?.serial == deviceSession.selectedSerial,
+                      source.packageName == deviceSession.packageName else { return }
+            }
+            if configuration == filterConfiguration { break }
+            configuration = filterConfiguration
+        }
         guard let image = NSImage(data: captured.imageData) else { throw CocoaError(.fileReadCorruptFile) }
+        cancelFilterIndexes()
         clearIssues()
         let source = captured.snapshot
         snapshots = [source.id: source]; images = [source.id: image]; liveSnapshotIDs = [source.id]
-        rawPresentation = nil; readingParameters = []
-        snapshot = source; selectedNodeID = nil; search = ""; fitImage(); hitCandidates = []
+        rawPresentation = nil; parameterRequests = [:]
+        snapshot = source
+        installIndexes(indexes)
+        selectedNodeID = nil; search = ""; fitImage(); hitCandidates = []
         expandedNodes = Set(source.roots.map(\.id)); windowRootID = source.roots.first?.id
         notice = "已获取界面"
     }
@@ -273,24 +401,44 @@ final class WorkspaceStore {
     }
 
     func readParameter(_ parameter: NodeParameter, settings: ToolchainSettings) async {
-        guard canRead(parameter), let token = parameter.continuationToken, let key = selectedKey,
-              let source = snapshots[key.snapshotID], let metadata = source.captureMetadata,
-              !readingParameters.contains(parameter.id) else { return }
-        readingParameters.insert(parameter.id)
-        defer { readingParameters.remove(parameter.id) }
-        do {
+        guard let metadata = snapshot.captureMetadata, let token = parameter.continuationToken else { return }
+        await readParameter(parameter) {
             let client = InspectorClient(tools: try settings.resolvedTools())
-            let document = try await client.parameter(serial: metadata.serial, package: metadata.packageName, token: token)
-            guard snapshot.id == key.snapshotID, deviceSession.selectedSerial == metadata.serial,
-                  deviceSession.packageName == metadata.packageName else { return }
+            return try await client.parameter(serial: metadata.serial, package: metadata.packageName, token: token)
+        }
+    }
+
+    func readParameter(_ parameter: NodeParameter,
+                       operation: @MainActor () async throws -> InspectorDocument) async {
+        guard canRead(parameter), let token = parameter.continuationToken, let key = selectedKey,
+              let source = snapshots[key.snapshotID], let metadata = source.captureMetadata else { return }
+        let requestKey = ParameterRequestKey(component: key, parameterID: parameter.id)
+        guard parameterRequests[requestKey] == nil else { return }
+        let requestID = UUID()
+        parameterRequests[requestKey] = requestID
+        defer {
+            if parameterRequests[requestKey] == requestID { parameterRequests.removeValue(forKey: requestKey) }
+        }
+        func isCurrent() -> Bool {
+            parameterRequests[requestKey] == requestID && snapshot.id == key.snapshotID
+                && deviceSession.selectedSerial == metadata.serial && deviceSession.packageName == metadata.packageName
+        }
+        do {
+            let document = try await operation()
+            try Task.checkCancellation()
+            guard isCurrent() else { return }
             var updated = snapshot
             let read = ParameterRead(nodeID: key.nodeID, parameterID: parameter.id, token: token, document: document)
             updated.parameterReads = (updated.parameterReads ?? []) + [read]
             snapshots[key.snapshotID] = updated
-            if snapshot.id == key.snapshotID { snapshot = updated }
+            snapshot = updated
             if selectedKey == key { rawPresentation = RawJSONPresentation(title: "后续参数读取 · \(parameter.name)", document: document) }
             notice = "参数已继续读取；结果单独保存，原快照未被覆盖。"
-        } catch { errorMessage = error.localizedDescription }
+        } catch is CancellationError {
+            // Cancellation retires this request without replacing the current UI's status.
+        } catch {
+            if isCurrent() { errorMessage = error.localizedDescription }
+        }
     }
 
 }

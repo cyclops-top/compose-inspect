@@ -52,13 +52,13 @@ struct HierarchyView: View {
 
 /// Native row selection happens on the first mouse-down. Double-action only changes expansion,
 /// so single selection is never delayed by waiting for a possible double-click gesture.
-private struct NativeHierarchyView: NSViewRepresentable {
+struct NativeHierarchyView: NSViewRepresentable {
     let store: WorkspaceStore
 
     func makeCoordinator() -> Coordinator { Coordinator(store: store) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let outline = NSOutlineView()
+        let outline = CompactHierarchyOutlineView()
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("component"))
         column.resizingMask = []
         column.maxWidth = .greatestFiniteMagnitude
@@ -96,17 +96,16 @@ private struct NativeHierarchyView: NSViewRepresentable {
 
     @MainActor final class Item: NSObject {
         let node: InspectorNode
-        let children: [Item]
-        let depth: Int
+        var children: [Item] = []
+        var depth: Int
+        var continuesParentChain = false
         let textWidth: CGFloat
-        init(node: InspectorNode, visibleIDs: Set<String>?, depth: Int = 0) {
+        init(node: InspectorNode, depth: Int) {
             self.node = node
             self.depth = depth
             let title = node.shortName + (node.label.map { " " + $0.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ") } ?? "")
             textWidth = (title as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)]).width
-            children = node.children.filter { visibleIDs?.contains($0.id) ?? true }.map { Item(node: $0, visibleIDs: visibleIDs, depth: depth + 1) }
         }
-        var flattened: [Item] { [self] + children.flatMap(\.flattened) }
     }
 
     @MainActor final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
@@ -114,8 +113,6 @@ private struct NativeHierarchyView: NSViewRepresentable {
         weak var outline: NSOutlineView?
         private var snapshotID: UUID?
         private var query = ""
-        private var hidingInternals = true
-        private var onlyClickable = false
         private var presentationRevision: UInt?
         private var roots: [Item] = []
         private var items: [String: Item] = [:]
@@ -132,21 +129,42 @@ private struct NativeHierarchyView: NSViewRepresentable {
             guard let outline else { return }
             synchronizing = true
             defer { synchronizing = false }
-            let rebuilt = snapshotID != store.snapshot.id || query != store.search || hidingInternals != store.hideInternalNodes || onlyClickable != store.onlyClickableNodes || presentationRevision != store.presentationRevision
+            let treeChanged = snapshotID != store.snapshot.id || presentationRevision != store.presentationRevision
+            let rebuilt = treeChanged || query != store.search
             let issues = Set(store.issues.filter { $0.component.snapshotID == store.snapshot.id }.map(\.component.nodeID))
             let issuesChanged = issues != issueNodeIDs
             issueNodeIDs = issues
             if rebuilt {
                 snapshotID = store.snapshot.id
                 query = store.search
-                hidingInternals = store.hideInternalNodes
-                onlyClickable = store.onlyClickableNodes
                 presentationRevision = store.presentationRevision
                 collapsedSearchItems.removeAll()
-                let visibleIDs = query.isEmpty ? nil : store.presentationIndex.matchingIDs(query)
-                roots = store.presentationIndex.roots.filter { visibleIDs?.contains($0.id) ?? true }
-                    .map { Item(node: $0, visibleIDs: visibleIDs) }
-                items = Dictionary(uniqueKeysWithValues: roots.flatMap(\.flattened).map { ($0.node.id, $0) })
+                let index = store.presentationIndex
+                if treeChanged {
+                    // Item identity and text measurements survive search edits.
+                    items = Dictionary(uniqueKeysWithValues: index.nodes.map {
+                        ($0.id, Item(node: $0, depth: index.depths[$0.id] ?? 0))
+                    })
+                    // Keep display depths stable while searching; only real branches indent.
+                    var pending = index.roots.compactMap { items[$0.id] }
+                    for root in pending { root.depth = 0 }
+                    while let parent = pending.popLast() {
+                        let singleChild = parent.node.children.count == 1
+                        for node in parent.node.children {
+                            guard let child = items[node.id] else { continue }
+                            child.depth = parent.depth + (singleChild ? 0 : 1)
+                            child.continuesParentChain = singleChild
+                            pending.append(child)
+                        }
+                    }
+                }
+                let visibleIDs = query.isEmpty ? nil : index.matchingIDs(query)
+                for item in items.values {
+                    item.children = item.node.children.compactMap {
+                        visibleIDs?.contains($0.id) == false ? nil : items[$0.id]
+                    }
+                }
+                roots = index.roots.compactMap { visibleIDs?.contains($0.id) == false ? nil : items[$0.id] }
                 outline.reloadData()
             }
             let selectionChanged = selectionRevision != store.selectionRevision
@@ -220,6 +238,8 @@ private struct NativeHierarchyView: NSViewRepresentable {
             }
             scroll.contentWidth = ceil(width)
             scroll.tile()
+            outline.needsLayout = true
+            outline.needsDisplay = true
         }
 
         func outlineView(_ outlineView: NSOutlineView, numberOfChildrenOfItem item: Any?) -> Int {
@@ -307,6 +327,103 @@ private struct NativeHierarchyView: NSViewRepresentable {
             if !query.isEmpty { collapsedSearchItems.insert(item.node.id) }
             updateContentWidth()
         }
+    }
+}
+
+/// Preserve the native hierarchy for navigation and accessibility, but lay out single-child
+/// chains in one column. Disclosure hit targets and cell contents use the same offset.
+final class CompactHierarchyOutlineView: NSOutlineView {
+    @MainActor private final class DisclosureImages: NSObject {
+        let normal: NSImage?
+        let alternate: NSImage?
+        init(_ button: NSButton) {
+            normal = button.image
+            alternate = button.alternateImage
+        }
+    }
+    private let disclosureImages = NSMapTable<NSButton, DisclosureImages>.weakToStrongObjects()
+    private lazy var chainDot: NSImage = {
+        let image = NSImage(size: NSSize(width: 12, height: 12), flipped: false) { _ in
+            NSColor.labelColor.setFill()
+            NSBezierPath(ovalIn: NSRect(x: 4.5, y: 4.5, width: 3, height: 3)).fill()
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }()
+
+    override func layout() {
+        super.layout()
+        enumerateAvailableRowViews { rowView, row in
+            guard let item = self.item(atRow: row) as? NativeHierarchyView.Item else { return }
+            let showsDot = item.node.children.count == 1 && self.isItemExpanded(item)
+            var pending = rowView.subviews
+            while let view = pending.popLast() {
+                pending.append(contentsOf: view.subviews)
+                guard let button = view as? NSButton,
+                      [NSOutlineView.disclosureButtonIdentifier, NSOutlineView.showHideButtonIdentifier].contains(button.identifier) else { continue }
+                let original: DisclosureImages
+                if let saved = self.disclosureImages.object(forKey: button) { original = saved }
+                else {
+                    original = DisclosureImages(button)
+                    self.disclosureImages.setObject(original, forKey: button)
+                }
+                // Keep AppKit's button, action, hit area and accessibility behavior intact.
+                button.image = showsDot ? self.chainDot : original.normal
+                button.alternateImage = showsDot ? self.chainDot : original.alternate
+            }
+        }
+    }
+
+    private func indentationAdjustment(at row: Int) -> CGFloat {
+        guard row >= 0, let item = item(atRow: row) as? NativeHierarchyView.Item else { return 0 }
+        return CGFloat(level(forItem: item) - item.depth) * indentationPerLevel
+    }
+
+    override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
+        var frame = super.frameOfCell(atColumn: column, row: row)
+        if column == outlineTableColumn.flatMap({ tableColumns.firstIndex(of: $0) }) {
+            let adjustment = indentationAdjustment(at: row)
+            frame.origin.x -= adjustment
+            frame.size.width += adjustment
+        }
+        return frame
+    }
+
+    override func frameOfOutlineCell(atRow row: Int) -> NSRect {
+        var frame = super.frameOfOutlineCell(atRow: row)
+        if !frame.isEmpty { frame.origin.x -= indentationAdjustment(at: row) }
+        return frame
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let visibleRows = rows(in: dirtyRect)
+        guard visibleRows.location != NSNotFound, visibleRows.length > 0 else { return }
+        NSColor.tertiaryLabelColor.withAlphaComponent(0.35).setStroke()
+        let lines = NSBezierPath()
+        lines.lineWidth = 1
+        for row in visibleRows.location..<(visibleRows.location + visibleRows.length) {
+            guard let item = item(atRow: row) as? NativeHierarchyView.Item else { continue }
+            let rowFrame = rect(ofRow: row)
+            // The incoming segment uses the parent's disclosure position, including for leaves.
+            if item.continuesParentChain, row > 0 {
+                let parentDisclosure = frameOfOutlineCell(atRow: row - 1)
+                if !parentDisclosure.isEmpty {
+                    let x = parentDisclosure.midX
+                    lines.move(to: NSPoint(x: x, y: rowFrame.minY - intercellSpacing.height))
+                    lines.line(to: NSPoint(x: x, y: rowFrame.midY - 7))
+                }
+            }
+            if item.node.children.count == 1, !item.children.isEmpty, isItemExpanded(item) {
+                let disclosure = frameOfOutlineCell(atRow: row)
+                if !disclosure.isEmpty {
+                    lines.move(to: NSPoint(x: disclosure.midX, y: rowFrame.midY + 7))
+                    lines.line(to: NSPoint(x: disclosure.midX, y: rowFrame.maxY))
+                }
+            }
+        }
+        lines.stroke()
     }
 }
 

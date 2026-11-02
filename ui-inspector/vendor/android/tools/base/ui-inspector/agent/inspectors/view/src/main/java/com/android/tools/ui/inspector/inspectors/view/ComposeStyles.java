@@ -122,18 +122,21 @@ final class ComposeStyles {
         return layer;
     }
 
-    private static JSONObject shape(Object shape, Object coords, Object node) throws Exception {
+    static JSONObject shape(Object shape, Object coords, Object node) throws Exception {
         String name = shape.getClass().getName();
         JSONObject result = new JSONObject().put("name", name).put("kind", "unknown");
         if (name.equals("androidx.compose.ui.graphics.RectangleShape")
                 || name.startsWith("androidx.compose.ui.graphics.RectangleShapeKt$RectangleShape$"))
             return result.put("kind", "rectangle");
-        if (!name.equals("androidx.compose.foundation.shape.RoundedCornerShape")) return result;
+        String simple = name.substring(name.lastIndexOf('.') + 1);
+        if (!name.startsWith("androidx.compose.foundation.shape.")
+                || !(simple.equals("RoundedCornerShape") || simple.equals("AbsoluteRoundedCornerShape")
+                || simple.equals("CutCornerShape") || simple.equals("AbsoluteCutCornerShape"))) return result;
         Object density = call(node, "getDensity");
         long size = ((Number) call(coords, "getSize")).longValue();
         float width = (int) (size >> 32), height = (int) size;
         long floatSize = pack(width, height);
-        boolean rtl = String.valueOf(call(node, "getLayoutDirection")).equals("Rtl");
+        boolean rtl = !simple.startsWith("Absolute") && String.valueOf(call(node, "getLayoutDirection")).equals("Rtl");
         double ts = number(call(call(shape, "getTopStart"), "toPx", floatSize, density));
         double te = number(call(call(shape, "getTopEnd"), "toPx", floatSize, density));
         double bs = number(call(call(shape, "getBottomStart"), "toPx", floatSize, density));
@@ -142,9 +145,32 @@ final class ComposeStyles {
         double startScale = Math.min(1, ratio(Math.min(width, height), ts + bs));
         double endScale = Math.min(1, ratio(Math.min(width, height), te + be));
         ts *= startScale; bs *= startScale; te *= endScale; be *= endScale;
-        return result.put("kind", "rounded").put("radiiPx", new JSONObject()
+        JSONObject configuration = new JSONObject();
+        String[] keys = {"topLeft", "topRight", "bottomLeft", "bottomRight"};
+        String[] getters = rtl ? new String[] {"getTopEnd", "getTopStart", "getBottomEnd", "getBottomStart"}
+                : new String[] {"getTopStart", "getTopEnd", "getBottomStart", "getBottomEnd"};
+        for (int i = 0; i < keys.length; i++) {
+            JSONObject corner = cornerConfiguration(call(shape, getters[i]));
+            if (corner != null) configuration.put(keys[i], corner);
+        }
+        return result.put("corners", configuration)
+                .put("kind", simple.contains("Cut") ? "cut" : "rounded").put("radiiPx", new JSONObject()
                 .put("topLeft", (rtl ? te : ts)).put("topRight", (rtl ? ts : te))
                 .put("bottomLeft", (rtl ? be : bs)).put("bottomRight", (rtl ? bs : be)));
+    }
+    // Original units are optional: custom CornerSize remains measured without inventing its input.
+    private static JSONObject cornerConfiguration(Object corner) throws Exception {
+        String name = corner.getClass().getName();
+        String unit, fieldName;
+        if (name.equals("androidx.compose.foundation.shape.DpCornerSize")) { unit = "dp"; fieldName = "size"; }
+        else if (name.equals("androidx.compose.foundation.shape.PxCornerSize")) { unit = "px"; fieldName = "size"; }
+        else if (name.equals("androidx.compose.foundation.shape.PercentCornerSize")) { unit = "%"; fieldName = "percent"; }
+        else return null;
+        Object value = optionalField(corner, fieldName);
+        if (!(value instanceof Number)) return null;
+        double number = number(value);
+        if (!Double.isFinite(number) || number < 0) return null;
+        return new JSONObject().put("value", number).put("unit", unit);
     }
     private static double ratio(double size, double sum) { return sum == 0 ? 1 : size / sum; }
     private static double number(Object value) { return ((Number) value).doubleValue(); }

@@ -4,6 +4,7 @@ load("//tools/base/bazel:kotlin.bzl", "kotlin_library", "kotlin_test")
 
 kotlin_library(
     name = "core",
+    resources = ["compat/compose-1.12.1-metadata-2.4.21.jar"],
     srcs = glob(["src/main/java/**/*.kt"]),
     visibility = [
         "//tools/base/ui-inspector:__subpackages__",

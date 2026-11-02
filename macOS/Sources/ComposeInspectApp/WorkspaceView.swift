@@ -37,18 +37,25 @@ struct WorkspaceView: View {
                             }.disabled(!device.online)
                         }
                     } label: { HStack(spacing: 5) { Image(systemName: "iphone"); Text(store.deviceSession.selectedDevice?.model ?? "选择设备") } }
-                    .disabled(store.deviceSession.capturing)
+                    .disabled(store.deviceSession.capturing || store.deviceSession.resolvingCaptureTarget)
                     .help("使用设置中的 ADB 查找设备，离线与未授权设备不可抓取")
                     Menu {
+                        Toggle("截图前自动获取前台应用", isOn: Binding(
+                            get: { store.deviceSession.automaticallySelectForeground },
+                            set: { store.deviceSession.automaticallySelectForeground = $0 }
+                        ))
+                        Divider()
                         Button("选择或输入应用包名…") { store.deviceSession.showApplications = true }
-                        Button("刷新应用列表与前台应用") {
+                            .disabled(store.deviceSession.automaticallySelectForeground)
+                        Button("定位前台应用（刷新列表）") {
                             Task {
-                                do { try await store.deviceSession.refreshPackages(settings: tools) }
+                                do { try await store.deviceSession.refreshPackages(settings: tools, selectForeground: true) }
                                 catch { store.errorMessage = error.localizedDescription }
                             }
-                        }
-                    } label: { HStack(spacing: 5) { Image(systemName: "app"); Text(store.deviceSession.packageName.isEmpty ? "选择应用" : store.deviceSession.packageName) } }
-                    .disabled(store.deviceSession.capturing)
+                        }.disabled(store.deviceSession.automaticallySelectForeground)
+                        .help("按前台 Activity 定位主应用；其他应用的悬浮窗请通过应用列表手动选择。")
+                    } label: { HStack(spacing: 5) { Image(systemName: "app"); Text(store.deviceSession.automaticallySelectForeground ? "自动获取前台应用" : (store.deviceSession.packageName.isEmpty ? "选择应用" : store.deviceSession.packageName)) } }
+                    .disabled(store.deviceSession.capturing || store.deviceSession.resolvingCaptureTarget)
                 }.font(.system(size: 12))
             }
             ToolbarItem(placement: .automatic) { Spacer() }
@@ -81,13 +88,15 @@ struct WorkspaceView: View {
         .onChange(of: [store.deviceSession.selectedSerial ?? "", store.deviceSession.packageName]) { _, _ in store.targetChanged() }
         .task {
             await tools.loadEnvironmentIfNeeded()
+            await tools.checkStartupEnvironment()
             do { try await store.deviceSession.refresh(settings: tools) }
             catch { store.notice = "设备发现失败：\(error.localizedDescription)" }
         }
     }
 
     private var canCapture: Bool {
-        store.deviceSession.selectedDevice?.online == true && !store.deviceSession.packageName.isEmpty
+        store.deviceSession.selectedDevice?.online == true && !store.deviceSession.resolvingCaptureTarget &&
+            (store.deviceSession.automaticallySelectForeground || !store.deviceSession.packageName.isEmpty)
     }
 
     private var statusBar: some View {

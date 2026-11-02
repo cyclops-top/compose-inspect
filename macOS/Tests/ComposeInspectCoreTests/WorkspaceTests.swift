@@ -38,7 +38,7 @@ final class WorkspaceTests: XCTestCase {
         let issue = ComponentIssue(component: ComponentKey(snapshotID: snapshot.id, nodeID: "login"),
                                    description: "高度改成 56dp\n保持现有圆角", parameterIDs: ["修饰符.height"])
         let text = LocatorTextBuilder.text(for: issue, in: snapshot)!
-        XCTAssertEqual(text, "请按以下要求修改：\n组件路径（采集，省略包装）：\nLoginScreen.kt:30 · LoginScreen\n  → LoginScreen.kt:86 · Button「登录」\nheight=48dp\n修改要求：\n高度改成 56dp\n保持现有圆角")
+        XCTAssertEqual(text, "请按以下要求修改：\n组件路径（采集，省略包装）：\nLoginScreen.kt:30 · LoginScreen\n  → LoginScreen.kt:86 · Button「登录」\n自身采集位置：LoginScreen.kt:86\n位置来自运行时采集，表示调用位置线索，不是已验证的函数声明；请结合项目代码确认。\nheight=48dp\n修改要求：\n高度改成 56dp\n保持现有圆角")
         XCTAssertFalse(text.contains("enabled"))
         XCTAssertFalse(text.contains("#42"))
         XCTAssertFalse(text.contains("login_submit"))

@@ -6,9 +6,13 @@ import SwiftUI
 @MainActor @Observable
 final class DeviceSession {
     var devices: [ADBDevice] = []
-    var selectedSerial: String?
+    var selectedSerial: String? {
+        didSet { if oldValue != selectedSerial { packageRefreshRevision = UUID() } }
+    }
     var packages: [String] = []
     var packageName = ""
+    var automaticallySelectForeground = true
+    private(set) var resolvingCaptureTarget = false
     var discovering = false
     var capturing = false
     var progress = ""
@@ -16,6 +20,7 @@ final class DeviceSession {
     var packageSearch = ""
     private var captureTask: Task<CapturedSnapshot, Error>?
     private var discoveryRevision = UUID()
+    private var packageRefreshRevision = UUID()
     var selectedDevice: ADBDevice? { devices.first { $0.serial == selectedSerial } }
 
     func refresh(settings: ToolchainSettings) async throws {
@@ -37,23 +42,64 @@ final class DeviceSession {
         selectedSerial = serial; packageName = ""; packages = []
         try await refreshPackages(settings: settings)
     }
-    func refreshPackages(settings: ToolchainSettings) async throws {
-        guard let serial = selectedSerial else { return }
+    func refreshPackages(settings: ToolchainSettings, selectForeground: Bool = false) async throws {
         let client = InspectorClient(tools: try settings.resolvedTools(requireJava: false))
-        let found = try await client.packages(serial: serial)
-        let foreground = try? await client.foregroundPackage(serial: serial)
-        guard selectedSerial == serial else { return }
-        packages = found
-        if packageName.isEmpty, let foreground, found.contains(foreground) { packageName = foreground }
+        try await refreshPackages(selectForeground: selectForeground) { serial in
+            let packages = try await client.packages(serial: serial)
+            let foreground: String?
+            if selectForeground {
+                foreground = try await client.foregroundPackage(serial: serial)
+            } else {
+                foreground = try? await client.foregroundPackage(serial: serial)
+            }
+            return (packages, foreground)
+        }
     }
+
+    func refreshPackages(selectForeground: Bool = false,
+                         load: @MainActor (String) async throws -> (packages: [String], foreground: String?)) async throws {
+        guard let serial = selectedSerial else { return }
+        let revision = UUID()
+        packageRefreshRevision = revision
+        let previousPackage = packageName
+        let result = try await load(serial)
+        try Task.checkCancellation()
+        guard packageRefreshRevision == revision, selectedSerial == serial else { return }
+        packages = result.packages
+        // A manual selection made during discovery takes precedence over the pending result.
+        guard packageName == previousPackage else { return }
+        if let foreground = result.foreground, result.packages.contains(foreground) {
+            if selectForeground || packageName.isEmpty { packageName = foreground }
+        } else if selectForeground {
+            throw CommandFailure.failed("未找到可选择的前台应用，请在设备上打开目标应用后重试。")
+        }
+    }
+    func prepareCaptureTarget(settings: ToolchainSettings) async throws {
+        guard automaticallySelectForeground else { return }
+        guard let serial = selectedSerial, selectedDevice?.online == true else {
+            throw CommandFailure.configuration("请先选择在线设备。")
+        }
+        resolvingCaptureTarget = true
+        defer { resolvingCaptureTarget = false }
+        let client = InspectorClient(tools: try settings.resolvedTools(requireJava: false))
+        let foreground = try await client.foregroundPackage(serial: serial)
+        try Task.checkCancellation()
+        guard selectedSerial == serial, automaticallySelectForeground else { throw CancellationError() }
+        guard let foreground, InspectorClient.validPackage(foreground) else {
+            throw CommandFailure.failed("未找到前台应用，请在设备上打开目标应用后重试，或取消自动获取并手动选择。")
+        }
+        packageName = foreground
+    }
+
     func capture(settings: ToolchainSettings) async throws -> CapturedSnapshot {
         guard !capturing, let device = selectedDevice, device.online else { throw CommandFailure.configuration("请先选择在线设备。") }
         let package = packageName.trimmingCharacters(in: .whitespacesAndNewlines)
         let client = InspectorClient(tools: try settings.resolvedTools())
         capturing = true
         defer { capturing = false; captureTask = nil; progress = "" }
+        let verifyConsistency = settings.verifyCaptureConsistency
         let task = Task { [weak self] in
-            try await client.capture(serial: device.serial, package: package, deviceName: device.model) { [weak session = self] value in
+            try await client.capture(serial: device.serial, package: package, deviceName: device.model, verifyConsistency: verifyConsistency) { [weak session = self] value in
                 await session?.setProgress(value)
             }
         }
@@ -74,7 +120,7 @@ struct ApplicationPickerView: View {
             Text("选择应用").font(.headline)
             TextField("搜索或输入应用包名", text: $session.packageSearch).textFieldStyle(.roundedBorder)
             List(session.packages.filter { session.packageSearch.isEmpty || $0.localizedCaseInsensitiveContains(session.packageSearch) }, id: \.self) { package in
-                Button { session.packageName = package; dismiss() } label: {
+                Button { session.automaticallySelectForeground = false; session.packageName = package; dismiss() } label: {
                     HStack { Text(package).font(.system(size: 12, design: .monospaced)); Spacer(); if session.packageName == package { Image(systemName: "checkmark") } }
                         .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.plain)
@@ -84,7 +130,7 @@ struct ApplicationPickerView: View {
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("使用输入的包名") { session.packageName = session.packageSearch; dismiss() }
+                Button("使用输入的包名") { session.automaticallySelectForeground = false; session.packageName = session.packageSearch; dismiss() }
                     .disabled(!InspectorClient.validPackage(session.packageSearch))
             }
         }.padding(18).frame(width: 620, height: 440)

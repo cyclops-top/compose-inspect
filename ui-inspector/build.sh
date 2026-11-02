@@ -2,6 +2,10 @@
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 WORKSPACE="$ROOT/vendor/android"
+# Exact-version inspector repair; rebuild from checksum-pinned inputs if not present.
+if [ ! -f "$WORKSPACE/tools/base/ui-inspector/core/compat/compose-1.12.1-metadata-2.4.21.jar" ]; then
+  python3 "$ROOT/compat/build.py"
+fi
 export JAVA_HOME="$WORKSPACE/prebuilts/studio/jdk/jbr25/mac-arm64/Contents/Home"
 export ANDROID_HOME="$WORKSPACE/prebuilts/studio/sdk/darwin"
 export ANDROID_SDK_ROOT="$ANDROID_HOME"

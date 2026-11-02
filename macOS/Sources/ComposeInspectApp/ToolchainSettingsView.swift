@@ -9,6 +9,9 @@ struct ToolchainSettingsView: View {
             ScrollView { toolsPage }.tabItem { Label("工具环境", systemImage: "wrench.and.screwdriver") }
             capturePage.tabItem { Label("检查", systemImage: "viewfinder") }
         }.frame(width: 620, height: 580)
+        .task(id: [settings.adbOverride, settings.javaOverride, settings.inspectorJarOverride]) {
+            await settings.validateEnvironment()
+        }
     }
 
     private var toolsPage: some View {
@@ -21,6 +24,15 @@ struct ToolchainSettingsView: View {
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             }
+            if !settings.environmentProblems.isEmpty {
+                Text(settings.environmentProblems.joined(separator: "\n"))
+                    .font(.system(size: 11)).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("UI Inspector 抓取需要 Java 25 或更新版本，以及可运行的 ADB。")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            Button("重新检测全部工具") { Task { await settings.validateEnvironment() } }
+                .disabled(!settings.checking.isEmpty)
             toolSection(.adb, path: $settings.adbOverride, placeholder: "留空使用 ANDROID_HOME / PATH")
             toolSection(.java, path: $settings.javaOverride, placeholder: "留空使用 JAVA_HOME / PATH")
             HStack(alignment: .top, spacing: 7) {
@@ -55,6 +67,9 @@ struct ToolchainSettingsView: View {
             Text(settings.inspectorJar?.path ?? "未找到内置 JAR")
                 .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
             Divider()
+            Toggle("采集一致性校验", isOn: $settings.verifyCaptureConsistency)
+            Text("默认关闭，只获取一次节点树和截图。开启后采集两轮并检查界面是否变化，耗时更长。")
+                .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Toggle("抓取属性来源链（resolution-stack）", isOn: $settings.includeResolutionStack)
             Text("首次开启会修改设备的调试属性设置，并可能重启目标 Activity；该设备设置会持续保留。默认关闭。关闭此开关仅停止请求来源链，不会自动还原设备设置。")
                 .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

@@ -12,6 +12,21 @@ struct ComposeInspectApp: App {
             WorkspaceView(store: store)
                 .environment(toolchain)
                 .onAppear { appDelegate.store = store }
+                .sheet(isPresented: $toolchain.showEnvironmentSetup) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("抓取环境需要配置", systemImage: "exclamationmark.triangle.fill")
+                            .font(.headline).foregroundStyle(.orange)
+                        Text("启动检测发现工具缺失或版本不兼容，请在下方配置后重新检测。")
+                            .font(.callout)
+                        ToolchainSettingsView(settings: toolchain)
+                        HStack {
+                            Spacer()
+                            Button("稍后配置") { toolchain.showEnvironmentSetup = false }
+                            Button("完成") { toolchain.showEnvironmentSetup = false }
+                                .disabled(!toolchain.environmentProblems.isEmpty || !toolchain.checking.isEmpty)
+                        }
+                    }.padding(20)
+                }
         }
         .defaultSize(width: 1080, height: 780)
         .windowStyle(.hiddenTitleBar)
@@ -27,6 +42,15 @@ struct ComposeInspectApp: App {
                 Divider()
                 Toggle("显示组件线框", isOn: $store.showWireframes).keyboardShortcut("b", modifiers: [.command, .shift])
                 Button("适合窗口") { store.fitImage() }.keyboardShortcut("0")
+                Divider()
+                Button("复制 AI 定位信息") { store.copyCurrentLocator() }
+                    .keyboardShortcut("c", modifiers: [.command, .option]).disabled(store.selectedNodeID == nil)
+                Button("选择父组件") { if let id = store.selectedParentID { store.select(id) } }
+                    .keyboardShortcut(.upArrow, modifiers: [.command, .option]).disabled(store.selectedParentID == nil)
+                Button("上一个重叠组件") { store.cycleHitCandidate(-1) }
+                    .keyboardShortcut("[", modifiers: [.command, .option]).disabled(store.hitCandidates.count < 2)
+                Button("下一个重叠组件") { store.cycleHitCandidate(1) }
+                    .keyboardShortcut("]", modifiers: [.command, .option]).disabled(store.hitCandidates.count < 2)
                 Divider()
                 Button("复制全部问题") { store.copyAllIssues() }
                     .keyboardShortcut("c", modifiers: [.command, .shift]).disabled(store.issues.isEmpty)

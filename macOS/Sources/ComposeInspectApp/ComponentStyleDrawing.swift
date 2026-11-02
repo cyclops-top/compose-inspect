@@ -11,7 +11,23 @@ enum ComponentStyleDrawing {
     }
 
     static func path(in rect: CGRect, shape: ComponentStyle.Shape?, scale: CGFloat) -> Path {
-        guard let shape, shape.kind == "rounded" else { return Path(rect) }
+        guard let shape else { return Path(rect) }
+        if shape.kind == "cut" {
+            let tl = shape.topLeft * scale, tr = shape.topRight * scale
+            let bl = shape.bottomLeft * scale, br = shape.bottomRight * scale
+            return Path { path in
+                path.move(to: CGPoint(x: rect.minX + tl, y: rect.minY))
+                path.addLine(to: CGPoint(x: rect.maxX - tr, y: rect.minY))
+                path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + tr))
+                path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - br))
+                path.addLine(to: CGPoint(x: rect.maxX - br, y: rect.maxY))
+                path.addLine(to: CGPoint(x: rect.minX + bl, y: rect.maxY))
+                path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - bl))
+                path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + tl))
+                path.closeSubpath()
+            }
+        }
+        guard shape.kind == "rounded" else { return Path(rect) }
         return UnevenRoundedRectangle(topLeadingRadius: shape.topLeft * scale,
             bottomLeadingRadius: shape.bottomLeft * scale, bottomTrailingRadius: shape.bottomRight * scale,
             topTrailingRadius: shape.topRight * scale, style: .circular).path(in: rect)

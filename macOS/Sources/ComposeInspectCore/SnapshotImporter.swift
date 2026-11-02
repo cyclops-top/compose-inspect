@@ -28,8 +28,33 @@ public enum SnapshotImporter {
                                  roots: roots, document: document, captureMetadata: metadata)
     }
 
-    private static func convert(_ raw: InspectorJSON, pointer: String, catalog inherited: ComponentStyleCatalog? = nil) throws -> InspectorNode {
-        let catalog = ComponentStyleCatalog(node: raw) ?? inherited
+    private static func convert(_ raw: InspectorJSON, pointer: String) throws -> InspectorNode {
+        // Conversion has a large stack frame in debug builds. Keep depth on the heap so real
+        // Compose trees can be decoded safely on Swift concurrency worker threads.
+        var pending: [(raw: InspectorJSON, pointer: String, catalog: ComponentStyleCatalog?, ready: Bool)] = [(raw, pointer, nil, false)]
+        var converted: [String: InspectorNode] = [:]
+        while let frame = pending.popLast() {
+            let children: [InspectorJSON]
+            if let value = frame.raw["children"] {
+                guard let array = value.array else { throw SnapshotImportError.schema("\(frame.pointer)/children 不是数组") }
+                children = array
+            } else { children = [] }
+            if frame.ready {
+                let nodes = children.indices.map { converted.removeValue(forKey: "\(frame.pointer)/children/\($0)")! }
+                converted[frame.pointer] = try convertNode(frame.raw, pointer: frame.pointer, catalog: frame.catalog, convertedChildren: nodes)
+            } else {
+                let catalog = ComponentStyleCatalog(node: frame.raw) ?? frame.catalog
+                pending.append((frame.raw, frame.pointer, catalog, true))
+                for index in children.indices.reversed() {
+                    pending.append((children[index], "\(frame.pointer)/children/\(index)", catalog, false))
+                }
+            }
+        }
+        return converted[pointer]!
+    }
+
+    private static func convertNode(_ raw: InspectorJSON, pointer: String, catalog: ComponentStyleCatalog?,
+                                    convertedChildren: [InspectorNode]) throws -> InspectorNode {
         guard let kind = raw["type"]?.string, let id = raw["id"]?.int64, let name = raw["className"]?.string,
               let bounds = raw["bounds"], let x = bounds["x"]?.double, let y = bounds["y"]?.double,
               let width = bounds["width"]?.double, let height = bounds["height"]?.double else {
@@ -44,25 +69,16 @@ public enum SnapshotImporter {
                 parameters += try flatten(values, group: group, pointer: pointer + "/" + namespace).filter { $0.name != ComponentStyleCatalog.attribute }
             }
         }
-        let label = parameters.first {
-            ["text", "contentdescription", "testtag"].contains($0.name.lowercased())
-                && !$0.value.isEmpty && $0.value.count <= 80 && !$0.isTruncated && $0.original?["value"]?.string != nil
-        }?.value
+        let label = parameters.lazy.filter {
+            ["text", "contentdescription"].contains($0.name.lowercased())
+        }.compactMap { $0.original.flatMap(Self.labelText) }.first
         let source = raw["sourceLocation"].flatMap { source -> SourceAnchor? in
             guard let file = source["fileName"]?.string else { return nil }
             return SourceAnchor(file: file, line: source["lineNumber"]?.int64.flatMap(Int.init(exactly:)))
         }
-        let children: [InspectorJSON]
-        if let value = raw["children"] {
-            guard let array = value.array else { throw SnapshotImportError.schema("\(pointer)/children 不是数组") }
-            children = array
-        } else { children = [] }
         let contentBounds = CGRect(x: x, y: y, width: width, height: height)
         let virtual = kind == "ComposeNode" && InspectorNode.isVirtualLayoutGroup(name: name, source: source)
-        let style = kind == "ComposeNode" && !virtual ? catalog?.style(for: contentBounds) : nil
-        let convertedChildren = try children.enumerated().map {
-            try convert($0.element, pointer: "\(pointer)/children/\($0.offset)", catalog: catalog)
-        }
+        let style = kind == "ComposeNode" && !virtual ? catalog?.style(for: contentBounds, node: raw) : nil
         // Real layouts include only their own measured modifier envelope, including layers
         // placed outside a custom layout's reported size. Only composition wrappers borrow
         // descendants' bounds; clipping/scrolling parents must not expand to fit their children.
@@ -93,6 +109,27 @@ public enum SnapshotImporter {
             }
         }
         return result
+    }
+
+    /// Collection values such as List[1] describe the container, not visible or accessible text.
+    /// Keep the original parameter untouched; only the presentation label unwraps its strings.
+    private static func labelText(_ raw: InspectorJSON) -> String? {
+        guard raw["isTruncated"]?.boolean != true else { return nil }
+        let text: String
+        if raw["isCollection"]?.boolean == true {
+            guard let elements = raw["elements"]?.array, !elements.isEmpty else { return nil }
+            var parts: [String] = []
+            for element in elements {
+                guard let value = labelText(element) else { return nil }
+                parts.append(value)
+            }
+            text = parts.joined(separator: " · ")
+        } else {
+            guard let value = raw["value"]?.string else { return nil }
+            text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard !text.isEmpty, text.count <= 80 else { return nil }
+        return text
     }
 
     private static func displayValue(_ value: InspectorJSON) -> String {

@@ -42,16 +42,15 @@ struct IssuesWorkspaceView: View {
     private var aiPreview: some View {
         let text = store.currentText
         return ScrollView {
-            Text(text.isEmpty ? "选择组件并输入描述后，这里显示 AI 定位文本。" : text)
+            Text(text.isEmpty ? "选中组件即可复制定位信息；也可补充修改要求。" : text)
                 .font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
                 .foregroundStyle(text.isEmpty ? .secondary : .primary)
                 .frame(maxWidth: .infinity, alignment: .topLeading).padding(14).padding(.bottom, 56)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.quaternary.opacity(0.15)).accessibilityLabel("AI 定位文本预览")
             .overlay(alignment: .bottomTrailing) {
-                copyButton("复制当前问题", disabled: text.isEmpty) {
-                    NSApp.keyWindow?.makeFirstResponder(nil)
-                    store.copy(store.currentText)
+                copyButton("复制 AI 定位信息（⌘⌥C）", disabled: text.isEmpty) {
+                    store.copyCurrentLocator()
                 }
             }
     }
@@ -72,10 +71,10 @@ struct IssuesWorkspaceView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(store.selectedNode.map { "当前组件 · \($0.displayName)" } ?? "选择组件后输入描述")
                 .font(.system(size: 12, weight: .medium)).lineLimit(1)
-            if let node = store.selectedNode, let key = store.selectedKey {
+            if store.selectedNode != nil, let key = store.selectedKey {
                 let revision = store.issueEditRevision
                 HStack {
-                    Text(node.source?.text ?? "无源码位置")
+                    Text(store.sourceSummary)
                         .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
                     Spacer(minLength: 5)
                     Text(store.currentIssue == nil ? "未记录" : "已自动记录")
@@ -88,7 +87,7 @@ struct IssuesWorkspaceView: View {
                     .background(.background, in: RoundedRectangle(cornerRadius: 6))
                     .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(AppStyle.divider.opacity(0.6)))
                     .frame(minHeight: 60, maxHeight: .infinity)
-                Text("输入即记录，留空不记录。")
+                Text("描述可选；留空也能复制组件定位信息。")
                     .font(.system(size: 10)).foregroundStyle(.tertiary)
             } else {
                 EmptyState(icon: "cursorarrow.click", title: "先选择一个组件", subtitle: "在截图或组件树中选择后，直接输入描述。")

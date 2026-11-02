@@ -63,6 +63,10 @@ internal class ComposeInspectorResolution(val overrideJar: Path?, val cacheDir: 
     if (versionProblem != null) {
       throw IOException(versionProblem)
     }
+    ComposeInspectorCompatibility.resolve(version, cacheDir)?.let { jar ->
+      logger.log(LogLevel.PROGRESS, "Using Compose $version compatibility inspector (kotlin-metadata-jvm 2.4.21): $jar")
+      return jar
+    }
     val artifactId = getComposeArtifactId(version)
 
     val maven = MavenArtifactResolver(downloader, cacheDir)

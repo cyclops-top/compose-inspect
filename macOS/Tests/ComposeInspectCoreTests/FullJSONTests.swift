@@ -91,6 +91,24 @@ final class FullJSONTests: XCTestCase {
         XCTAssertEqual(restored.document?.originalJSON, Data(fixture.utf8))
     }
 
+    func testCaptureContextPreservesParsedTreeOriginalBytesAndIdentity() throws {
+        var snapshot = try SnapshotImporter.decode(Data(fixture.utf8), imageSize: CGSize(width: 1080, height: 2220), packageName: "app.example")
+        snapshot.parameterReads = [ParameterRead(nodeID: "node", parameterID: "parameter", token: "token",
+                                                 document: try InspectorDocument(data: Data("{}".utf8)))]
+        let metadata = CaptureMetadata(serial: "device", packageName: "app.example", startedAt: Date(), finishedAt: Date(),
+                                      includeFacets: "attributes", stableLayout: true, stableImage: false,
+                                      diagnostics: ["diagnostic"], baselineJSON: Data(fixture.utf8))
+        let result = snapshot.withCaptureContext(deviceName: "Pixel", metadata: metadata)
+        XCTAssertEqual(result.id, snapshot.id)
+        XCTAssertEqual(result.capturedAt, snapshot.capturedAt)
+        XCTAssertEqual(result.roots, snapshot.roots)
+        XCTAssertEqual(result.document, snapshot.document)
+        XCTAssertEqual(result.document?.originalJSON, Data(fixture.utf8))
+        XCTAssertEqual(result.parameterReads, snapshot.parameterReads)
+        XCTAssertEqual(result.deviceName, "Pixel")
+        XCTAssertEqual(result.captureMetadata, metadata)
+    }
+
     func testInvalidJSONIsRejectedInsteadOfPartlyAccepted() {
         for bad in ["01", "[1,]", "{\"x\":1,}", "NaN", "1e", "1.", "true false", "\"unterminated", "[null"] {
             XCTAssertThrowsError(try InspectorJSON.parse(Data(bad.utf8)), bad)
