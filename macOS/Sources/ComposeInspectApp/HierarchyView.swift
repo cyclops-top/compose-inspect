@@ -1,3 +1,4 @@
+import CoreText
 import ComposeInspectCore
 import AppKit
 import SwiftUI
@@ -22,12 +23,14 @@ struct HierarchyView: View {
                 .background(.background, in: RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(AppStyle.divider.opacity(0.5)))
                 .padding(.horizontal, 10).padding(.bottom, 8)
-            HStack(spacing: 12) {
+            HStack(spacing: 6) {
                 Toggle("精简", isOn: $store.hideInternalNodes)
                     .disabled(store.onlyClickableNodes)
                     .help(store.onlyClickableNodes ? "仅可点击模式必须开启精简" : "隐藏内部实现及 Android 宿主容器，保留子组件")
                 Toggle("仅可点击", isOn: $store.onlyClickableNodes)
                     .help("保留窗口根节点及具有点击动作的组件，并自动开启精简")
+                Toggle("仅有源码", isOn: $store.onlySourceNodes)
+                    .help("保留窗口根节点和自身有源码位置的组件；SDK 已关联工程时，仅显示能匹配工程文件的组件")
                 Spacer(minLength: 0)
                 Button { showingFilterConfiguration = true } label: {
                     Image(systemName: "gearshape")
@@ -38,11 +41,23 @@ struct HierarchyView: View {
                 Text("多个窗口 · 在预览中选择窗口")
                     .font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 6)
             }
+            if store.searchesAllComponents {
+                Button("正在搜索全部组件 · 恢复筛选") { store.searchesAllComponents = false }
+                    .font(.caption)
+            }
             NativeHierarchyView(store: store)
+                .overlay {
+                    if store.searchMatches?.isEmpty == true {
+                        VStack(spacing: 8) {
+                            Text("未找到“\(store.search)”").lineLimit(3)
+                            if (store.hideInternalNodes || store.onlySourceNodes) && !store.searchesAllComponents {
+                                Button("在全部组件中搜索") { store.searchesAllComponents = true }
+                            }
+                        }.font(.callout).padding().multilineTextAlignment(.center)
+                    }
+                }
             HStack(spacing: 5) {
-                Text("C").font(.system(size: 9, weight: .semibold, design: .monospaced))
-                Text("Compose").font(.system(size: 10))
-                Text("·  V View").font(.system(size: 10))
+                Text("数字表示层级 · 根节点为 0").font(.system(size: 10))
                 Spacer()
             }.foregroundStyle(.tertiary).padding(12)
         }.background(AppStyle.sidebar)
@@ -83,7 +98,7 @@ struct NativeHierarchyView: NSViewRepresentable {
         scroll.documentView = outline
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = true
-        scroll.usesPredominantAxisScrolling = true
+        scroll.usesPredominantAxisScrolling = false
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         context.coordinator.outline = outline
@@ -98,13 +113,16 @@ struct NativeHierarchyView: NSViewRepresentable {
         let node: InspectorNode
         var children: [Item] = []
         var depth: Int
+        let hierarchyDepth: Int
         var continuesParentChain = false
         let textWidth: CGFloat
         init(node: InspectorNode, depth: Int) {
             self.node = node
             self.depth = depth
+            self.hierarchyDepth = depth
             let title = node.shortName + (node.label.map { " " + $0.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ") } ?? "")
             textWidth = (title as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)]).width
+                + max(0, (String(depth) as NSString).size(withAttributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)]).width + 4 - 14)
         }
     }
 
@@ -158,7 +176,7 @@ struct NativeHierarchyView: NSViewRepresentable {
                         }
                     }
                 }
-                let visibleIDs = query.isEmpty ? nil : index.matchingIDs(query)
+                let visibleIDs = store.searchMatches
                 for item in items.values {
                     item.children = item.node.children.compactMap {
                         visibleIDs?.contains($0.id) == false ? nil : items[$0.id]
@@ -192,7 +210,7 @@ struct NativeHierarchyView: NSViewRepresentable {
             let rows = outline.rows(in: outline.visibleRect)
             for row in rows.location..<(rows.location + rows.length) {
                 if let item = outline.item(atRow: row) as? Item,
-                   let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView {
+                   let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? HierarchyNodeCellView {
                     configure(cell, for: item)
                 }
             }
@@ -204,9 +222,9 @@ struct NativeHierarchyView: NSViewRepresentable {
             let rowRect = outline.rect(ofRow: row)
             var left = CGFloat(item.depth) * outline.indentationPerLevel + 16
             var right = left + 24 + item.textWidth
-            if let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView {
+            if let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: true) as? HierarchyNodeCellView {
                 cell.layoutSubtreeIfNeeded()
-                if let icon = cell.imageView { left = icon.convert(icon.bounds, to: outline).minX }
+                left = cell.depthLabel.convert(cell.depthLabel.bounds, to: outline).minX
                 if let label = cell.textField {
                     right = label.convert(label.bounds, to: outline).minX + label.attributedStringValue.size().width + 4
                 }
@@ -254,14 +272,18 @@ struct NativeHierarchyView: NSViewRepresentable {
         func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
             let item = item as! Item
             let identifier = NSUserInterfaceItemIdentifier("nodeCell")
-            let cell: NSTableCellView
-            if let reused = outlineView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView { cell = reused }
+            let cell: HierarchyNodeCellView
+            if let reused = outlineView.makeView(withIdentifier: identifier, owner: self) as? HierarchyNodeCellView { cell = reused }
             else {
-                cell = NSTableCellView()
+                cell = HierarchyNodeCellView()
                 cell.identifier = identifier
-                let icon = NSImageView()
+                let depthLabel = cell.depthLabel
+                depthLabel.translatesAutoresizingMaskIntoConstraints = false
+                depthLabel.font = .monospacedDigitSystemFont(ofSize: 9, weight: .regular)
+                depthLabel.textColor = .tertiaryLabelColor
+                depthLabel.alignment = .center
+                depthLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
                 let label = NSTextField(labelWithString: "")
-                icon.translatesAutoresizingMaskIntoConstraints = false
                 label.translatesAutoresizingMaskIntoConstraints = false
                 label.lineBreakMode = .byTruncatingTail
                 label.maximumNumberOfLines = 1
@@ -269,13 +291,14 @@ struct NativeHierarchyView: NSViewRepresentable {
                 label.cell?.wraps = false
                 label.cell?.isScrollable = true
                 label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-                cell.addSubview(icon); cell.addSubview(label)
-                cell.imageView = icon; cell.textField = label
+                cell.addSubview(depthLabel); cell.addSubview(label)
+                cell.textField = label
                 NSLayoutConstraint.activate([
-                    icon.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
-                    icon.widthAnchor.constraint(equalToConstant: 14), icon.heightAnchor.constraint(equalToConstant: 14),
-                    icon.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                    label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 5),
+                    depthLabel.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
+                    cell.depthWidth,
+                    depthLabel.heightAnchor.constraint(equalToConstant: 14),
+                    depthLabel.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                    label.leadingAnchor.constraint(equalTo: depthLabel.trailingAnchor, constant: 5),
                     label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -6),
                     label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
                 ])
@@ -284,11 +307,12 @@ struct NativeHierarchyView: NSViewRepresentable {
             return cell
         }
 
-        private func configure(_ cell: NSTableCellView, for item: Item) {
+        private func configure(_ cell: HierarchyNodeCellView, for item: Item) {
             let node = item.node
-            cell.imageView?.image = NSImage(systemSymbolName: node.kind == "ViewNode" ? "v.square" : "c.square",
-                                           accessibilityDescription: node.kind == "ViewNode" ? "View" : "Compose")
-            cell.imageView?.contentTintColor = .secondaryLabelColor
+            cell.depthLabel.stringValue = String(item.hierarchyDepth)
+            cell.depthWidth.constant = max(14, ceil(cell.depthLabel.intrinsicContentSize.width) + 4)
+            cell.depthLabel.toolTip = "层级 \(item.hierarchyDepth)"
+            cell.depthLabel.setAccessibilityLabel("层级 \(item.hierarchyDepth)")
             let text = NSMutableAttributedString(string: node.shortName, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)])
             if let label = node.label {
                 let singleLine = label.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ")
@@ -299,7 +323,7 @@ struct NativeHierarchyView: NSViewRepresentable {
             }
             cell.textField?.attributedStringValue = text
             cell.toolTip = node.displayName + (node.source.map { " · \($0.text)" } ?? "")
-            cell.setAccessibilityLabel(node.displayName)
+            cell.setAccessibilityLabel(node.displayName + "，层级 \(item.hierarchyDepth)")
         }
 
         func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -328,6 +352,39 @@ struct NativeHierarchyView: NSViewRepresentable {
             updateContentWidth()
         }
     }
+}
+
+private final class HierarchyDepthLabel: NSTextField {
+    override func draw(_ dirtyRect: NSRect) {
+        // Center the visible digit outlines rather than NSTextField's baseline box.
+        if let context = NSGraphicsContext.current?.cgContext {
+            let text = NSAttributedString(string: stringValue, attributes: [
+                .font: font ?? NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular),
+                .foregroundColor: textColor ?? NSColor.tertiaryLabelColor,
+            ])
+            let line = CTLineCreateWithAttributedString(text)
+            let inkBounds = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+            context.saveGState()
+            if isFlipped {
+                context.translateBy(x: 0, y: bounds.height)
+                context.scaleBy(x: 1, y: -1)
+            }
+            context.textMatrix = .identity
+            context.textPosition = CGPoint(x: bounds.midX - inkBounds.midX,
+                                           y: bounds.midY - inkBounds.midY)
+            CTLineDraw(line, context)
+            context.restoreGState()
+        }
+        NSColor.tertiaryLabelColor.setStroke()
+        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3)
+        border.lineWidth = 1
+        border.stroke()
+    }
+}
+
+private final class HierarchyNodeCellView: NSTableCellView {
+    let depthLabel = HierarchyDepthLabel(labelWithString: "")
+    lazy var depthWidth = depthLabel.widthAnchor.constraint(equalToConstant: 14)
 }
 
 /// Preserve the native hierarchy for navigation and accessibility, but lay out single-child

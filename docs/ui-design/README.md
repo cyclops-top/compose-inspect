@@ -1,4 +1,4 @@
-# ComposeInspect UI 设计
+# CompScope UI 设计
 
 面向 Android Jetpack Compose 开发的 macOS 检查工具。通过截图选择组件，查看节点信息，并将必要定位信息和修改要求复制为简短文本，交给 AI 修复。
 

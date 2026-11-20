@@ -5,6 +5,8 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -12,10 +14,18 @@ import org.json.JSONObject;
 /** Optional, version-tolerant Compose tooling adapter. No Compose classes are linked into the agent. */
 final class ComposeStyles {
     static final String ATTRIBUTE = "composeinspect.styleLayers.v1";
+    // Capture-local metadata only: never retain app classes or mutable layout values across dumps.
+    private final Map<Class<?>, Method[]> methods = new HashMap<>();
+    private final Map<Class<?>, Map<String, Method>> resolvedMethods = new HashMap<>();
+    private final Map<Class<?>, Map<String, Field>> fields = new HashMap<>();
     private ComposeStyles() {}
 
     static String capture(View view) {
         if (!view.getClass().getName().endsWith("AndroidComposeView")) return null;
+        return new ComposeStyles().captureView(view);
+    }
+
+    private String captureView(View view) {
         JSONObject result = new JSONObject();
         JSONArray records = new JSONArray();
         JSONArray errors = new JSONArray();
@@ -37,7 +47,7 @@ final class ComposeStyles {
         return result.toString();
     }
 
-    private static void visit(Object node, int dx, int dy, JSONArray records, JSONArray errors,
+    private void visit(Object node, int dx, int dy, JSONArray records, JSONArray errors,
             Set<Object> visited) throws Exception {
         if (node == null || !visited.add(node)) return;
         try {
@@ -71,9 +81,17 @@ final class ComposeStyles {
         }
     }
 
-    private static JSONObject layer(Object modifier, Object coords, Object node, int dx, int dy) throws Exception {
+    private JSONObject layer(Object modifier, Object coords, Object node, int dx, int dy) throws Exception {
         String name = modifier.getClass().getName();
         String simple = modifier.getClass().getSimpleName();
+        // Reject irrelevant modifiers before any coordinate reflection or JSON allocation.
+        boolean padding = name.startsWith("androidx.compose.foundation.layout.")
+                && (simple.equals("PaddingElement") || simple.equals("PaddingValuesElement"));
+        boolean background = name.equals("androidx.compose.foundation.BackgroundElement");
+        boolean clip = name.startsWith("androidx.compose.ui.graphics.")
+                && Boolean.TRUE.equals(optionalField(modifier, "clip"));
+        if (!padding && !background && !clip && !simple.contains("Padding")
+                && !name.contains("Draw") && !name.contains("GraphicsLayer")) return null;
         JSONObject layer = new JSONObject();
         layer.put("name", name);
         layer.put("bounds", bounds(coords, dx, dy));
@@ -108,10 +126,10 @@ final class ComposeStyles {
                 layer.put("argb", String.format(java.util.Locale.ROOT, "%08X", argb));
                 layer.put("alpha", number(field(modifier, "alpha")));
             }
-            layer.put("shape", shape(field(modifier, "shape"), coords, node));
-        } else if (name.startsWith("androidx.compose.ui.graphics.") && Boolean.TRUE.equals(optionalField(modifier, "clip"))) {
+            layer.put("shape", readShape(field(modifier, "shape"), coords, node));
+        } else if (clip) {
             layer.put("kind", "clip");
-            layer.put("shape", shape(field(modifier, "shape"), coords, node));
+            layer.put("shape", readShape(field(modifier, "shape"), coords, node));
         } else if (simple.contains("Padding")) {
             layer.put("kind", "unsupported");
             layer.put("unsupported", "未解析的 padding: " + name);
@@ -123,6 +141,10 @@ final class ComposeStyles {
     }
 
     static JSONObject shape(Object shape, Object coords, Object node) throws Exception {
+        return new ComposeStyles().readShape(shape, coords, node);
+    }
+
+    private JSONObject readShape(Object shape, Object coords, Object node) throws Exception {
         String name = shape.getClass().getName();
         JSONObject result = new JSONObject().put("name", name).put("kind", "unknown");
         if (name.equals("androidx.compose.ui.graphics.RectangleShape")
@@ -159,7 +181,7 @@ final class ComposeStyles {
                 .put("bottomLeft", (rtl ? be : bs)).put("bottomRight", (rtl ? bs : be)));
     }
     // Original units are optional: custom CornerSize remains measured without inventing its input.
-    private static JSONObject cornerConfiguration(Object corner) throws Exception {
+    private JSONObject cornerConfiguration(Object corner) throws Exception {
         String name = corner.getClass().getName();
         String unit, fieldName;
         if (name.equals("androidx.compose.foundation.shape.DpCornerSize")) { unit = "dp"; fieldName = "size"; }
@@ -172,12 +194,12 @@ final class ComposeStyles {
         if (!Double.isFinite(number) || number < 0) return null;
         return new JSONObject().put("value", number).put("unit", unit);
     }
-    private static double ratio(double size, double sum) { return sum == 0 ? 1 : size / sum; }
-    private static double number(Object value) { return ((Number) value).doubleValue(); }
-    private static long pack(float x, float y) {
+    private double ratio(double size, double sum) { return sum == 0 ? 1 : size / sum; }
+    private double number(Object value) { return ((Number) value).doubleValue(); }
+    private long pack(float x, float y) {
         return ((long) Float.floatToRawIntBits(x) << 32) | (Float.floatToRawIntBits(y) & 0xffffffffL);
     }
-    private static JSONObject bounds(Object coords, int dx, int dy) throws Exception {
+    private JSONObject bounds(Object coords, int dx, int dy) throws Exception {
         long size = ((Number) call(coords, "getSize")).longValue();
         float w = (int) (size >> 32), h = (int) size;
         double minX = Double.POSITIVE_INFINITY, minY = minX, maxX = -minX, maxY = -minX;
@@ -192,31 +214,49 @@ final class ComposeStyles {
                 .put("width", Math.round(maxX) - Math.round(minX))
                 .put("height", Math.round(maxY) - Math.round(minY));
     }
-    private static Object optionalField(Object target, String name) {
+    private Object optionalField(Object target, String name) {
         try { return field(target, name); } catch (Exception ignored) { return null; }
     }
-    private static Object field(Object target, String name) throws Exception {
-        for (Class<?> cls = target.getClass(); cls != null; cls = cls.getSuperclass()) {
-            try { Field f = cls.getDeclaredField(name); f.setAccessible(true); return f.get(target); }
-            catch (NoSuchFieldException ignored) { }
+    private Object field(Object target, String name) throws Exception {
+        Class<?> type = target.getClass();
+        Map<String, Field> cache = fields.computeIfAbsent(type, ignored -> new HashMap<>());
+        if (!cache.containsKey(name)) {
+            Field found = null;
+            for (Class<?> cls = type; cls != null; cls = cls.getSuperclass()) {
+                try { found = cls.getDeclaredField(name); found.setAccessible(true); break; }
+                catch (NoSuchFieldException ignored) { }
+            }
+            cache.put(name, found);
         }
-        throw new NoSuchFieldException(target.getClass().getName() + "." + name);
+        Field found = cache.get(name);
+        if (found == null) throw new NoSuchFieldException(type.getName() + "." + name);
+        return found.get(target);
     }
-    private static Object call(Object target, String name, Object... args) throws Exception {
+    private Object call(Object target, String name, Object... args) throws Exception {
         return invoke(target.getClass(), target, name, args);
     }
-    private static Object staticCall(Class<?> cls, String name, Object... args) throws Exception {
+    private Object staticCall(Class<?> cls, String name, Object... args) throws Exception {
         return invoke(cls, null, name, args);
     }
-    private static Object invoke(Class<?> cls, Object target, String name, Object... args) throws Exception {
-        for (Method m : cls.getMethods()) {
-            String actual = m.getName();
-            if ((actual.equals(name) || actual.startsWith(name + "-") || actual.startsWith(name + "$"))
-                    && m.getParameterTypes().length == args.length) {
-                m.setAccessible(true);
-                return m.invoke(target, args);
+    private Object invoke(Class<?> cls, Object target, String name, Object... args) throws Exception {
+        Map<String, Method> cache = resolvedMethods.computeIfAbsent(cls, ignored -> new HashMap<>());
+        String key = name + "/" + args.length;
+        if (!cache.containsKey(key)) {
+            Method found = null;
+            // Preserve the existing first-match and Kotlin mangled-name behavior.
+            for (Method method : methods.computeIfAbsent(cls, Class::getMethods)) {
+                String actual = method.getName();
+                if ((actual.equals(name) || actual.startsWith(name + "-") || actual.startsWith(name + "$"))
+                        && method.getParameterTypes().length == args.length) {
+                    method.setAccessible(true);
+                    found = method;
+                    break;
+                }
             }
+            cache.put(key, found);
         }
-        throw new NoSuchMethodException(cls.getName() + "." + name);
+        Method found = cache.get(key);
+        if (found == null) throw new NoSuchMethodException(cls.getName() + "." + name);
+        return found.invoke(target, args);
     }
 }

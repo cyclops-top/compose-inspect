@@ -19,7 +19,7 @@ final class ComponentLabelTests: XCTestCase {
         XCTAssertEqual(node.displayName, "Button「添加人员」")
         let issue = ComponentIssue(component: ComponentKey(snapshotID: snapshot.id, nodeID: node.id), description: "调整", parameterIDs: [])
         let text = try XCTUnwrap(LocatorTextBuilder.text(for: issue, in: snapshot))
-        XCTAssertTrue(text.contains("Screen.kt:12 · Button「添加人员」"))
+        XCTAssertTrue(text.contains("Screen.kt:12 (Button「添加人员」)"))
         XCTAssertFalse(text.contains("List[1]"))
         XCTAssertEqual(node.parameters.first?.value, "List[1]")
     }
@@ -35,7 +35,7 @@ final class ComponentLabelTests: XCTestCase {
             let node = try XCTUnwrap(snapshot.nodes.first)
             XCTAssertEqual(node.displayName, "Button")
             let issue = ComponentIssue(component: ComponentKey(snapshotID: snapshot.id, nodeID: node.id), description: "调整", parameterIDs: [])
-            XCTAssertTrue(try XCTUnwrap(LocatorTextBuilder.text(for: issue, in: snapshot)).contains("Screen.kt:12 · Button\n"))
+            XCTAssertTrue(try XCTUnwrap(LocatorTextBuilder.text(for: issue, in: snapshot)).contains("Screen.kt:12 (Button)\n"))
         }
     }
     func testUnavailableCollectionFallsBackToRealDescription() throws {

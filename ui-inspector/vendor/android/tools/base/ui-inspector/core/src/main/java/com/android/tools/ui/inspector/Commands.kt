@@ -135,7 +135,9 @@ private suspend fun <T> connectAndRunInspectors(
   block: suspend (CommandSender, Boolean) -> T,
 ): T = coroutineScope {
   try {
-    val injection = injectionManager.injectAndAttach(needsDebugViewAttributes, mode)
+    val injection = timedCaptureStage(logger, "Agent attach/reconnect") {
+      injectionManager.injectAndAttach(needsDebugViewAttributes, mode)
+    }
     val commandSender =
       try {
         CommandSender.connect(host = "127.0.0.1", port = injection.forwardedPort.toInt(), scope = this, responseTimeout = responseTimeout)
@@ -146,9 +148,13 @@ private suspend fun <T> connectAndRunInspectors(
         throw e
       }
     commandSender.use {
-      val viewInspectorDexPath = injectionManager.stageViewInspectorPayload()
+      val viewInspectorDexPath = timedCaptureStage(logger, "View inspector staging") {
+        injectionManager.stageViewInspectorPayload()
+      }
       try {
-        createViewInspector(commandSender, viewInspectorDexPath)
+        timedCaptureStage(logger, "View inspector connection") {
+          createViewInspector(commandSender, viewInspectorDexPath)
+        }
       } catch (e: InspectorCrashException) {
         throw e
       } catch (e: IOException) {
@@ -159,12 +165,28 @@ private suspend fun <T> connectAndRunInspectors(
       }
 
       val composeInspectorConnected =
-        createComposeInspector(commandSender, injectionManager, logger, resolveComposeInspectorJar, composeInspectorOverrideJar)
+        timedCaptureStage(logger, "Compose inspector connection") {
+          createComposeInspector(commandSender, injectionManager, logger, resolveComposeInspectorJar, composeInspectorOverrideJar)
+        }
 
       block(commandSender, composeInspectorConnected)
     }
   } finally {
     withContext(NonCancellable) { injectionManager.removeAdbForward() }
+  }
+}
+
+/** Monotonic wall time, including device work and transport; progress stays off JSON stdout. */
+private suspend fun <T> timedCaptureStage(logger: Logger, name: String, block: suspend () -> T): T {
+  val started = System.nanoTime()
+  logger.log(LogLevel.PROGRESS, "$name: started")
+  try {
+    val result = block()
+    logger.log(LogLevel.PROGRESS, "$name: completed in ${(System.nanoTime() - started) / 1_000_000} ms")
+    return result
+  } catch (failure: Throwable) {
+    logger.log(LogLevel.PROGRESS, "$name: failed after ${(System.nanoTime() - started) / 1_000_000} ms")
+    throw failure
   }
 }
 
@@ -194,7 +216,9 @@ internal suspend fun fetchUiDump(
   includeSemantics: Boolean,
   logger: Logger,
 ): UiDump {
-  val result = dumpViews(commandSender, includeAttributes, includeResolutionStack)
+  val result = timedCaptureStage(logger, "View tree (including Compose styles)") {
+    dumpViews(commandSender, includeAttributes, includeResolutionStack)
+  }
   if (!composeInspectorConnected) return result
   val windows = fetchAndMergeComposeTrees(commandSender, result.windows, includeAttributes, includeSemantics, logger)
   return result.copy(windows = windows)
@@ -213,11 +237,15 @@ private suspend fun fetchAndMergeComposeTrees(
   // Each facet is still an independent demand, so the conversion below only copies the requested ones into the tree.
   val fetchComposeDetails = includeParameters || includeSemantics
 
-  val composeResult = queryComposeTree(commandSender = commandSender, rootViewId = viewRoot.id, extractAllParameters = fetchComposeDetails)
+  val composeResult = timedCaptureStage(logger, "Window ${viewRoot.id}: Compose tree") {
+    queryComposeTree(commandSender = commandSender, rootViewId = viewRoot.id, extractAllParameters = fetchComposeDetails)
+  }
   val stringsMap = composeResult.stringsList.associate { it.id to it.str }
   val roots = composeResult.rootsList
 
-  val composeParameters = if (fetchComposeDetails) queryComposeParameters(commandSender, viewRoot.id) else null
+  val composeParameters = if (fetchComposeDetails) timedCaptureStage(logger, "Window ${viewRoot.id}: Compose parameters") {
+    queryComposeParameters(commandSender, viewRoot.id)
+  } else null
 
   val mergedRoot =
     mergeComposeRoots(

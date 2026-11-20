@@ -2,6 +2,15 @@
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 WORKSPACE="$ROOT/vendor/android"
+# A source-only checkout can rebuild the host and View Inspector using the
+# checksum-pinned bootstrap runtime. Native/protocol changes require Bazel.
+if [ ! -x "$WORKSPACE/prebuilts/bazel/darwin-x86_64/bazel" ]; then
+  if [ "$#" -ne 0 ]; then
+    echo 'Bazel arguments require the full Android workspace; standalone build takes no arguments.' >&2
+    exit 1
+  fi
+  exec python3 "$ROOT/build-standalone.py"
+fi
 # Exact-version inspector repair; rebuild from checksum-pinned inputs if not present.
 if [ ! -f "$WORKSPACE/tools/base/ui-inspector/core/compat/compose-1.12.1-metadata-2.4.21.jar" ]; then
   python3 "$ROOT/compat/build.py"

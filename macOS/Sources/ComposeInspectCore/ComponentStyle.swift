@@ -47,9 +47,10 @@ public struct ComponentStyle: Codable, Equatable, Sendable {
     public let layers: [Layer]
     /// A custom layout can place its own modifier layers outside its reported outer box.
     /// These rectangles are already measured in screen pixels, including padding and offsets.
-    /// Union only this layout's records; never add padding again or borrow child/parent bounds.
+    /// The outer coordinator is a layout allocation, which offset can leave behind at the
+    /// original position. Only content and measured style layers describe the selection area.
     public var selectionBounds: CGRect {
-        ([contentBounds] + layers.map(\.bounds)).reduce(outerBounds) { result, rect in
+        layers.map(\.bounds).reduce(contentBounds) { result, rect in
             guard !rect.isEmpty else { return result }
             return result.isEmpty ? rect : result.union(rect)
         }
@@ -63,14 +64,16 @@ public struct ComponentStyle: Codable, Equatable, Sendable {
 
 /// The AndroidComposeView owns this extension; associations never cross hosts or windows.
 struct ComponentStyleCatalog {
-    static let attribute = "composeinspect.styleLayers.v1"
     let records: [ComponentStyle]
-    init?(node: InspectorJSON) {
-        guard let raw = node["attributes"]?.array?.first(where: { $0["name"]?.string == Self.attribute })?["value"]?.string,
-              let json = try? InspectorJSON.parse(Data(raw.utf8)), json["version"]?.int64 == 1,
+    private let identityRecords: [String: [ComponentStyle]]
+    init?(json: InspectorJSON) {
+        guard json["version"]?.int64 == 1,
               let density = json["density"]?.double, density.isFinite, density > 0,
               let entries = json["records"]?.array else { return nil }
+        var identities: [String: [ComponentStyle]] = [:]
         records = entries.compactMap { entry in
+            let density = entry["density"]?.double ?? density
+            guard density.isFinite, density > 0 else { return nil }
             guard let content = Self.rect(entry["contentBounds"]), let outer = Self.rect(entry["outerBounds"]),
                   let rawLayers = entry["layers"]?.array else { return nil }
             let layers: [ComponentStyle.Layer] = rawLayers.enumerated().compactMap { index, raw in
@@ -99,10 +102,21 @@ struct ComponentStyleCatalog {
             }
             // Reject partial decoding: a missing layer must not look like an absent background.
             guard layers.count == rawLayers.count else { return nil }
-            return ComponentStyle(density: density, contentBounds: content, outerBounds: outer, layers: layers)
+            let style = ComponentStyle(density: density, contentBounds: content, outerBounds: outer, layers: layers)
+            if let identity = entry["layoutIdentity"]?.int64 { identities[String(identity), default: []].append(style) }
+            return style
         }
+        identityRecords = identities
     }
     func style(for bounds: CGRect, node: InspectorJSON? = nil) -> ComponentStyle? {
+        if let identity = node?["sdkLayoutIdentity"]?.int64 {
+            let exact = identityRecords[String(identity)] ?? []
+            // Tooling combines a transformed origin with untransformed width/height.
+            // A proven layout identity lets us use the measured four-corner screen bounds
+            // even when rotation or scale makes that tooling rectangle different.
+            guard let first = exact.first, exact.allSatisfy({ $0 == first }) else { return nil }
+            return first
+        }
         let matches = records.filter { $0.contentBounds == bounds }
         if let first = matches.first, matches.allSatisfy({ $0 == first }) { return first }
         // Equal content rectangles are common for a padded wrapper and its Surface. Only the

@@ -18,6 +18,12 @@
         C00000000000000000000016 = {isa = PBXBuildFile; fileRef = D00000000000000000000016; };
         C00000000000000000000017 = {isa = PBXBuildFile; fileRef = D00000000000000000000017; };
         C00000000000000000000018 = {isa = PBXBuildFile; fileRef = D00000000000000000000018; };
+        C00000000000000000000021 = {isa = PBXBuildFile; fileRef = D00000000000000000000021; };
+        C00000000000000000000026 = {isa = PBXBuildFile; fileRef = D00000000000000000000026; };
+        C00000000000000000000025 = {isa = PBXBuildFile; fileRef = D00000000000000000000025; };
+        C00000000000000000000024 = {isa = PBXBuildFile; fileRef = D00000000000000000000024; };
+        C00000000000000000000023 = {isa = PBXBuildFile; fileRef = D00000000000000000000023; };
+        C00000000000000000000022 = {isa = PBXBuildFile; fileRef = D00000000000000000000022; };
         C00000000000000000000019 = {isa = PBXBuildFile; fileRef = D00000000000000000000019; };
         C00000000000000000000020 = {isa = PBXBuildFile; fileRef = D00000000000000000000020; };
 
@@ -30,7 +36,7 @@
         D00000000000000000000007 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorView.swift; sourceTree = "<group>"; };
         D00000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComponentTextEditor.swift; sourceTree = "<group>"; };
         D00000000000000000000009 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IssuesWorkspaceView.swift; sourceTree = "<group>"; };
-        D00000000000000000000010 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ComposeInspect.app; sourceTree = BUILT_PRODUCTS_DIR; };
+        D00000000000000000000010 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CompScope.app; sourceTree = BUILT_PRODUCTS_DIR; };
         D00000000000000000000011 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Configuration/Info.plist; sourceTree = "<group>"; };
         D00000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Package.swift; sourceTree = "<group>"; };
         D00000000000000000000013 = {isa = PBXFileReference; lastKnownFileType = folder; path = Sources/ComposeInspectCore; sourceTree = "<group>"; };
@@ -39,6 +45,12 @@
         D00000000000000000000016 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolchainSettingsView.swift; sourceTree = "<group>"; };
         D00000000000000000000017 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSession.swift; sourceTree = "<group>"; };
         D00000000000000000000018 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RawJSONView.swift; sourceTree = "<group>"; };
+        D00000000000000000000021 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceNavigationButton.swift; sourceTree = "<group>"; };
+        D00000000000000000000026 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectSourceIndex.swift; sourceTree = "<group>"; };
+        D00000000000000000000025 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeFilterSettingsView.swift; sourceTree = "<group>"; };
+        D00000000000000000000024 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocatorMarkdownRenderer.swift; sourceTree = "<group>"; };
+        D00000000000000000000023 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComponentStyleDrawing.swift; sourceTree = "<group>"; };
+        D00000000000000000000022 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComponentMeasurement.swift; sourceTree = "<group>"; };
         D00000000000000000000019 = {isa = PBXFileReference; lastKnownFileType = archive.jar; name = "ui-inspector.jar"; path = "../ui-inspector/lib/ui-inspector.jar"; sourceTree = SOURCE_ROOT; };
         D00000000000000000000020 = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Configuration/AppIcon.icns; sourceTree = "<group>"; };
 
@@ -47,9 +59,9 @@
             attributes = {BuildIndependentTargetsInParallel = YES; LastUpgradeCheck = 1600; };
             buildConfigurationList = B00000000000000000000001;
             compatibilityVersion = "Xcode 15.0";
-            developmentRegion = en;
+            developmentRegion = "zh-Hans";
             hasScannedForEncodings = 0;
-            knownRegions = (en, Base, "zh-Hans");
+            knownRegions = ("zh-Hans", Base);
             mainGroup = A00000000000000000000002;
             packageReferences = (F00000000000000000000001);
             productRefGroup = A00000000000000000000004;
@@ -64,7 +76,7 @@
         };
         A00000000000000000000003 = {
             isa = PBXGroup;
-            children = (D00000000000000000000001, D00000000000000000000002, D00000000000000000000003, D00000000000000000000004, D00000000000000000000005, D00000000000000000000006, D00000000000000000000007, D00000000000000000000008, D00000000000000000000009, D00000000000000000000015, D00000000000000000000016, D00000000000000000000017, D00000000000000000000018);
+            children = (D00000000000000000000001, D00000000000000000000002, D00000000000000000000003, D00000000000000000000004, D00000000000000000000005, D00000000000000000000006, D00000000000000000000007, D00000000000000000000008, D00000000000000000000009, D00000000000000000000015, D00000000000000000000016, D00000000000000000000017, D00000000000000000000018, D00000000000000000000022, D00000000000000000000023, D00000000000000000000024, D00000000000000000000025, D00000000000000000000021, D00000000000000000000026);
             path = Sources/ComposeInspectApp;
             sourceTree = "<group>";
         };
@@ -75,16 +87,16 @@
             buildPhases = (A00000000000000000000006, A00000000000000000000007, A00000000000000000000008);
             buildRules = ();
             dependencies = ();
-            name = ComposeInspect;
+            name = CompScope;
             packageProductDependencies = (F00000000000000000000002);
-            productName = ComposeInspect;
+            productName = CompScope;
             productReference = D00000000000000000000010;
             productType = "com.apple.product-type.application";
         };
         A00000000000000000000006 = {
             isa = PBXSourcesBuildPhase;
             buildActionMask = 2147483647;
-            files = (C00000000000000000000001, C00000000000000000000002, C00000000000000000000003, C00000000000000000000004, C00000000000000000000005, C00000000000000000000006, C00000000000000000000007, C00000000000000000000008, C00000000000000000000009, C00000000000000000000015, C00000000000000000000016, C00000000000000000000017, C00000000000000000000018);
+            files = (C00000000000000000000001, C00000000000000000000002, C00000000000000000000003, C00000000000000000000004, C00000000000000000000005, C00000000000000000000006, C00000000000000000000007, C00000000000000000000008, C00000000000000000000009, C00000000000000000000015, C00000000000000000000016, C00000000000000000000017, C00000000000000000000018, C00000000000000000000022, C00000000000000000000023, C00000000000000000000024, C00000000000000000000025, C00000000000000000000021, C00000000000000000000026);
             runOnlyForDeploymentPostprocessing = 0;
         };
         A00000000000000000000007 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (C00000000000000000000010); runOnlyForDeploymentPostprocessing = 0; };

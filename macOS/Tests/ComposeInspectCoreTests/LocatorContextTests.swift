@@ -20,12 +20,12 @@ final class LocatorContextTests: XCTestCase {
                                                        description: "文字改为应用信息", parameterIDs: []), in: snapshot)!
         }
         let first = prompt("first"), second = prompt("second")
-        XCTAssertTrue(first.contains("ReaderApp.kt:96 · SettingsScreen\n  → SettingsScreens.kt:47 · SettingsRow\n  → GlassComponents.kt:106 · Text「关于」"))
-        XCTAssertTrue(second.contains("SettingsScreens.kt:75 · SettingsRow"))
+        XCTAssertTrue(first.contains("ReaderApp.kt:96 (SettingsScreen)\n  → SettingsScreens.kt:47 (SettingsRow)\n  → GlassComponents.kt:106 (Text「关于」)"))
+        XCTAssertTrue(second.contains("SettingsScreens.kt:75 (SettingsRow)"))
         XCTAssertNotEqual(first, second)
         XCTAssertFalse(first.contains("GlassComponents.kt:104"))
-        XCTAssertTrue(first.hasPrefix("请按以下要求修改：\n组件路径（采集，省略包装）："))
-        XCTAssertTrue(first.hasSuffix("修改要求：\n文字改为应用信息"))
+        XCTAssertTrue(first.hasPrefix("## 组件路径\n已省略包装组件，末项为目标。\n\n```text"))
+        XCTAssertTrue(first.hasSuffix("## 修改要求\n文字改为应用信息"))
     }
     func testInvalidSourceDoesNotBecomeAnExactLocation() throws {
         let child = InspectorNode(id: "child", rawID: 2, name: "Text", label: "Find me", bounds: .zero,
@@ -35,11 +35,11 @@ final class LocatorContextTests: XCTestCase {
         let snapshot = InspectorSnapshot(packageName: "test.app", deviceName: "test", pixelSize: .zero, roots: [root])
         let issue = ComponentIssue(component: ComponentKey(snapshotID: snapshot.id, nodeID: "child"), description: "", parameterIDs: [])
         let text = try XCTUnwrap(LocatorTextBuilder.text(for: issue, in: snapshot))
-        XCTAssertTrue(text.hasPrefix("请定位以下界面组件："))
+        XCTAssertTrue(text.hasPrefix("## 组件路径\n已省略包装组件，末项为目标。\n\n```text"))
         XCTAssertTrue(text.contains("祖先定位线索：Screen.kt:25 · Screen（非当前组件位置）"))
         XCTAssertTrue(text.contains("资源 ID：app:id/title"))
         XCTAssertTrue(text.contains("布局资源：app:layout/main"))
-        XCTAssertFalse(text.contains("修改要求："))
+        XCTAssertFalse(text.contains("## 修改要求"))
         XCTAssertFalse(text.contains(":-1"))
         XCTAssertEqual(LocatorTextBuilder.usableSource(SourceAnchor(file: "Main.kt", line: 0)), SourceAnchor(file: "Main.kt"))
     }

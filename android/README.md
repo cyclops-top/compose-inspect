@@ -1,0 +1,194 @@
+# ComposeInspect Android SDK 验证工程
+
+验证业务应用**只增加 `debugImplementation`**、不修改 Kotlin/Java/业务 Manifest 时，能否采集 Compose 调用树、参数和源码位置。本工程已接入 macOS 自动抓取，已配置 Maven Central 发布，尚未上传远端制品。
+
+## 模块
+
+| 模块 | 职责 |
+| --- | --- |
+| `protocol` | 协议版本、JSON 辅助函数和 socket 命名，不依赖 Compose |
+| `compose-collector` | 启用 tooling 数据、遍历各窗口的 Composition 表、读取参数与调用位置、有限深度的值编码 |
+| `inspector-sdk` | Manifest 自动初始化、Activity 生命周期、ADB LocalSocket 通信与调试包检查 |
+| `sample` | 普通业务 Compose 示例；唯一 SDK 接入点在 Gradle `debugImplementation` |
+| `tools` | 桌面采集、两种后端的对照采集、值与源码位置断言、依赖及 release 包检查 |
+
+依赖方向：`sample (debug) → inspector-sdk → compose-collector → protocol`。`inspector-sdk` 也直接使用 `protocol`。release 不依赖 SDK。
+
+## 原理与边界
+
+SDK 的非导出 ContentProvider 随 AAR Manifest 合并，在 Activity 首次组合前启用 `isDebugInspectorInfoEnabled`。Compose 自身记录 `inspection_slot_table_set` 并调用参数信息收集逻辑。SDK 读取 `CompositionData.mapTree`，不替换 `setContent`，不设置预览模式，不要求业务包装 Composable，也不加载 ui-inspector/JVMTI Agent。
+
+- Android 29+ 使用 `WindowInspector.getGlobalWindowViews()` 包含 Dialog/Popup；26–28 回退到 Activity decor，并明确返回窗口覆盖限制。
+- 在主线程读取 Composition 表；socket 工作在后台线程，单次请求有超时。源码位置是**调用点**，不是函数定义；只包含文件名、行号、UTF-16 offset/length 和包 hash，不含完整源文件路径。
+- `source.line` 保留 tooling 原始值。在已测两个版本中它是 1 起算，已用业务源码行和 offset 验证；不能仅根据 tooling 的旧注释再加 1。
+- 原始 Composition 表分别输出，**尚未跨表拼接 Lazy 子组合，也未与 Android View 树合并**。同名节点和调用点全覆盖不代表树结构完全等同 ui-inspector。
+- 参数编码最多 3 层、20 个元素、2048 字符；截断或不支持的类型会显式标记。标准 Shape、盒装 Color/Dp 已有专用编码；其他未支持的 Android/AndroidX 对象和回调保留类型，尚不支持参数续读。
+- `complete` 只表示这次发现的表没有读取错误，不表示任意应用的所有窗口、所有参数和所有代码路径都完整。
+- 只处理默认进程。SDK 仅在 debuggable 应用初始化；socket 校验 shell/root/同 UID 的 peer credentials，不开放 TCP 监听、不声明 INTERNET 权限。
+- 初始化会启用 Compose 的额外参数记录，存在调试内存与 CPU 开销。本轮没有完成性能基准。
+
+## 构建和接入
+
+需要 JDK 21、Android SDK Platform 37；Gradle Wrapper 固定 9.4.1，AGP 9.2.1，Kotlin/Compose compiler 2.4.21。SDK 路径通过 `ANDROID_HOME` 或未纳入版本控制的 `local.properties` 提供。
+
+在 `android/` 目录执行：
+
+```sh
+./gradlew :sample:assembleDebug
+```
+
+示例的唯一接入：
+
+```kotlin
+debugImplementation(project(":inspector-sdk"))
+```
+
+`sample/src/main/` 不含 SDK import、初始化代码、SDK 专用 Manifest 或检查用 Composable 包装。同一份源码去掉依赖，即为 ui-inspector 对照包：
+
+```sh
+./gradlew :sample:assembleDebug -PwithInspectorSdk=false
+```
+
+## Compose 版本
+
+当前默认验证 1.12.1，可切换到 1.10.6：
+
+```sh
+./gradlew :sample:assembleDebug -PcomposeVersion=1.10.6
+```
+
+这个属性同时选择示例与采集模块的 Compose/tooling 依赖。已测矩阵见 [验证结果](validation/RESULTS.md)。**不代表已经验证一个预编译 SDK 可以兼容所有 Compose 版本**，也不是强制业务升级到 1.12.1。
+
+当前 project 依赖的默认值仍是 1.12.1，直接接入较旧业务项目而不对齐版本可能被 Gradle 升级。验证脚本比较实际解析的 SDK/无 SDK 依赖，确认测试组合中未升级宿主的 Compose 组件。发布前应确定支持范围和依赖策略：最低支持版本编译、同版本 tooling 对齐，并验证同一 SDK 二进制在各宿主版本运行。不能简单用 `compileOnly` 删除 tooling 依赖，运行时仍需要它。
+
+## 单独采集（不需要 Java 或 ui-inspector）
+
+先安装 SDK debug APK、打开示例应用，再从 `android/` 执行：
+
+```sh
+python3 tools/capture.py --serial DEVICE_SERIAL --command hello --output artifacts/hello.json
+python3 tools/capture.py --serial DEVICE_SERIAL --output artifacts/capture.json
+```
+
+支持 `--adb /path/to/adb` 和 `--package your.application.id`。工具建立随机端口的 ADB forward，结束时只清理自己的 forward。传输为一行 JSON 请求和一行 JSON 响应，当前命令只有 `hello` 与 `capture`。
+
+## 可复现对照验证
+
+需要连接已授权的设备，另需当前项目可运行的 `ui-inspector/lib/ui-inspector.jar` 及 Java 25+。验证脚本仅安装、重启 `dev.composeinspect.sample`；不会修改其他业务应用。
+
+```sh
+python3 tools/validate.py --serial DEVICE_SERIAL
+# 或指定版本：
+python3 tools/validate.py --serial DEVICE_SERIAL --versions 1.12.1
+```
+
+`JAVA_HOME` 用于 Gradle；inspector 默认由项目启动器寻找 Java 25+，也可用 `INSPECTOR_JAVA_HOME` 单独指定。脚本执行：
+
+1. 构建 SDK debug 和无 SDK release，检查 DEX/Manifest。
+2. SDK 模式分别冷启动主页面、Dialog、Popup；此阶段不运行 ui-inspector。
+3. 断言业务参数、默认值、对象字段、调用源码行及 offset，并点击计数器验证重组后读到新值。
+4. 用相同业务源码构建不带 SDK 的 debug 包，分别冷启动并运行 ui-inspector（attributes、semantics、system-composables）。
+5. 比较共享 Compose 依赖的实际解析版本；保存 APK/hash、业务源码 hash、构建日志、原始 JSON 和 `comparison.json`。
+
+产物在 `artifacts/<Compose版本>/`，已 gitignore。`--sdk-only` 只刷新 SDK/release 证据；现存 baseline JSON 不会重新生成，不能用它声称完成新一轮对照。
+
+```sh
+python3 tools/compare.py artifacts/1.12.1 --validate
+```
+
+比较使用节点名称、源文件、tooling 行号的 multiset 匹配；参数名另行匹配。**节点数不能直接比较**：SDK 保留原始运行时包装组，inspector 做过滤和拼接。参数名匹配也不等于参数值的完整显示能力一致。
+
+## Maven 发布
+
+与 spear 使用相同的 `com.vanniktech.maven.publish:0.37.0` 插件，签名后发布到 Maven Central。
+版本由 `gradle.properties` 的 `sdkVersion` 统一控制，默认 `0.1.1-snapshot`。
+
+用户仅需添加（远端发布完成后可用）：
+
+```kotlin
+debugImplementation("top.cyclops:compose-inspector:0.1.1-snapshot")
+```
+
+同时发布 `compose-inspector-collector` 和 `compose-inspector-protocol`，均属于 `top.cyclops`；主制品会传递依赖它们。发布的是库的 release 变体，使用方仍须使用 `debugImplementation`，不要加入生产包。
+
+本地构建、签名与发布验证：
+
+```sh
+./gradlew publishToMavenLocal
+```
+
+凭据和签名信息沿用用户级 `~/.gradle/gradle.properties` 或环境变量配置，不要提交到仓库：
+`mavenCentralUsername`、`mavenCentralPassword`、`signingInMemoryKey`、`signingInMemoryKeyPassword`（需要时加 `signingInMemoryKeyId`）。
+
+正式上传前，在用户级 Gradle 属性中设置 `sdkScmUrl` 为实际仓库 HTTPS URL（不带 `.git`）。仓库可以私有；当前按用户要求与 spear 共用 `https://github.com/cyclops-top/hilt-plus`，已在项目属性中设置。缺少该属性会阻止远端发布。
+
+```sh
+./gradlew publishToMavenCentral
+```
+
+上传后在 Central Portal 检查并发布；如需同时自动发布，运行 `./gradlew publishAndReleaseToMavenCentral`。Maven Central 制品及 sources JAR 将公开，GitHub 仓库可以继续私有。Android SDK 源码采用本目录 `LICENSE` 中的 Apache-2.0；不改变 `ui-inspector/vendor` 的许可证。
+
+
+## 性能与压缩协议（本地 0.1.1-snapshot）
+
+本地优化版仍使用 `top.cyclops:compose-inspector:0.1.1-snapshot`；更新同名本地制品后，请刷新 Gradle 依赖并重新安装应用。
+
+- `hello` 声明 `gzip-json-v1` 时，新 macOS 客户端发送 `capture-gzip`。响应为 4 字节大端压缩长度 + 单个 gzip member，解压后仍为完整、以换行结尾的原始 JSON。未声明该能力的 SDK 保持 `capture` JSON 协议。
+- Compose/View 状态只在主线程读取；对象字段元数据仅在单次采集中缓存，实际值始终重新读取。编码、快速压缩和 socket 写入在 SDK 工作线程执行。
+- macOS 复用已解析文档，避免规范化数据再次解析；截图 I/O 与原始 JSON 解析并行。压缩输入与解压输出均有大小限制，CRC、截断、额外数据会报错。
+- `tools/capture.py` 默认写紧凑 JSON，`--pretty` 才生成缩进输出。深层树的缩进文件可能远大于实际传输数据，不应用作传输性能基线。
+
+真机编码基准（fixture 只进入测试 APK，不进入发布制品）：
+
+```sh
+./gradlew :protocol:assembleDebugAndroidTest -PbenchmarkJson=/absolute/path/capture.json
+adb install -r protocol/build/outputs/apk/androidTest/debug/protocol-debug-androidTest.apk
+adb shell am instrument -w dev.composeinspect.protocol.test/dev.composeinspect.protocol.EncodingBenchmark
+```
+
+2026-11-02，设备 GX202606000036WL，cn.bs 同一份 4,220,492 字节数据（8,365 个导入节点）：
+Android 编码基准第 4 轮约 4.00s → 2.31s；快速 gzip 约 33ms，含头帧 425,857 字节。
+macOS Debug 紧凑数据导入约 4.14s → 1.07s；Release 解压 + 导入约 0.25s。
+这些是分阶段基准，不包含完整端到端抓取与界面渲染；之前 129s 测试含 106MB 美化 JSON 的重复解析，不能与正常传输直接比较。
+
+更新 cn.bs 后，真实 gzip 通道完整集成测试通过：当前 2,200 节点页面，首次 6.66s，预热后 3.96s（包含设备识别及后续交互）。预热轮读取 2.00s、截图/解析 0.78s、建树 0.07s，Android 主线程采集 1,143ms。
+
+
+## SDK 样式：shape、padding、背景色
+
+SDK 从每个 AndroidComposeView 的 LayoutNode/ModifierInfo 读取实测样式层，按从外到内的顺序保存；不根据父子节点的尺寸差推测 padding。每个窗口的 `styleCatalogs` 每个 host 只存一份，Composition 表用 `styleCatalogIndex` 引用；macOS 在对应 host 范围内关联并展示样式，边界相同而无法消歧时不猜测归属。
+
+- shape：矩形、圆形/胶囊、RoundedCornerShape、CutCornerShape 及 Absolute 变体；保留 dp/px/% 配置及归一化后的实际像素角尺寸，支持 RTL。
+- padding：普通/absolute padding 和 PaddingValues；显示物理左右上下 dp 值，保留每层真实边界。
+- 背景色：纯色转换到 ARGB，包含透明度，保留多层背景及其各自 shape。
+- 样式边界已是屏幕坐标；tooling 调用树边界仍按窗口偏移换算，避免重复偏移。记录可携带局部 density。
+- 自定义 Shape/Brush、drawBehind 和动态 graphicsLayer block 尚不还原，明确保留未知/未支持信息。反射适配失败保留诊断，不伪造样式，也不影响调用树采集。
+
+验证入口（业务示例不含 SDK 专用 API）：
+
+```sh
+./gradlew :compose-collector:testDebugUnitTest :sample:assembleDebug
+adb install -r sample/build/outputs/apk/debug/sample-debug.apk
+adb shell am force-stop dev.composeinspect.sample
+adb shell am start -W -n dev.composeinspect.sample/.MainActivity --es scenario styles
+python3 tools/capture.py --serial DEVICE_SERIAL --output artifacts/styles-1.12.1.json
+cd ../macOS
+SDK_STYLE_CAPTURE="$PWD/../android/artifacts/styles-1.12.1.json" swift test --filter SDKStyleTests
+```
+
+可加 `-PcomposeVersion=1.10.6` 切换版本验证。SDK 及 macOS 均需更新；业务 debug APK 重新构建安装后才包含新的采集逻辑。
+
+2026-11-02：Compose 1.10.6 / 1.12.1 的采集模块单元测试、示例构建和设备样式采集均通过，样式目录无采集错误；两份真机数据均通过 macOS SDKStyleTests，相关 SDK/样式/绘制回归共 19 项通过。任意版本兼容性仍需分别验证。
+
+
+## SDK 点击语义
+
+SDK 在主线程读取 LayoutNode 自身的 SemanticsConfiguration，输出 `interaction.hasClickAction / hasLongClickAction / disabled`；仅检查动作是否存在，不执行回调，也不合并后代动作。`hello` 声明 `layout-interactions-v1`（及 `style-layers-v1`）。
+
+macOS SDK 适配器沿 Composition 的实际布局归属映射到公共 `unmergedSemantics`。匿名 layout 向拥有它的调用节点提供语义，遇到下一层 layout 就停止；多个根布局或不同边界的包装节点不推断为可点击。仅可点击筛选忽略普通 onClick 参数、仅长按动作和禁用控件。自定义 pointerInput 手势如果未声明 OnClick 语义，仍无法据此判定为点击。
+
+验证示例使用 `--es scenario interactions`，包含启用点击、禁用点击、普通文本、仅长按、自定义 OnClick 语义和 CompositionLocalProvider 包装。采集后设置 `SDK_INTERACTION_CAPTURE=/absolute/path/capture.json` 执行 macOS 的 `SDKInteractionTests`。2026-11-02，Compose 1.10.6 / 1.12.1 的交互编码单元测试通过；1.12.1 示例已在设备采集验证，各布局均有交互字段且无采集错误。
+
+### 悬浮窗选择
+
+未勾选“跳过悬浮窗”时，优先选择目标进程内最后枚举到的可见系统悬浮窗，不要求它持有焦点；勾选后排除系统悬浮窗，接着检查焦点窗口上方的附属面板（包括无焦点 Popup），有面板时采集面板，否则采集焦点窗口。没有焦点时取最后枚举到的可见窗口。截图为整屏截图，不会移除浮层像素；其他应用或进程的浮层需要选择对应采集目标。SDK 端的窗口选择修复需要重新构建并安装接入新版 SDK 的 Android debug 应用。

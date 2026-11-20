@@ -19,25 +19,53 @@ public indirect enum InspectorJSON: Codable, Equatable, Sendable {
         }
     }
     public func jsonString(pretty: Bool = false, level: Int = 0) -> String {
-        let indent = pretty ? String(repeating: "  ", count: level) : ""
-        let inner = pretty ? String(repeating: "  ", count: level + 1) : ""
-        let separator = pretty ? ",\n" : ","
-        func quote(_ value: String) -> String { String(decoding: try! JSONEncoder().encode(value), as: UTF8.self) }
-        switch self {
-        case .number(let token): return token
-        case .string(let value): return quote(value)
-        case .null: return "null"
-        case .bool(let value): return value ? "true" : "false"
-        case .array(let values):
-            guard !values.isEmpty else { return "[]" }
-            let content = values.map { inner + $0.jsonString(pretty: pretty, level: level + 1) }.joined(separator: separator)
-            return "[" + (pretty ? "\n" : "") + content + (pretty ? "\n" + indent : "") + "]"
-        case .object(let values):
-            guard !values.isEmpty else { return "{}" }
-            let content = values.keys.sorted().map { inner + quote($0) + (pretty ? ": " : ":") + values[$0]!.jsonString(pretty: pretty, level: level + 1) }.joined(separator: separator)
-            return "{" + (pretty ? "\n" : "") + content + (pretty ? "\n" + indent : "") + "}"
+        enum Work {
+            case value(InspectorJSON, Int)
+            case text(String)
         }
+        let encoder = JSONEncoder()
+        func quote(_ value: String) -> String {
+            if value.utf8.allSatisfy({ $0 >= 32 && $0 != 34 && $0 != 92 && $0 != 47 }) {
+                return "\"" + value + "\""
+            }
+            return String(decoding: try! encoder.encode(value), as: UTF8.self)
+        }
+        var pending: [Work] = [.value(self, level)]
+        var output = ""
+        while let work = pending.popLast() {
+            switch work {
+            case .text(let text): output += text
+            case .value(let value, let depth):
+                switch value {
+                case .number(let token): output += token
+                case .string(let string): output += quote(string)
+                case .null: output += "null"
+                case .bool(let bool): output += bool ? "true" : "false"
+                case .array(let values):
+                    guard !values.isEmpty else { output += "[]"; continue }
+                    output += pretty ? "[\n" : "["
+                    pending.append(.text(pretty ? "\n" + String(repeating: "  ", count: depth) + "]" : "]"))
+                    for index in values.indices.reversed() {
+                        if index < values.count - 1 { pending.append(.text(pretty ? ",\n" : ",")) }
+                        pending.append(.value(values[index], depth + 1))
+                        if pretty { pending.append(.text(String(repeating: "  ", count: depth + 1))) }
+                    }
+                case .object(let values):
+                    guard !values.isEmpty else { output += "{}"; continue }
+                    let keys = values.keys.sorted()
+                    output += pretty ? "{\n" : "{"
+                    pending.append(.text(pretty ? "\n" + String(repeating: "  ", count: depth) + "}" : "}"))
+                    for index in keys.indices.reversed() {
+                        if index < keys.count - 1 { pending.append(.text(pretty ? ",\n" : ",")) }
+                        pending.append(.value(values[keys[index]]!, depth + 1))
+                        pending.append(.text((pretty ? String(repeating: "  ", count: depth + 1) : "") + quote(keys[index]) + (pretty ? ": " : ":")))
+                    }
+                }
+            }
+        }
+        return output
     }
+
     public func value(at pointer: String) -> InspectorJSON? {
         if pointer.isEmpty { return self }
         guard pointer.hasPrefix("/") else { return nil }
@@ -65,7 +93,14 @@ private struct JSONParser {
     let bytes: [UInt8]
     var index = 0
     func error(_ message: String) -> NSError { NSError(domain: "ComposeInspect.JSON", code: index, userInfo: [NSLocalizedDescriptionKey: "\(message)（字节 \(index)）"]) }
-    mutating func whitespace() { while index < bytes.count && [9, 10, 13, 32].contains(bytes[index]) { index += 1 } }
+    mutating func whitespace() {
+        while index < bytes.count {
+            switch bytes[index] {
+            case 9, 10, 13, 32: index += 1
+            default: return
+            }
+        }
+    }
     mutating func take(_ char: UInt8) -> Bool { whitespace(); if index < bytes.count && bytes[index] == char { index += 1; return true }; return false }
     mutating func value(depth: Int) throws -> InspectorJSON {
         whitespace()
@@ -100,10 +135,24 @@ private struct JSONParser {
     mutating func string() throws -> String {
         guard index < bytes.count, bytes[index] == 34 else { throw error("预期 JSON 字符串") }
         let start = index; index += 1
+        var escaped = false
         while index < bytes.count {
             let char = bytes[index]; index += 1
-            if char == 34 { return try JSONDecoder().decode(String.self, from: Data(bytes[start..<index])) }
-            if char == 92 { guard index < bytes.count else { throw error("字符串转义不完整") }; index += 1 }
+            if char == 34 {
+                if !escaped {
+                    guard let value = String(bytes: bytes[(start + 1)..<(index - 1)], encoding: .utf8) else {
+                        throw error("无效的 UTF-8 字符串")
+                    }
+                    return value
+                }
+                return try JSONDecoder().decode(String.self, from: Data(bytes[start..<index]))
+            }
+            guard char >= 32 else { throw error("字符串包含未转义控制字符") }
+            if char == 92 {
+                escaped = true
+                guard index < bytes.count else { throw error("字符串转义不完整") }
+                index += 1
+            }
         }
         throw error("字符串未闭合")
     }
@@ -143,6 +192,11 @@ public struct InspectorDocument: Codable, Equatable, Sendable {
     public init(data: Data) throws {
         originalJSON = data; root = try InspectorJSON.parse(data)
         guard root.object != nil else { throw SnapshotImportError.schema("根节点必须为对象") }
+    }
+    /// Reuse an already validated tree without a second serialization/parser round trip.
+    init(root: InspectorJSON) {
+        self.root = root
+        originalJSON = Data(root.jsonString().utf8)
     }
     public var windows: [InspectorJSON] { root["windows"]?.array ?? [] }
     public var displays: [InspectorJSON] { root["displays"]?.array ?? [] }

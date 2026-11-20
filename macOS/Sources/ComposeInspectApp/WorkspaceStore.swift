@@ -6,6 +6,7 @@ import Observation
 final class WorkspaceStore {
     private(set) var snapshot: InspectorSnapshot
     private var captureRevision = UUID()
+    private var captureRequestID = UUID()
 
     private struct PreparedIndexes: Sendable {
         let full: InspectorSnapshotIndex
@@ -100,9 +101,25 @@ final class WorkspaceStore {
             updatePresentationIndex()
         }
     }
+    var onlySourceNodes: Bool {
+        didSet {
+            filterDefaults.set(onlySourceNodes, forKey: "onlySourceNodes")
+            updatePresentationIndex()
+        }
+    }
+
     private func updatePresentationIndex() {
         presentationRevision &+= 1
-        presentationIndex = onlyClickableNodes ? clickableIndex : (hideInternalNodes ? compactIndex : snapshotIndex)
+        let base = searchesAllComponents ? snapshotIndex : onlyClickableNodes ? clickableIndex : (hideInternalNodes ? compactIndex : snapshotIndex)
+        if onlySourceNodes && !searchesAllComponents {
+            let local = usesProjectSources
+            presentationIndex = base.filteringNodes { node in
+                local ? projectSources.confirms(node.source) : LocatorTextBuilder.usableSource(node.source) != nil
+            }
+        } else {
+            presentationIndex = base
+        }
+        updateSearchMatches()
         imageHitCycle.reset(); hitCandidates = []
         if let selected = selectedNodeID, presentationIndex.byID[selected] == nil { clearSelection() }
     }
@@ -111,10 +128,23 @@ final class WorkspaceStore {
     private(set) var selectedNodeID: String?
     private(set) var selectionRevision: UInt = 0
     var expandedNodes: Set<String> = []
-    var search = ""
+    var search = "" {
+        didSet {
+            if search.isEmpty && searchesAllComponents { searchesAllComponents = false }
+            else { updateSearchMatches() }
+        }
+    }
+    var searchesAllComponents = false {
+        didSet { updatePresentationIndex() }
+    }
+    private(set) var searchMatches: Set<String>?
+    private func updateSearchMatches() {
+        searchMatches = search.isEmpty ? nil : presentationIndex.matchingIDs(search)
+    }
     var showWireframes = UserDefaults.standard.object(forKey: "showWireframes") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showWireframes, forKey: "showWireframes") }
     }
+    var pickingColor = false
     var selectionEnabled = true
     var zoom: CGFloat = 1
     var imagePan: CGSize = .zero
@@ -139,11 +169,12 @@ final class WorkspaceStore {
         guard let key = selectedKey else { return [] }
         return Set(parameterRequests.keys.filter { $0.component == key }.map(\.parameterID))
     }
-    private var liveSnapshotIDs: Set<UUID> = []
+    private(set) var latestSnapshotID: UUID?
     private(set) var issueEditRevision: UInt = 0
 
     init(filterDefaults: UserDefaults = .standard) {
         self.filterDefaults = filterDefaults
+        onlySourceNodes = filterDefaults.bool(forKey: "onlySourceNodes")
         let configuration = filterDefaults.data(forKey: "tree.filterConfiguration.v1")
             .flatMap { try? JSONDecoder().decode(NodeFilterConfiguration.self, from: $0) } ?? .defaults
         filterConfiguration = configuration
@@ -157,6 +188,11 @@ final class WorkspaceStore {
         clickableIndex = clickable
         presentationIndex = UserDefaults.standard.bool(forKey: "onlyClickableNodes") ? clickable
             : ((UserDefaults.standard.object(forKey: "hideInternalNodes") as? Bool ?? true) ? compact : full)
+        projectSources.onCatalogChange = { [weak self] in
+            guard let self, self.onlySourceNodes, !self.searchesAllComponents,
+                  self.snapshot.captureMetadata?.backend == .sdk else { return }
+            self.updatePresentationIndex()
+        }
     }
 
     private static func emptySnapshot() -> InspectorSnapshot {
@@ -173,11 +209,12 @@ final class WorkspaceStore {
     var description: String { currentIssue?.description ?? "" }
     var selectedParameters: Set<String> {
         guard let key = selectedKey else { return [] }
-        return ledger.issue(for: key)?.parameterIDs ?? transientParameters[key] ?? []
+        return ledger.issue(for: key)?.parameterIDs ?? transientParameters[key]
+            ?? Set((selectedNode?.selectableParameters ?? []).filter { $0.name == "item.key" }.map(\.id))
     }
     var image: NSImage? { images[snapshot.id] }
     var canPickImage: Bool {
-        liveSnapshotIDs.contains(snapshot.id) && (snapshot.document?.displays.count ?? 0) <= 1
+        image != nil && (snapshot.document?.displays.count ?? 0) <= 1
     }
     var visibleRoot: InspectorNode? { presentationIndex.roots.first { $0.id == windowRootID } ?? presentationIndex.roots.first }
     var visibleNodes: [InspectorNode] { visibleRoot.flatMap { presentationIndex.nodesByRoot[$0.id] } ?? [] }
@@ -189,8 +226,26 @@ final class WorkspaceStore {
         let target = ComponentIssue(component: key, description: description, parameterIDs: selectedParameters)
         return LocatorTextBuilder.text(for: target, in: snapshot, index: snapshotIndex) ?? ""
     }
+    let projectSources = ProjectSourceIndex()
+    var usesProjectSources: Bool {
+        snapshot.captureMetadata?.backend == .sdk && !projectSources.project.isEmpty
+    }
+    private func projectNode(for id: String) -> InspectorNode? {
+        guard usesProjectSources else { return nil }
+        return snapshotIndex.path(to: id).reversed().first { projectSources.confirms($0.source) }
+    }
     var sourceSummary: String {
-        selectedNodeID.map { LocatorTextBuilder.sourceSummary(for: $0, index: snapshotIndex) } ?? "未选择组件"
+        if let id = selectedNodeID, let owner = projectNode(for: id), let anchor = owner.source {
+            return (id == owner.id ? "" : "父组件调用处 · ") + anchor.text
+        }
+        return selectedNodeID.map { LocatorTextBuilder.sourceSummary(for: $0, index: snapshotIndex) } ?? "未选择组件"
+    }
+    var sourceAnchor: SourceAnchor? {
+        guard let selectedNodeID else { return nil }
+        if let owner = projectNode(for: selectedNodeID) { return owner.source }
+        return snapshotIndex.path(to: selectedNodeID).reversed().lazy
+            .compactMap { LocatorTextBuilder.usableSource($0.source) }
+            .first
     }
     var selectedParentID: String? { path.dropLast().last?.id }
 
@@ -230,6 +285,14 @@ final class WorkspaceStore {
         for node in presentationIndex.path(to: nodeID).dropLast() { expandedNodes.insert(node.id) }
     }
 
+    func handleEscape() {
+        if pickingColor {
+            pickingColor = false
+        } else {
+            clearSelection()
+        }
+    }
+
     func clearSelection() {
         // Commit the active editor (including IME composition) before hiding it.
         NSApp.keyWindow?.makeFirstResponder(nil)
@@ -259,6 +322,7 @@ final class WorkspaceStore {
     }
 
     func selectIssue(_ issue: ComponentIssue) {
+        showSnapshot(issue.component.snapshotID)
         guard issue.component.snapshotID == snapshot.id, snapshotIndex.byID[issue.component.nodeID] != nil else { return }
         if presentationIndex.byID[issue.component.nodeID] != nil { search = "" }
         selectNode(issue.component.nodeID)
@@ -268,7 +332,7 @@ final class WorkspaceStore {
     func edit(_ text: String, for key: ComponentKey, revision: UInt) {
         guard revision == issueEditRevision, key == selectedKey,
               key.snapshotID == snapshot.id, snapshotIndex.byID[key.nodeID] != nil else { return }
-        let parameters = ledger.issue(for: key)?.parameterIDs ?? transientParameters[key] ?? []
+        let parameters = selectedParameters
         ledger.update(key, description: text, parameterIDs: parameters)
     }
 
@@ -285,6 +349,7 @@ final class WorkspaceStore {
         issueEditRevision &+= 1
         ledger.update(issue.component, description: "", parameterIDs: [])
         transientParameters.removeValue(forKey: issue.component)
+        pruneSnapshots()
     }
 
     func clearIssues() {
@@ -292,23 +357,41 @@ final class WorkspaceStore {
         issueEditRevision &+= 1
         ledger = IssueLedger()
         transientParameters = [:]
+        pruneSnapshots()
     }
 
-    func targetChanged() {
-        guard let metadata = snapshot.captureMetadata,
-              metadata.serial != deviceSession.selectedSerial || metadata.packageName != deviceSession.packageName else { return }
-        deviceSession.cancel()
-        clearIssues()
-        let empty = Self.emptySnapshot()
-        captureRevision = UUID()
-        captureWorker?.cancel()
+    func showLatestCapture() {
+        guard let latestSnapshotID else { return }
+        showSnapshot(latestSnapshotID)
+    }
+
+    private func showSnapshot(_ id: UUID) {
+        guard id != snapshot.id, let source = snapshots[id] else { return }
+        let indexes = PreparedIndexes(source, configuration: filterConfiguration, checkpoint: {})
+        display(source, indexes: indexes)
+        pruneSnapshots()
+    }
+
+    private func display(_ source: InspectorSnapshot, indexes: PreparedIndexes) {
+        clearSelection()
         cancelFilterIndexes()
-        snapshot = empty
-        installIndexes(PreparedIndexes(empty, configuration: filterConfiguration, checkpoint: {}))
-        snapshots = [empty.id: empty]; images = [:]; liveSnapshotIDs = []
-        selectedNodeID = nil; expandedNodes = []; windowRootID = nil; search = ""; fitImage()
-        rawPresentation = nil; parameterRequests = [:]
-        notice = "等待获取界面"
+        rawPresentation = nil
+        parameterRequests = [:]
+        snapshot = source
+        search = ""
+        installIndexes(indexes)
+        expandedNodes = Set(source.roots.map(\.id))
+        windowRootID = source.roots.first?.id
+        fitImage()
+    }
+
+    private func pruneSnapshots() {
+        var retained = Set(issues.map { $0.component.snapshotID })
+        retained.insert(snapshot.id)
+        if let latestSnapshotID { retained.insert(latestSnapshotID) }
+        snapshots = snapshots.filter { retained.contains($0.key) }
+        images = images.filter { retained.contains($0.key) }
+        transientParameters = transientParameters.filter { retained.contains($0.key.snapshotID) }
     }
 
     func copyCurrentLocator(to pasteboard: NSPasteboard = .general) {
@@ -325,24 +408,60 @@ final class WorkspaceStore {
     }
 
     func copy(_ text: String) {
-        guard !text.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        if NSPasteboard.general.setString(text, forType: .string) { notice = "已复制到剪贴板" }
+        _ = copy(text, successNotice: "已复制到剪贴板")
+    }
+
+    func copy(_ text: String, successNotice: String, to pasteboard: NSPasteboard = .general) -> Bool {
+        guard !text.isEmpty else { return false }
+        pasteboard.clearContents()
+        guard pasteboard.setString(text, forType: .string) else { return false }
+        notice = successNotice
+        return true
+    }
+
+    var captureProgressText: String {
+        if deviceSession.resolvingCaptureTarget { return "正在定位应用…" }
+        return deviceSession.progress.isEmpty ? "正在抓取界面信息…" : deviceSession.progress
+    }
+
+    private(set) var isCapturing = false
+
+    func stopCapture() {
+        guard isCapturing else { return }
+        captureRequestID = UUID()
+        captureRevision = UUID()
+        deviceSession.cancel()
+        captureWorker?.cancel()
+        notice = "已停止获取界面。"
     }
 
     func capture(settings: ToolchainSettings) async {
-        guard !deviceSession.capturing, !deviceSession.resolvingCaptureTarget else { return }
+        guard !isCapturing, !deviceSession.resolvingCaptureTarget else { return }
+        isCapturing = true
+        defer { isCapturing = false }
+        captureRequestID = UUID()
+        parameterRequests = [:]
+        let requestID = captureRequestID
         NSApp.keyWindow?.makeFirstResponder(nil)
+        await deviceSession.waitForCaptureCancellation()
+        guard captureRequestID == requestID else { return }
         do {
             try await deviceSession.prepareCaptureTarget(settings: settings)
-            targetChanged()
+            guard captureRequestID == requestID else { return }
             let captured = try await deviceSession.capture(settings: settings)
+            guard captureRequestID == requestID else { return }
             let source = captured.snapshot
             guard source.captureMetadata?.serial == deviceSession.selectedSerial,
                   source.packageName == deviceSession.packageName else { return }
             try await applyCapture(captured, requiringCurrentTarget: true)
-        } catch is CancellationError { notice = "已取消抓取，保留上次快照。" }
-        catch { errorMessage = error.localizedDescription }
+        } catch is CancellationError {
+            if captureRequestID == requestID { notice = "已取消抓取。" }
+        } catch {
+            if captureRequestID == requestID {
+                notice = "获取界面失败"
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 
     func applyCapture(_ captured: CapturedSnapshot, requiringCurrentTarget: Bool = false) async throws {
@@ -374,15 +493,12 @@ final class WorkspaceStore {
             configuration = filterConfiguration
         }
         guard let image = NSImage(data: captured.imageData) else { throw CocoaError(.fileReadCorruptFile) }
-        cancelFilterIndexes()
-        clearIssues()
         let source = captured.snapshot
-        snapshots = [source.id: source]; images = [source.id: image]; liveSnapshotIDs = [source.id]
-        rawPresentation = nil; parameterRequests = [:]
-        snapshot = source
-        installIndexes(indexes)
-        selectedNodeID = nil; search = ""; fitImage(); hitCandidates = []
-        expandedNodes = Set(source.roots.map(\.id)); windowRootID = source.roots.first?.id
+        snapshots[source.id] = source
+        images[source.id] = image
+        latestSnapshotID = source.id
+        display(source, indexes: indexes)
+        pruneSnapshots()
         notice = "已获取界面"
     }
 
@@ -396,8 +512,8 @@ final class WorkspaceStore {
     }
 
     func canRead(_ parameter: NodeParameter) -> Bool {
-        guard parameter.continuationToken != nil, liveSnapshotIDs.contains(snapshot.id), let metadata = snapshot.captureMetadata else { return false }
-        return !deviceSession.capturing && metadata.serial == deviceSession.selectedSerial && metadata.packageName == deviceSession.packageName
+        guard parameter.continuationToken != nil, snapshot.id == latestSnapshotID, !isCapturing, let metadata = snapshot.captureMetadata else { return false }
+        return metadata.backend != .sdk && !deviceSession.capturing && metadata.serial == deviceSession.selectedSerial && metadata.packageName == deviceSession.packageName
     }
 
     func readParameter(_ parameter: NodeParameter, settings: ToolchainSettings) async {

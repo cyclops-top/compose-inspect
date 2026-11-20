@@ -1,10 +1,10 @@
-# ComposeInspect macOS
+# CompScope macOS
 
 原生 SwiftUI + AppKit 界面工程，最低 macOS 14，当前 Xcode App target 面向 Apple Silicon。无需第三方 Swift 依赖；Android `ui-inspector/` 仍独立构建；现有 JAR 随 App 打包，Java 与 ADB 使用设置解析出的本机工具。
 
 ## 使用 Xcode
 
-打开 `ComposeInspect.xcodeproj`，选择 **ComposeInspect → My Mac** 后运行。App target 通过本地 Swift Package 依赖 `ComposeInspectCore`，界面和核心逻辑共用同一份源码。
+打开 `ComposeInspect.xcodeproj`，选择 **CompScope → My Mac** 后运行。App target 通过本地 Swift Package 依赖 `ComposeInspectCore`，界面和核心逻辑共用同一份源码。
 
 ```sh
 open macOS/ComposeInspect.xcodeproj
@@ -19,20 +19,20 @@ open macOS/ComposeInspect.xcodeproj
 ```sh
 swift test --package-path macOS
 ./macOS/scripts/build-app.sh
-open macOS/dist/ComposeInspect.app
+open macOS/dist/CompScope.app
 ```
 
-`BUILD_CONFIGURATION=release ./macOS/scripts/build-app.sh` 可生成本机 Release bundle。脚本使用 Swift Package executable `ComposeInspectLauncher`，打包后的应用仍为 `ComposeInspect.app`。分开命名避免与 Xcode 原生 App scheme 冲突。
+脚本默认生成本机 Release bundle，以启用 Swift 优化；开发调试可使用 `BUILD_CONFIGURATION=debug ./macOS/scripts/build-app.sh`。脚本使用 Swift Package executable `ComposeInspectLauncher`，打包后的应用仍为 `CompScope.app`。分开命名避免与 Xcode 原生 App scheme 冲突。
 
 也可通过 Xcode 原生 target 构建：
 
 ```sh
 xcodebuild -project macOS/ComposeInspect.xcodeproj \
-  -scheme ComposeInspect -configuration Debug \
+  -scheme CompScope -configuration Debug \
   -derivedDataPath macOS/DerivedData CODE_SIGN_IDENTITY=- build
 ```
 
-原生 target 构建产物位于 `macOS/DerivedData/Build/Products/Debug/ComposeInspect.app`。核心测试通过 `swift test` 或 Xcode 的 ComposeInspectCore package scheme 执行。
+原生 target 构建产物位于 `macOS/DerivedData/Build/Products/Debug/CompScope.app`。核心测试通过 `swift test` 或 Xcode 的 ComposeInspectCore package scheme 执行。
 
 应用图标源文件为 `Artwork/AppIcon.svg`，透明预览为 `Artwork/AppIcon.png`；两种打包方式均使用 `Configuration/AppIcon.icns`。修改 SVG 后执行 `./macOS/scripts/generate-app-icon.sh`，使用系统 WebKit 渲染并生成 16–1024px 的标准 macOS 图标，无需第三方工具。
 
@@ -41,7 +41,7 @@ xcodebuild -project macOS/ComposeInspect.xcodeproj \
 这是实时抓取辅助工具，只处理当前一次抓取结果：
 
 - 启动为空白，选择在线设备和应用，点击右上角强调色相机抓取。
-- 新抓取成功后替换截图、完整 JSON 和组件树，并清空上一轮问题与参数勾选；失败或取消时保留当前结果。
+- 新抓取成功后替换截图、完整 JSON 和组件树，并保留已有问题及其快照。点击旧问题可回看截图，再点状态栏的“返回最新快照”继续检查。失败或取消时保留当前结果。
 - 切换设备或应用，清除旧目标的结果和问题，等待重新抓取。
 - 问题和采集内容只存在当前进程内存中，不自动写盘、不恢复历史；旧版工作区自动保存文件不再读取。没有导入、示例或历史入口。
 - 布局尺寸、线框/节点过滤偏好和工具环境配置继续保存。
@@ -95,18 +95,26 @@ App 启动时在后台运行用户 shell 的登录、交互配置（`-ilc`，zsh
 
 AI 预览底部显示当前生成文本及全部问题的预计 Token 数，随描述和勾选参数更新；全部统计包含复制时的编号和分隔符，空文本为 0。使用本地粗略估算（ASCII 约 4 字符/Token，非 ASCII 约 2 UTF-8 字节/Token），实际数量取决于目标模型的分词方式，无需联网。
 
-复制全部问题时，每项带简短修改指令、所选参数和组件路径。例如：
+AI 预览渲染 Markdown 标题、代码块和正文；复制按钮输出 Markdown 原文，用户填写的修改要求保持原样。
+
+复制全部问题时，每项带组件路径、定位说明、所选参数和用户填写的修改要求。例如：
+
+````markdown
+## 组件路径
+已省略包装组件，末项为目标。
 
 ```text
-请按以下要求修改：
-组件路径（采集，省略包装）：
-ReaderApp.kt:96 · SettingsScreen
-  → SettingsScreens.kt:43 · GlassCard
-  → SettingsScreens.kt:47 · SettingsRow
-  → GlassComponents.kt:106 · Text「关于」
-修改要求：
-将文字改为应用信息
+ReaderApp.kt:96 (SettingsScreen)
+  → SettingsScreens.kt:43 (GlassCard)
+  → SettingsScreens.kt:47 (SettingsRow)
+  → GlassComponents.kt:106 (Text「关于」)
 ```
+
+注：文件和行号为运行时采集的调用位置线索，请结合当前源码确认。
+
+## 修改要求
+将文字改为应用信息
+````
 
 从当前原始树提取最近 Screen 及其下的业务祖先；没有 Screen 时保留最近三个有源码的非包装祖先。目标、勾选参数和用户描述完整保留，不附整棵树，不调用外部 AI 服务。箭头代表采集的嵌套关系，sourceLocation 为上游报告的位置；尚未解析本地 Android 源码，不声称是经过验证的完整源码调用栈。
 
@@ -122,10 +130,35 @@ Text / BasicText 组件支持文本预览，展示内容、颜色和字号；Mat
 
 圆角样式关联：内容边界相同但样式不同的记录，不再一律丢弃。仅在节点自身的原始 Shape 语义（或直接 shape 参数）与实测圆角一致、且候选结果唯一时解除歧义；合并语义不能作为证据，避免把子组件或外层 padding 的样式误赋给当前节点。支持当前采集格式的 dp 圆角和 CircleShape，无法确认时仍显示未知。
 
+### 快速定位源码
+
+选中组件后，右侧的“复制源码路径”会复制采集到的文件名或路径，有有效行号时会附在末尾，如 `LoginScreen.kt:86`。在 Android Studio 双按 Shift，切到 Files，粘贴后选择结果。当前组件没有源码位置时，按钮会使用最近的可用祖先位置。没有可用位置时，按钮不可用。
+
 ### 快速交给 AI 定位代码
 
-选中截图或组件树中的节点，即可点击“复制 AI 定位信息”或按 `⌘⌥C`；问题描述可选，未填写时不会创建问题记录。仅复制当前组件勾选的参数。新抓取仍替换当前会话，不保留历史问题。
+选中截图或组件树中的节点，即可点击底部 AI 预览的复制按钮或按 `⌘⌥C`；问题描述可选，未填写时不会创建问题记录。仅复制当前组件勾选的参数。同一目标再次抓取后，仍可从问题列表回看已记录问题的截图。
 
 源码线索区分自身采集位置、祖先位置和缺失位置；采集位置不是已验证的函数声明，无效行号不会作为精确位置输出。AI 定位文本不附带应用包名、同名实例序号、快照节点路径或窗口编号；保留组件路径、源码线索、资源信息及勾选参数。
 
 截图悬停可预览边界和定位线索；点击后可以从重叠候选菜单直接选择，或用左右箭头 / `⌘⌥[`、`⌘⌥]` 循环切换。`⌘⌥↑` 选择当前展示树中的父组件；普通树选择会清除上一个点位的候选。`⌘⇧C` 仍用于复制全部已记录问题，普通 `⌘C` 保持文本复制行为。
+
+
+## 统一采集模型
+
+两种后端都通过适配器生成 `SnapshotTreeInput`，再由唯一的 `SnapshotImporter` 建树，输出 `InspectorSnapshot / InspectorNode / ComponentStyle`。组件树、筛选、点选、参数区和样式预览只使用这一套模型。
+
+- `UIInspectorSnapshotAdapter` 解码 ui-inspector 的样式扩展属性，并记录需要隐藏的传输属性路径。
+- `SDKSnapshotImporter` 适配窗口偏移、调用树、参数值和 host 样式目录，保留 SDK 原始响应。
+- `SnapshotTreeInput` 提供公共节点字段、按节点路径索引的已解码样式目录和隐藏属性路径；公共建树器不识别任何后端专属样式字段。
+- `ComponentStyleCatalog` 仅解码统一的样式格式并进行 host 内关联，不判断采集来源。原始文档与参数路径保留，用于完整 JSON 查看和参数读取。
+
+`SDKStyleTests.testBothAdaptersProduceTheSameTreeParametersAndStyles` 验证等价的两种输入具有相同节点层级、屏幕边界、源码位置、参数展示和 shape/padding/背景色，并检查原始 JSON 路径。
+
+
+默认精简规则隐藏 `CompositionLocalProvider` 并保持子节点顺序；关闭精简或关闭组合包装过滤可查看原始层级。它被视为无独立布局的组合包装，不借用后代 shape。仅可点击筛选使用统一的自身 OnClick 语义，并排除 Disabled/未启用的控件；SDK 通过布局归属适配这些字段，两种后端共用筛选逻辑。
+
+精简规则同时隐藏已知的状态/动画值、资源计算、组合包装和副作用调用，包括 `SkippableItem`、`SaveableStateProvider`、`ReusableContent`、`ProvideCommonCompositionLocals`、`animate*AsState` 等，以及已核对源码的 `resourceCardColor`、`masteryColor`、`masteryLabel`。包装上的 `OnClick=false` 不会使其重新显示；跳过节点时始终提升子节点。规则在 macOS 的统一模型层执行，原始采集数据保留。Tooling 不提供返回类型，因此这是一组已知调用规则，不代表能识别所有非 `Unit` 函数，也不会仅凭小写名称或 `Color` 后缀隐藏未知业务组件。
+
+### 悬浮窗选择
+
+未勾选“跳过悬浮窗”时，优先选择目标进程内最后枚举到的可见系统悬浮窗，不要求它持有焦点；勾选后排除系统悬浮窗，接着检查焦点窗口上方的附属面板（包括无焦点 Popup），有面板时采集面板，否则采集焦点窗口。没有焦点时取最后枚举到的可见窗口。截图为整屏截图，不会移除浮层像素；其他应用或进程的浮层需要选择对应采集目标。SDK 端的窗口选择修复需要重新构建并安装接入新版 SDK 的 Android debug 应用。

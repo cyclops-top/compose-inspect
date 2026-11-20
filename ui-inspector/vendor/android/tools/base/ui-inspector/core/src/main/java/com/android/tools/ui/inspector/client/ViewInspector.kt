@@ -59,6 +59,12 @@ internal suspend fun dumpViews(commandSender: CommandSender, includeAttributes: 
         ViewInspectorProtocol.DumpViewsCommand.newBuilder()
           .setIncludeAttributes(includeAttributes || includeResolutionStack)
           .setIncludeResolutionStack(includeResolutionStack)
+          // Optional wire extension, field 100: skip system overlay windows before traversal.
+          .apply {
+            if (java.lang.Boolean.getBoolean("composeinspect.skipOverlays")) {
+              mergeFrom(byteArrayOf(0xA0.toByte(), 0x06, 0x01))
+            }
+          }
           .build()
       )
       .build()

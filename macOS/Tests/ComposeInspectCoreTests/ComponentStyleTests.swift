@@ -25,7 +25,7 @@ final class ComponentStyleTests: XCTestCase {
             "bounds": ["x": 30, "y": 30, "width": 40, "height": 20]]
         let root: [String: Any] = ["id": 1, "type": "ViewNode", "className": "AndroidComposeView",
             "bounds": ["x": 0, "y": 0, "width": 200, "height": 200], "children": [node],
-            "attributes": [["name": ComponentStyleCatalog.attribute, "value": String(decoding: style, as: UTF8.self)]]]
+            "attributes": [["name": UIInspectorSnapshotAdapter.styleAttribute, "value": String(decoding: style, as: UTF8.self)]]]
         return try JSONSerialization.data(withJSONObject: ["windows": [["root": root]]])
     }
     func testPaddingLayersBackgroundOrderUnknownShapeAndOuterHitAreaSurviveImportAndFiltering() throws {
@@ -46,7 +46,7 @@ final class ComponentStyleTests: XCTestCase {
         let mapper = CoordinateMapper(imageSize: snapshot.pixelSize, canvasSize: snapshot.pixelSize)
         XCTAssertTrue(mapper.candidates(at: CGPoint(x: 5, y: 5), in: index, imageSize: snapshot.pixelSize).contains { $0.id == node.id })
         XCTAssertEqual(snapshot.document?.originalJSON, data)
-        XCTAssertFalse(snapshot.roots[0].parameters.contains { $0.name == ComponentStyleCatalog.attribute })
+        XCTAssertFalse(snapshot.roots[0].parameters.contains { $0.name == UIInspectorSnapshotAdapter.styleAttribute })
         let decoded = try JSONDecoder().decode(InspectorSnapshot.self, from: JSONEncoder().encode(snapshot))
         XCTAssertEqual(decoded.nodes.first { $0.id == node.id }?.style, style)
     }
@@ -126,7 +126,7 @@ final class ComponentStyleTests: XCTestCase {
         let parent: [String: Any] = ["id": -1, "type": "ComposeNode", "className": "Box", "bounds": outer, "children": [row]]
         let root: [String: Any] = ["id": 1, "type": "ViewNode", "className": "AndroidComposeView",
             "bounds": ["x": 0, "y": 0, "width": 400, "height": 300], "children": [parent],
-            "attributes": [["name": ComponentStyleCatalog.attribute, "value": String(decoding: styleJSON, as: UTF8.self)]]]
+            "attributes": [["name": UIInspectorSnapshotAdapter.styleAttribute, "value": String(decoding: styleJSON, as: UTF8.self)]]]
         let data = try JSONSerialization.data(withJSONObject: ["windows": [["root": root]]])
         let snapshot = try SnapshotImporter.decode(data, imageSize: CGSize(width: 400, height: 300), packageName: "example")
         let node = try XCTUnwrap(snapshot.nodes.first { $0.name == "Row" })
@@ -159,6 +159,23 @@ final class ComponentStyleTests: XCTestCase {
         let decoded = try JSONDecoder().decode(InspectorSnapshot.self, from: JSONEncoder().encode(snapshot))
         XCTAssertEqual(decoded.node(node.id)?.bounds, expected)
         XCTAssertEqual(decoded.node(node.id)?.style, style)
+    }
+
+    func testOffsetSelectionDoesNotIncludeOriginalLayoutAllocation() throws {
+        for origin in [CGPoint(x: 686, y: 158), CGPoint(x: -200, y: -100), CGPoint(x: 20, y: 10)] {
+            let content = CGRect(origin: origin, size: CGSize(width: 548, height: 384))
+            let outer = CGRect(x: 0, y: 0, width: 548, height: 384)
+            let style = ComponentStyle(density: 1, contentBounds: content, outerBounds: outer, layers: [])
+            XCTAssertEqual(style.selectionBounds, content)
+            let node = InspectorNode(id: "image", rawID: -1, name: "Image", bounds: style.selectionBounds, style: style)
+            let snapshot = InspectorSnapshot(packageName: "example", deviceName: "test",
+                pixelSize: CGSize(width: 1920, height: 1080), roots: [node])
+            let index = InspectorSnapshotIndex(snapshot)
+            XCTAssertEqual(index.boundsByRoot[node.id], [content])
+            let mapper = CoordinateMapper(imageSize: snapshot.pixelSize, canvasSize: snapshot.pixelSize)
+            XCTAssertEqual(mapper.candidates(at: CGPoint(x: content.midX, y: content.midY),
+                in: index, imageSize: snapshot.pixelSize).first?.id, node.id)
+        }
     }
 
     func testEnvelopeIncludesMeasuredContentOverflowAndIgnoresEmptyLayers() {

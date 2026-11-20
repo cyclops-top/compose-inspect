@@ -68,7 +68,12 @@ public struct NodeParameter: Identifiable, Codable, Equatable, Sendable {
 public struct SourceAnchor: Codable, Equatable, Sendable {
     public let file: String
     public let line: Int?
-    public init(file: String, line: Int? = nil) { self.file = file; self.line = line }
+    public let packageHash: Int32?
+    public init(file: String, line: Int? = nil, packageHash: Int32? = nil) {
+        self.file = file
+        self.line = line
+        self.packageHash = packageHash
+    }
     public var text: String { line.map { "\(file):\($0)" } ?? file }
 }
 
@@ -84,18 +89,30 @@ public struct InspectorNode: Identifiable, Codable, Equatable, Sendable {
     public let children: [InspectorNode]
     public let idResource: String?
     public let layoutResource: String?
+    public let clickTargetID: String?
     public let style: ComponentStyle?
 
     public init(id: String, rawID: Int64, name: String, kind: String = "ComposeNode", label: String? = nil,
                 bounds: CGRect, source: SourceAnchor? = nil, parameters: [NodeParameter] = [], children: [InspectorNode] = [],
-                idResource: String? = nil, layoutResource: String? = nil, style: ComponentStyle? = nil) {
+                idResource: String? = nil, layoutResource: String? = nil, style: ComponentStyle? = nil, clickTargetID: String? = nil) {
         self.id = id; self.rawID = rawID; self.name = name; self.kind = kind; self.label = label
         self.bounds = bounds; self.source = source; self.parameters = parameters; self.children = children
         self.style = style
+        self.clickTargetID = clickTargetID
         self.idResource = idResource; self.layoutResource = layoutResource
     }
+    fileprivate func withChildren(_ children: [InspectorNode]) -> InspectorNode {
+        InspectorNode(id: id, rawID: rawID, name: name, kind: kind, label: label,
+                                  bounds: bounds, source: source, parameters: parameters, children: children,
+                                  idResource: idResource, layoutResource: layoutResource, style: style, clickTargetID: clickTargetID)
+    }
+
     /// These composition-only wrappers have no independently measured layout box.
     public static func isVirtualLayoutGroup(name: String, source: SourceAnchor?) -> Bool {
+        let shortName = name.components(separatedBy: ".").last ?? name
+        if ["CompositionLocalProvider", "SkippableItem", "SaveableStateProvider", "ReusableContent",
+            "ReusableContentHost", "LazyLayoutPinnableItem", "ProvideCommonCompositionLocals",
+            "ProvideTextStyle", "ProvideContentColorTextStyle"].contains(shortName) { return true }
         guard let file = source?.file.components(separatedBy: "/").last else { return false }
         switch name.components(separatedBy: ".").last ?? name {
         case "Item", "SkippableItem": return file == "LazyLayoutItemContentFactory.kt"
@@ -128,6 +145,10 @@ public struct InspectorNode: Identifiable, Codable, Equatable, Sendable {
     /// Use interaction metadata, rather than component names or arbitrary callback parameters.
     public var isClickable: Bool {
         if kind == "ViewNode" {
+            if parameters.contains(where: {
+                $0.group == .attribute && $0.name.split(separator: ":").last?.lowercased() == "enabled"
+                    && ($0.original?["value"]?.boolean == false || $0.value.lowercased() == "false")
+            }) { return false }
             return parameters.contains {
                 $0.group == .attribute && $0.name.split(separator: ":").last?.lowercased() == "clickable"
                     && ($0.original?["value"]?.boolean == true || $0.value.lowercased() == "true")
@@ -136,6 +157,7 @@ public struct InspectorNode: Identifiable, Codable, Equatable, Sendable {
         guard kind == "ComposeNode" else { return false }
         let own = parameters.filter { $0.group == .unmergedSemantics }
         let semantics = own.isEmpty ? parameters.filter { $0.group == .mergedSemantics || $0.group == .semantics } : own
+        if semantics.contains(where: { $0.name == "Disabled" && $0.value != "false" && $0.value != "null" }) { return false }
         return semantics.contains { $0.name == "OnClick" && $0.value != "null" && $0.value != "false" }
     }
     public var displayName: String { label.map { "\(shortName)「\($0)」" } ?? shortName }
@@ -214,6 +236,10 @@ public struct InspectorSnapshotIndex: Sendable {
         let presentedRoots = hidingInternals || onlyClickable
             ? try ComposeNodeFilter.roots(snapshot.roots, onlyClickable: onlyClickable,
                                           configuration: configuration, checkpoint: checkpoint) : snapshot.roots
+        try self.init(presentedRoots: presentedRoots, checkpoint: checkpoint)
+    }
+
+    private init(presentedRoots: [InspectorNode], checkpoint: () throws -> Void) rethrows {
         var nodes: [InspectorNode] = [], byID: [String: InspectorNode] = [:]
         var parents: [String: String] = [:], roots: [String: String] = [:]
         var depths: [String: Int] = [:]
@@ -236,6 +262,16 @@ public struct InspectorSnapshotIndex: Sendable {
         self.nodes = nodes; self.byID = byID; parentIDs = parents; rootIDs = roots
         self.depths = depths
         nodesByRoot = grouped; boundsByRoot = bounds
+    }
+
+    /// Keep window roots and promote matching descendants through omitted parents.
+    public func filteringNodes(_ includes: (InspectorNode) -> Bool) -> InspectorSnapshotIndex {
+        var projected: [String: [InspectorNode]] = [:]
+        for node in nodes.reversed() {
+            let children = node.children.flatMap { projected.removeValue(forKey: $0.id) ?? [] }
+            projected[node.id] = parentIDs[node.id] == nil || includes(node) ? [node.withChildren(children)] : children
+        }
+        return InspectorSnapshotIndex(presentedRoots: roots.flatMap { projected[$0.id] ?? [] }, checkpoint: {})
     }
 
     /// One postorder pass per search, rather than recursively rescanning every subtree per row.
@@ -272,6 +308,26 @@ public enum ComposeNodeFilter {
     public static func roots(_ roots: [InspectorNode], onlyClickable: Bool = false,
                              configuration: NodeFilterConfiguration = .defaults,
                              checkpoint: () throws -> Void) rethrows -> [InspectorNode] {
+        // Identity comes from the captured layout, never from names or equal rectangles.
+        var preferred: [String: String] = [:]
+        if onlyClickable {
+            let frameworkFiles: Set<String> = ["Surface.kt", "Box.kt", "Row.kt", "Column.kt", "Layout.kt",
+                "Button.kt", "Text.kt", "BasicText.kt", "Clickable.kt", "Composables.kt", "SubcomposeLayout.kt"]
+            var scores: [String: Int] = [:]
+            var candidates = Array(try self.roots(roots, onlyClickable: false, configuration: configuration, checkpoint: checkpoint).reversed())
+            while let node = candidates.popLast() {
+                try checkpoint()
+                if node.isClickable, let target = node.clickTargetID {
+                    let file = node.source?.file.components(separatedBy: "/").last
+                    let score = file.map { frameworkFiles.contains($0) ? 1 : 2 } ?? 0
+                    if preferred[target] == nil || score > (scores[target] ?? -1) {
+                        preferred[target] = node.id
+                        scores[target] = score
+                    }
+                }
+                candidates.append(contentsOf: node.children.reversed())
+            }
+        }
         var pending = roots.reversed().map { (node: $0, insideText: false, isRoot: true, ready: false) }
         var projected: [String: [InspectorNode]] = [:]
         while let (node, insideText, isRoot, ready) = pending.popLast() {
@@ -287,30 +343,61 @@ public enum ComposeNodeFilter {
             let file = node.source?.file.components(separatedBy: "/").last
             let textImplementation = configuration.hideTextImplementation && compose && insideText && name == "BasicText" && (file == nil || file == "Text.kt")
             let layoutImplementation = configuration.hideLayoutImplementation && compose && (
-                (name == "ReusableComposeNode" && (file == nil || file == "Layout.kt" || file == "SubcomposeLayout.kt"))
+                (name == "ReusableComposeNode" && (file == nil || file == "Layout.kt" || file == "SubcomposeLayout.kt" || file == "Composables.kt"))
                 || (name == "Layout" && file.map { layoutCallSites.contains($0) } == true))
             let children = node.children.flatMap { projected.removeValue(forKey: $0.id) ?? [] }
             // Known composition wrappers have no independent layout. Keep any identity or
             // semantics attached to them, but don't retain bookkeeping parameters as UI rows.
             let meaningfulIdentity = node.label?.isEmpty == false || node.idResource != nil || node.layoutResource != nil
-                || node.parameters.contains { [.semantics, .mergedSemantics, .unmergedSemantics, .attribute].contains($0.group) }
+                || node.parameters.contains {
+                    [.semantics, .mergedSemantics, .unmergedSemantics, .attribute].contains($0.group)
+                        && !["false", "null", ""].contains($0.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+                }
                 || node.style?.layers.isEmpty == false
-            let compositionWrapper = configuration.hideCompositionWrappers && node.isVirtualLayoutGroup && !meaningfulIdentity
+            let compositionWrapper = configuration.hideCompositionWrappers && compose && (
+                nonVisualCall(name, file: file)
+                    || (node.isVirtualLayoutGroup && (name != "Item" || !meaningfulIdentity)))
             let androidWrapper = configuration.viewRules.contains { $0.matches(node) }
             if !isRoot && (textImplementation || layoutImplementation || compositionWrapper || androidWrapper
-                || (onlyClickable && !node.isClickable)) {
+                || (onlyClickable && (!node.isClickable || node.clickTargetID.map { preferred[$0] != node.id } == true))) {
                 projected[node.id] = children
                 continue
             }
-            projected[node.id] = [InspectorNode(id: node.id, rawID: node.rawID, name: node.name, kind: node.kind, label: node.label,
-                                  bounds: node.bounds, source: node.source, parameters: node.parameters, children: children,
-                                  idResource: node.idResource, layoutResource: node.layoutResource, style: node.style)]
+            projected[node.id] = [node.withChildren(children)]
         }
         return roots.flatMap { projected.removeValue(forKey: $0.id) ?? [] }
     }
     private static let layoutCallSites: Set<String> = [
         "Layout.kt", "Text.kt", "BasicText.kt", "Box.kt", "Row.kt", "Column.kt", "Spacer.kt",
         "SubcomposeLayout.kt", "Icon.kt", "Image.kt"
+    ]
+
+    // Tooling does not expose return types. Only known non-UI calls are classified here;
+    // a lowercase name or a Color suffix alone is not evidence that a call returns a value.
+    private static func nonVisualCall(_ name: String, file: String?) -> Bool {
+        if nonVisualCalls.contains(name) { return true }
+        if name == "remember" || (name.hasPrefix("remember") && name.dropFirst(8).first?.isUppercase == true) { return true }
+        if name.hasPrefix("animate") && name.hasSuffix("AsState") { return true }
+        if name.hasPrefix("<get-") && name.hasSuffix(">") { return true }
+        switch (name, file) {
+        case ("resourceCardColor", "ResourceFolderSelectorCard.kt"),
+             ("masteryColor", "ResourceMastery.kt"), ("masteryLabel", "ResourceMastery.kt"):
+            return true
+        default: return false
+        }
+    }
+
+    private static let nonVisualCalls: Set<String> = [
+        "SideEffect", "DisposableEffect", "LaunchedEffect", "produceState", "derivedStateOf",
+        "LifecycleStartEffect", "LifecycleStartEffectImpl", "LifecycleResumeEffect", "LifecycleResumeEffectImpl",
+        "LifecycleEventEffect", "BackHandler", "PredictiveBackHandler", "BackgroundTextMeasurement",
+        "collectAsState", "collectAsStateWithLifecycle", "collectIsPressedAsState", "collectIsFocusedAsState",
+        "collectIsHoveredAsState", "collectIsDraggedAsState", "currentStateAsState", "collectAsLazyPagingItems",
+        "viewModel", "hiltViewModel", "stringResource", "pluralStringResource", "stringArrayResource",
+        "painterResource", "imageResource", "vectorResource", "colorResource", "dimensionResource",
+        "integerResource", "booleanResource", "buttonColors", "buttonElevation", "iconButtonColors",
+        "rowMeasurePolicy", "columnMeasurePolicy", "rowMeasurementMultiContentHelper",
+        "surfaceColorAtElevation", "applyTonalElevation", "loadVectorResource"
     ]
 }
 
@@ -354,7 +441,7 @@ public enum LocatorTextBuilder {
         guard let source else { return nil }
         let file = source.file.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !file.isEmpty else { return nil }
-        return SourceAnchor(file: file, line: source.line.flatMap { $0 > 0 ? $0 : nil })
+        return SourceAnchor(file: file, line: source.line.flatMap { $0 > 0 ? $0 : nil }, packageHash: source.packageHash)
     }
 
     public static func sourceSummary(for nodeID: String, index: InspectorSnapshotIndex) -> String {
@@ -393,16 +480,24 @@ public enum LocatorTextBuilder {
         // reported callsite, not a verified function declaration or a JVM/Kotlin stack frame.
         let screen = ancestors.lastIndex { $0.shortName.hasSuffix("Screen") }
         let contextual = screen.map { Array(ancestors[$0...]) } ?? Array(ancestors.suffix(3))
-        let route = contextual.map { "\(usableSource($0.source)!.text) · \($0.displayName)" }
-            + ["\(location) · \(target)"]
+        let route = contextual.map { "\(usableSource($0.source)!.text) (\($0.displayName))" }
+            + ["\(location) (\(target))"]
         let hasRequest = !issue.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let locator = [hasRequest ? "请按以下要求修改：" : "请定位以下界面组件：", "组件路径（采集，省略包装）："]
-            + route.enumerated().map { $0.offset == 0 ? $0.element : "  → " + $0.element }
-        var clues = [sourceSummary(for: node.id, index: index),
-                     "位置来自运行时采集，表示调用位置线索，不是已验证的函数声明；请结合项目代码确认。"]
+        let locator = ["## 组件路径", "已省略包装组件，末项为目标。", "", codeBlock(route.enumerated().map { $0.offset == 0 ? $0.element : "  → " + $0.element }.joined(separator: "\n"))]
+        var clues = ["", "注：文件和行号为运行时采集的调用位置线索，请结合当前源码确认。"]
+        if usableSource(node.source)?.line == nil {
+            clues.append(sourceSummary(for: node.id, index: index))
+        }
         if let resource = node.idResource { clues.append("资源 ID：" + resource) }
         if let resource = node.layoutResource { clues.append("布局资源：" + resource) }
-        return (locator + clues + parameters + (hasRequest ? ["修改要求：", issue.description] : [])).joined(separator: "\n")
+        let parameterSection = parameters.isEmpty ? [] : ["", "## 所选参数", codeBlock(parameters.joined(separator: "\n"))]
+        return (locator + clues + parameterSection + (hasRequest ? ["", "## 修改要求", issue.description] : [])).joined(separator: "\n")
+    }
+
+    private static func codeBlock(_ text: String) -> String {
+        let longestRun = text.split(whereSeparator: { $0 != "`" }).map(\.count).max() ?? 0
+        let fence = String(repeating: "`", count: max(3, longestRun + 1))
+        return "\(fence)text\n\(text)\n\(fence)"
     }
 
     private static let contextWrappers: Set<String> = [
@@ -416,7 +511,7 @@ public enum LocatorTextBuilder {
         var sections: [String] = []
         for (index, issue) in issues.enumerated() {
             guard let snapshot = snapshots[issue.component.snapshotID], let text = text(for: issue, in: snapshot) else { return nil }
-            sections.append("\(index + 1). \(text)")
+            sections.append("# 问题 \(index + 1)\n\n\(text)")
         }
         return sections.isEmpty ? nil : sections.joined(separator: "\n\n")
     }

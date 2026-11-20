@@ -38,7 +38,7 @@ final class WorkspaceTests: XCTestCase {
         let issue = ComponentIssue(component: ComponentKey(snapshotID: snapshot.id, nodeID: "login"),
                                    description: "高度改成 56dp\n保持现有圆角", parameterIDs: ["修饰符.height"])
         let text = LocatorTextBuilder.text(for: issue, in: snapshot)!
-        XCTAssertEqual(text, "请按以下要求修改：\n组件路径（采集，省略包装）：\nLoginScreen.kt:30 · LoginScreen\n  → LoginScreen.kt:86 · Button「登录」\n自身采集位置：LoginScreen.kt:86\n位置来自运行时采集，表示调用位置线索，不是已验证的函数声明；请结合项目代码确认。\nheight=48dp\n修改要求：\n高度改成 56dp\n保持现有圆角")
+        XCTAssertEqual(text, "## 组件路径\n已省略包装组件，末项为目标。\n\n```text\nLoginScreen.kt:30 (LoginScreen)\n  → LoginScreen.kt:86 (Button「登录」)\n```\n\n注：文件和行号为运行时采集的调用位置线索，请结合当前源码确认。\n\n## 所选参数\n```text\nheight=48dp\n```\n\n## 修改要求\n高度改成 56dp\n保持现有圆角")
         XCTAssertFalse(text.contains("enabled"))
         XCTAssertFalse(text.contains("#42"))
         XCTAssertFalse(text.contains("login_submit"))
@@ -49,14 +49,14 @@ final class WorkspaceTests: XCTestCase {
         let issue = ComponentIssue(component: ComponentKey(snapshotID: snapshot.id, nodeID: "login-text"),
                                    description: "文字加粗", parameterIDs: [])
         let text = LocatorTextBuilder.text(for: issue, in: snapshot)!
-        XCTAssertTrue(text.contains("位于 LoginScreen.kt:86 的 Button 内 · Text「登录」"))
+        XCTAssertTrue(text.contains("位于 LoginScreen.kt:86 的 Button 内 (Text「登录」)"))
     }
 
     func testBatchFailsInsteadOfSilentlySkippingUnavailableSources() {
         let snapshot = InspectorSnapshot.demo()
         let issue = ComponentIssue(component: ComponentKey(snapshotID: snapshot.id, nodeID: "login"), description: "修改", parameterIDs: [])
         XCTAssertNil(LocatorTextBuilder.batch([issue], snapshots: [:]))
-        XCTAssertTrue(LocatorTextBuilder.batch([issue], snapshots: [snapshot.id: snapshot])!.hasPrefix("1. 请按以下要求修改："))
+        XCTAssertTrue(LocatorTextBuilder.batch([issue], snapshots: [snapshot.id: snapshot])!.hasPrefix("# 问题 1\n\n## 组件路径\n已省略包装组件，末项为目标。\n\n```text"))
     }
 
     func testCoordinateMappingAndNestedHitCandidates() {

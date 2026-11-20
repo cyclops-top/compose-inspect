@@ -17,36 +17,69 @@
 package com.android.tools.ui.inspector.inspectors.view;
 
 import android.view.View;
+import android.view.WindowManager.LayoutParams;
 import android.view.inspector.WindowInspector;
 
 import com.android.tools.agent.appinspection.XrHelper;
 
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.Collections;
 import java.util.List;
 
 final class RootsDetector {
     private RootsDetector() {}
 
     /**
-     * Returns all root views currently attached to the window.
+     * Returns the last visible overlay when enabled, otherwise the focused visible root.
      *
      * <p>Note: This relies on {@link WindowInspector#getGlobalWindowViews()}, which requires API
      * 29+. This is intentional as the UI Inspector targets modern Android versions.
      */
-    static List<View> getRootViews(XrHelper xrHelper) {
+    static List<View> getRootViews(XrHelper xrHelper, boolean skipOverlays) {
         List<View> xrViews = xrHelper.getXrViews();
         // If there are xr panels, xrViews already contains both XR panel views and regular
         // window views merged without duplicates.
         List<View> views = !xrViews.isEmpty() ? xrViews : getAndroidViews();
         List<View> roots = new ArrayList<>();
         for (View view : views) {
-            if (view.getVisibility() == View.VISIBLE && view.isAttachedToWindow()) {
+            int type = view.getLayoutParams() instanceof LayoutParams
+                    ? ((LayoutParams) view.getLayoutParams()).type : 0;
+            if (skipOverlays && type >= LayoutParams.FIRST_SYSTEM_WINDOW) continue;
+            if (view.isShown() && view.isAttachedToWindow() && view.getWindowVisibility() == View.VISIBLE) {
                 roots.add(view);
             }
         }
-        roots.sort(Comparator.comparingDouble(View::getZ));
-        return roots;
+        if (roots.isEmpty()) throw new IllegalStateException("未找到可采集的窗口（可能已排除悬浮窗）");
+        // Overlays commonly use FLAG_NOT_FOCUSABLE; focus remains on the Activity below.
+        for (int index = roots.size() - 1; index >= 0; index--) {
+            View root = roots.get(index);
+            if (root.getLayoutParams() instanceof LayoutParams
+                    && ((LayoutParams) root.getLayoutParams()).type >= LayoutParams.FIRST_SYSTEM_WINDOW) {
+                return Collections.singletonList(root);
+            }
+        }
+        for (int index = roots.size() - 1; index >= 0; index--) {
+            if (roots.get(index).hasWindowFocus()) {
+                View parent = roots.get(index);
+                for (int i = roots.size() - 1; i >= 0; i--) {
+                    View panel = roots.get(i);
+                    if (!(panel.getLayoutParams() instanceof LayoutParams)) continue;
+                    LayoutParams params = (LayoutParams) panel.getLayoutParams();
+                    if (params.token == null || !params.token.equals(parent.getWindowToken())) continue;
+                    switch (params.type) {
+                        case LayoutParams.TYPE_APPLICATION_PANEL:
+                        case LayoutParams.TYPE_APPLICATION_SUB_PANEL:
+                        case LayoutParams.TYPE_APPLICATION_ATTACHED_DIALOG:
+                        case LayoutParams.FIRST_SUB_WINDOW + 5: // TYPE_APPLICATION_ABOVE_SUB_PANEL (hidden API)
+                            return Collections.singletonList(panel);
+                        default:
+                            break;
+                    }
+                }
+                return Collections.singletonList(parent);
+            }
+        }
+        return Collections.singletonList(roots.get(roots.size() - 1));
     }
 
     private static List<View> getAndroidViews() {

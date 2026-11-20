@@ -5,11 +5,11 @@ import SwiftUI
 struct IssuesWorkspaceView: View {
     @Bindable var store: WorkspaceStore
     var body: some View {
-        PersistentSplitView(name: "issues.columns", horizontal: true, flexiblePane: 2, panes: [
-            .init(minimum: 180, preferred: 250) { issueList },
-            .init(minimum: 220, preferred: 350) { aiPreview },
-            .init(minimum: 230) { editor }
-        ]).background(AppStyle.background)
+        PersistentSplitView(name: "issues.columns", horizontal: true, flexiblePane: 2, spaced: true, panes: [
+            .init(minimum: 180, preferred: 250) { issueList.workspacePanel() },
+            .init(minimum: 220, preferred: 350) { aiPreview.workspacePanel() },
+            .init(minimum: 230) { editor.workspacePanel() }
+        ])
     }
 
     private var issueList: some View {
@@ -41,12 +41,8 @@ struct IssuesWorkspaceView: View {
 
     private var aiPreview: some View {
         let text = store.currentText
-        return ScrollView {
-            Text(text.isEmpty ? "选中组件即可复制定位信息；也可补充修改要求。" : text)
-                .font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
-                .foregroundStyle(text.isEmpty ? .secondary : .primary)
-                .frame(maxWidth: .infinity, alignment: .topLeading).padding(14).padding(.bottom, 56)
-        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        return SelectableLocatorText(text: text)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.quaternary.opacity(0.15)).accessibilityLabel("AI 定位文本预览")
             .overlay(alignment: .bottomTrailing) {
                 copyButton("复制 AI 定位信息（⌘⌥C）", disabled: text.isEmpty) {
@@ -93,6 +89,44 @@ struct IssuesWorkspaceView: View {
                 EmptyState(icon: "cursorarrow.click", title: "先选择一个组件", subtitle: "在截图或组件树中选择后，直接输入描述。")
             }
         }.padding(.horizontal, 14).padding(.vertical, 10)
+    }
+}
+
+private struct SelectableLocatorText: NSViewRepresentable {
+    let text: String
+
+    final class Coordinator { var source: String? }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.scrollableTextView()
+        scroll.drawsBackground = false
+        scroll.hasHorizontalScroller = false
+        scroll.contentInsets.bottom = 56
+        let editor = scroll.documentView as! NSTextView
+        editor.isEditable = false
+        editor.isSelectable = true
+        editor.isRichText = true
+        editor.isHorizontallyResizable = false
+        editor.isVerticallyResizable = true
+        editor.autoresizingMask = [.width]
+        editor.textContainer?.widthTracksTextView = true
+        editor.textContainer?.lineFragmentPadding = 0
+        editor.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        editor.textContainerInset = NSSize(width: 14, height: 14)
+        editor.drawsBackground = false
+        editor.setAccessibilityLabel("AI 定位文本预览")
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let editor = scroll.documentView as? NSTextView else { return }
+        let displayed = text.isEmpty ? "选中组件即可复制定位信息；也可补充修改要求。" : text
+        // Preserve selection and scroll position during unrelated workspace updates.
+        if context.coordinator.source != text {
+            editor.textStorage?.setAttributedString(LocatorMarkdownRenderer.render(displayed))
+            context.coordinator.source = text
+        }
     }
 }
 

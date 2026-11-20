@@ -5,19 +5,23 @@ import ComposeInspectCore
 struct WorkspaceView: View {
     @Bindable var store: WorkspaceStore
     @Environment(ToolchainSettings.self) private var tools
+    @State private var showingCaptureMethod = false
 
     var body: some View {
         VStack(spacing: 0) {
-            PersistentSplitView(name: "workspace", horizontal: false, flexiblePane: 0, panes: [
+            PersistentSplitView(name: "workspace", horizontal: false, flexiblePane: 0, spaced: true, panes: [
                 .init(minimum: 260) {
-                    PersistentSplitView(name: "inspection", horizontal: true, flexiblePane: 1, panes: [
-                        .init(minimum: 180, preferred: 240) { HierarchyView(store: store) },
-                        .init(minimum: 260) { PreviewView(store: store) },
-                        .init(minimum: 255, preferred: 300) { InspectorView(store: store) }
+                    PersistentSplitView(name: "inspection", horizontal: true, flexiblePane: 1, spaced: true, panes: [
+                        .init(minimum: 180, preferred: 240) { HierarchyView(store: store).workspacePanel() },
+                        .init(minimum: 260) { PreviewView(store: store).workspacePanel() },
+                        .init(minimum: 255, preferred: 300) { InspectorView(store: store).workspacePanel() }
                     ])
                 },
-                .init(minimum: 170, preferred: 230) { IssuesWorkspaceView(store: store) }
+                .init(minimum: 170, preferred: 170) { IssuesWorkspaceView(store: store) }
             ])
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(Color(nsColor: .workspaceSurround))
             statusBar
         }
         .frame(minWidth: 940, minHeight: 670)
@@ -58,23 +62,71 @@ struct WorkspaceView: View {
                     .disabled(store.deviceSession.capturing || store.deviceSession.resolvingCaptureTarget)
                 }.font(.system(size: 12))
             }
-            ToolbarItem(placement: .automatic) { Spacer() }
-            ToolbarItemGroup(placement: .primaryAction) {
-                if store.deviceSession.capturing {
-                    ProgressView().controlSize(.small)
-                    Button("取消") { store.deviceSession.cancel() }
-                } else {
-                    Button { Task { await store.capture(settings: tools) } } label: {
-                        Image(systemName: "camera.fill")
+            if #available(macOS 26, *) {
+                ToolbarSpacer(.flexible, placement: .primaryAction)
+            } else {
+                ToolbarItem(placement: .automatic) { Spacer() }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                HStack(spacing: 14) {
+                    Toggle("跳过悬浮窗", isOn: Binding(
+                        get: { tools.skipOverlayWindows },
+                        set: { tools.skipOverlayWindows = $0 }
+                    ))
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 12))
+                    .disabled(store.isCapturing)
+                    .help("下次采集时排除系统类型悬浮窗；保留普通对话框和弹出菜单。截图仍包含屏幕上可见的悬浮窗。")
+                    if let metadata = store.snapshot.captureMetadata, let backend = metadata.backend {
+                        Button { showingCaptureMethod.toggle() } label: {
+                            Label(backend == .sdk ? "SDK" : "ui-inspector · 已降级",
+                                  systemImage: backend == .sdk ? "bolt.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(backend == .sdk ? Color.green : Color.orange)
+                        }
+                        .help("查看当前结果的采集方式")
+                        .popover(isPresented: $showingCaptureMethod) {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(backend == .sdk ? "本次通过 SDK 获取" : "本次已降级到 ui-inspector")
+                                    .font(.headline)
+                                Text(metadata.packageName).font(.caption).foregroundStyle(.secondary)
+                                Text("采集耗时：\(max(0, metadata.finishedAt.timeIntervalSince(metadata.startedAt)), specifier: "%.1f") 秒")
+                                    .font(.caption)
+                                if backend == .uiInspector {
+                                    Text("SDK 未接入或当前不可用。可在应用的 debug 构建中接入 Compose Inspector，重新安装并启动后再次抓取；已接入时请检查下方原因。")
+                                    Text("debugImplementation(\"top.cyclops:compose-inspector:0.1.1-snapshot\")")
+                                        .font(.system(.caption, design: .monospaced))
+                                    Text("当前优化版发布在本地 Maven：配置 mavenLocal()，将以上依赖加入应用模块并刷新依赖。无需修改业务源码，仅用于 debug 构建；当前采集 Compose 节点。")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    if let reason = metadata.diagnostics.first {
+                                        Text(reason).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                } else {
+                                    Text("应用内 SDK 采集，未使用 ui-inspector。")
+                                    ForEach(metadata.diagnostics.filter { $0.hasPrefix("耗时：") || $0.hasPrefix("传输：") }, id: \.self) { detail in
+                                        Text(detail).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .textSelection(.enabled)
+                            .padding(16)
+                            .frame(width: 380)
+                        }
+                    }
+                    Button {
+                        if store.isCapturing { store.stopCapture() }
+                        else { Task { await store.capture(settings: tools) } }
+                    } label: {
+                        Image(systemName: store.isCapturing ? "stop.fill" : "camera.fill")
                             .font(.system(size: 17, weight: .semibold))
                             .foregroundStyle(.white)
                             .frame(width: 48, height: 30)
                             .background(Color.accentColor.gradient, in: RoundedRectangle(cornerRadius: 8))
                             .contentShape(RoundedRectangle(cornerRadius: 8))
-                            .opacity(canCapture ? 1 : 0.4)
+                            .opacity(canCapture || store.isCapturing ? 1 : 0.4)
                     }.buttonStyle(.plain)
-                        .accessibilityLabel("获取界面")
-                        .disabled(!canCapture)
+                        .accessibilityLabel(store.isCapturing ? "停止获取界面" : "获取界面")
+                        .help(store.isCapturing ? "停止本次获取界面" : "重新获取界面")
+                        .disabled(!canCapture && !store.isCapturing)
                 }
             }
         }
@@ -84,8 +136,10 @@ struct WorkspaceView: View {
         .sheet(isPresented: Binding(get: { store.deviceSession.showApplications }, set: { store.deviceSession.showApplications = $0 })) {
             ApplicationPickerView(session: store.deviceSession)
         }
+        .sheet(isPresented: Binding(get: { tools.managingProjects }, set: { tools.managingProjects = $0 })) {
+            RecentProjectsView(settings: tools)
+        }
         .sheet(item: $store.rawPresentation) { RawJSONView(presentation: $0) }
-        .onChange(of: [store.deviceSession.selectedSerial ?? "", store.deviceSession.packageName]) { _, _ in store.targetChanged() }
         .task {
             await tools.loadEnvironmentIfNeeded()
             await tools.checkStartupEnvironment()
@@ -101,9 +155,28 @@ struct WorkspaceView: View {
 
     private var statusBar: some View {
         HStack(spacing: 7) {
-            Circle().fill(store.snapshot.captureMetadata == nil ? Color.secondary : Color.green).frame(width: 5, height: 5)
-            Text(store.deviceSession.capturing ? store.deviceSession.progress : store.notice).lineLimit(1)
+            if store.isCapturing {
+                ProgressView().controlSize(.mini)
+                Text(store.captureProgressText)
+                    .lineLimit(1)
+                if store.deviceSession.capturing, let start = store.deviceSession.captureStartedAt {
+                    TimelineView(.periodic(from: start, by: 1)) { context in
+                        Text("已耗时 \(max(0, Int(context.date.timeIntervalSince(start)))) 秒").monospacedDigit()
+                    }
+                }
+            } else {
+                Circle().fill(store.snapshot.captureMetadata == nil ? Color.secondary : Color.green).frame(width: 5, height: 5)
+                Text(store.notice).lineLimit(1)
+            }
+            if let latest = store.latestSnapshotID, latest != store.snapshot.id {
+                Button("返回最新快照") { store.showLatestCapture() }
+            }
             Spacer()
+            if !tools.androidProjectPath.isEmpty {
+                Label((tools.androidProjectPath as NSString).lastPathComponent, systemImage: "folder")
+                    .lineLimit(1).truncationMode(.middle).help(tools.androidProjectPath)
+                Divider().frame(height: 10)
+            }
             Text(store.hideInternalNodes ? "\(store.presentationIndex.nodes.count) / \(store.snapshotIndex.nodes.count) 个节点" : "\(store.snapshotIndex.nodes.count) 个节点")
             if store.snapshot.captureMetadata != nil {
                 Divider().frame(height: 10)
@@ -122,12 +195,57 @@ struct WorkspaceView: View {
     }
 }
 
+private extension NSColor {
+    static let workspaceSurround = NSColor(name: nil) { appearance in
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return NSColor(white: dark ? 0.24 : 0.89, alpha: 1)
+    }
+}
+
+extension View {
+    func workspacePanel() -> some View {
+        let outline = RoundedRectangle(cornerRadius: 9, style: .continuous)
+        return frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(AppStyle.background)
+            .clipShape(outline)
+            .overlay { outline.strokeBorder(AppStyle.divider.opacity(0.3), lineWidth: 0.5).allowsHitTesting(false) }
+            .background(Color(nsColor: .workspaceSurround))
+    }
+}
+
+private final class WorkspaceSplitView: NSSplitView {
+    var bottomHeight: NSLayoutConstraint?
+    var didDragDivider: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        guard let bottomHeight else { super.mouseDown(with: event); return }
+        bottomHeight.isActive = false
+        super.mouseDown(with: event)
+        bottomHeight.constant = arrangedSubviews[1].frame.height
+        bottomHeight.isActive = true
+        didDragDivider?()
+    }
+
+    override func setPosition(_ position: CGFloat, ofDividerAt index: Int) {
+        if let bottomHeight, bottomHeight.isActive, index == 0 {
+            bottomHeight.constant = max(0, bounds.height - position - dividerThickness)
+        }
+        super.setPosition(position, ofDividerAt: index)
+    }
+
+    override var dividerThickness: CGFloat { 5 }
+    override func drawDivider(in rect: NSRect) {
+        NSColor.workspaceSurround.setFill()
+        rect.fill()
+    }
+}
+
 struct PersistentSplitPane {
     let minimum: CGFloat
     let preferred: CGFloat?
     let content: AnyView
     init<Content: View>(minimum: CGFloat, preferred: CGFloat? = nil, @ViewBuilder content: () -> Content) {
-        self.minimum = minimum; self.preferred = preferred; self.content = AnyView(content())
+        self.minimum = minimum; self.preferred = preferred; self.content = AnyView(content().frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading))
     }
 }
 
@@ -136,17 +254,27 @@ struct PersistentSplitView: NSViewControllerRepresentable {
     let name: String
     let horizontal: Bool
     let flexiblePane: Int
+    var spaced = false
     let panes: [PersistentSplitPane]
     @Environment(ToolchainSettings.self) private var tools
 
     func makeNSViewController(context: Context) -> PersistedSplitController {
         let controller = PersistedSplitController()
+        if spaced { controller.splitView = WorkspaceSplitView() }
         controller.storageKey = "layout.split." + name
         controller.horizontal = horizontal
         controller.flexiblePane = flexiblePane
         controller.configure(panes: panes, tools: tools)
         return controller
     }
+    func sizeThatFits(_ proposal: ProposedViewSize, nsViewController: PersistedSplitController,
+                      context: Context) -> CGSize? {
+        // A divider changes the allocation inside its parent, never the size of the parent itself.
+        guard let width = proposal.width, let height = proposal.height,
+              width.isFinite, height.isFinite else { return nil }
+        return CGSize(width: width, height: height)
+    }
+
     func updateNSViewController(_ controller: PersistedSplitController, context: Context) {
         controller.configure(panes: panes, tools: tools)
     }
@@ -168,11 +296,24 @@ final class PersistedSplitController: NSSplitViewController {
             splitView.dividerStyle = .thin
             for (index, pane) in panes.enumerated() {
                 let host = NSHostingController(rootView: AnyView(pane.content.environment(tools)))
+                host.sizingOptions = []
                 let item = NSSplitViewItem(viewController: host)
                 item.minimumThickness = pane.minimum
                 item.holdingPriority = NSLayoutConstraint.Priority(rawValue: index == flexiblePane ? 250 : 260)
                 addSplitViewItem(item)
                 hosts.append(host)
+            }
+            if !horizontal, let split = splitView as? WorkspaceSplitView,
+               panes.count == 2, let preferred = panes[1].preferred {
+                let saved = UserDefaults.standard.array(forKey: storageKey) as? [Double]
+                let height = saved?.count == 2 ? saved?[1] : nil
+                let desired = height.flatMap { $0.isFinite && $0 > 0 ? CGFloat($0) : nil } ?? preferred
+                let constraint = hosts[1].view.heightAnchor.constraint(equalToConstant: max(panes[1].minimum, desired))
+                constraint.priority = .defaultHigh
+                constraint.isActive = true
+                split.bottomHeight = constraint
+                split.didDragDivider = { [weak self] in self?.saveSizes() }
+                return
             }
             NotificationCenter.default.addObserver(self, selector: #selector(dividersChanged), name: NSSplitView.didResizeSubviewsNotification, object: splitView)
         } else {
@@ -185,7 +326,8 @@ final class PersistedSplitController: NSSplitViewController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        guard !restored, !applying, view.window != nil, splitView.bounds.width > 0, splitView.bounds.height > 0 else { return }
+        guard (splitView as? WorkspaceSplitView)?.bottomHeight == nil,
+              !restored, !applying, view.window != nil, splitView.bounds.width > 0, splitView.bounds.height > 0 else { return }
         applying = true
         let length = horizontal ? splitView.bounds.width : splitView.bounds.height
         let available = max(0, length - CGFloat(max(0, panes.count - 1)) * splitView.dividerThickness)
@@ -217,5 +359,44 @@ final class PersistedSplitController: NSSplitViewController {
         let sizes = splitView.arrangedSubviews.map { Double(horizontal ? $0.frame.width : $0.frame.height) }
         guard sizes.count == panes.count, sizes.allSatisfy({ $0.isFinite && $0 > 0 }) else { return }
         UserDefaults.standard.set(sizes, forKey: storageKey)
+    }
+}
+
+private struct RecentProjectsView: View {
+    let settings: ToolchainSettings
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("管理最近工程").font(.headline)
+            if settings.recentProjects.isEmpty {
+                Text("暂无最近工程").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(settings.recentProjects, id: \.self) { path in
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading) {
+                            Text((path as NSString).lastPathComponent)
+                            Text(path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        }
+                        Spacer()
+                        if path == settings.androidProjectPath {
+                            Label("当前", systemImage: "checkmark").foregroundStyle(.secondary)
+                        } else {
+                            Button("切换") {
+                                settings.openProject(path)
+                                if settings.androidProjectPath == path { dismiss() }
+                            }
+                        }
+                        Button { settings.forgetProject(path) } label: { Image(systemName: "minus.circle") }
+                            .help("从最近记录中移除").accessibilityLabel("从最近记录中移除 " + path)
+                    }.padding(.vertical, 3)
+                }
+            }
+            HStack {
+                Button("清空最近记录") { settings.clearRecentProjects() }.disabled(settings.recentProjects.isEmpty)
+                Spacer()
+                Button("完成") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+        }.padding(20).frame(width: 560, height: 350)
     }
 }

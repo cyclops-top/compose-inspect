@@ -16,6 +16,7 @@ final class DeviceSession {
     var discovering = false
     var capturing = false
     var progress = ""
+    private(set) var captureStartedAt: Date?
     var showApplications = false
     var packageSearch = ""
     private var captureTask: Task<CapturedSnapshot, Error>?
@@ -94,14 +95,25 @@ final class DeviceSession {
     func capture(settings: ToolchainSettings) async throws -> CapturedSnapshot {
         guard !capturing, let device = selectedDevice, device.online else { throw CommandFailure.configuration("请先选择在线设备。") }
         let package = packageName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let client = InspectorClient(tools: try settings.resolvedTools())
+        let sdk = SDKInspectorClient(tools: try settings.resolvedTools(requireJava: false))
+        captureStartedAt = Date()
         capturing = true
         defer { capturing = false; captureTask = nil; progress = "" }
+        let skipOverlayWindows = settings.skipOverlayWindows
         let verifyConsistency = settings.verifyCaptureConsistency
         let task = Task { [weak self] in
-            try await client.capture(serial: device.serial, package: package, deviceName: device.model, verifyConsistency: verifyConsistency) { [weak session = self] value in
+            let progress: @Sendable (String) async -> Void = { [weak session = self] value in
                 await session?.setProgress(value)
             }
+            return try await AutomaticCapture.capture(sdk: {
+                try await sdk.capture(serial: device.serial, package: package, deviceName: device.model,
+                                      verifyConsistency: verifyConsistency, skipOverlayWindows: skipOverlayWindows, progress: progress)
+            }, inspector: {
+                // SDK-only users don't need Java/JAR. Resolve these only after SDK fallback.
+                let tools = try await MainActor.run { try settings.resolvedTools() }
+                return try await InspectorClient(tools: tools).capture(serial: device.serial, package: package,
+                    deviceName: device.model, verifyConsistency: verifyConsistency, skipOverlayWindows: skipOverlayWindows, progress: progress)
+            }, progress: progress)
         }
         captureTask = task
         let result = try await task.value
@@ -109,6 +121,11 @@ final class DeviceSession {
         return result
     }
     func cancel() { captureTask?.cancel() }
+    func waitForCaptureCancellation() async {
+        guard let task = captureTask else { return }
+        task.cancel()
+        _ = await task.result
+    }
     private func setProgress(_ value: String) { progress = value }
 }
 

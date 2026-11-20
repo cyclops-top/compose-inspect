@@ -1,0 +1,165 @@
+{
+  "date": "2026-11-02",
+  "environment": {
+    "device": "BSPAD",
+    "androidApi": 34,
+    "agp": "9.2.1",
+    "gradle": "9.4.1",
+    "kotlinCompiler": "2.4.21"
+  },
+  "scope": "Separate SDK build for each Compose version, same sample business sources, cold SDK-only and SDK-free ui-inspector processes. Node/source and parameter-name matching is not tree/value equivalence.",
+  "versions": {
+    "1.12.1": {
+      "businessSourceSha256": "2607ffbf673f340d881e7e3150b5378c27a918362d4540bf7bbb43f524b1c279",
+      "inspectorJarSha256": "20dd20f344c3827460e824be03dbfe80971312d48770cbae0caf5524fbcffdad",
+      "hostComposeVersionsUnchanged": true,
+      "apkChecks": {
+        "sdkApk": {
+          "initializerInDex": true,
+          "initializerInManifest": true,
+          "sha256": "c32c0f11c01c29dd8946f7bbba40ab1523e4cff3a32fb4530649b651b8021b11",
+          "bytes": 11544168
+        },
+        "baselineApk": {
+          "initializerInDex": false,
+          "initializerInManifest": false,
+          "sha256": "e71f9cf1f2161e2254a83e9e7aaefd314b12f168200e0ab2d781bf3e771679e9",
+          "bytes": 11543896
+        },
+        "releaseApk": {
+          "initializerInDex": false,
+          "initializerInManifest": false,
+          "sha256": "40a7f0cc920b4cf9baf2e69bed329b2b009f70ffd2a68ad53c8b0a7841b1cf19",
+          "bytes": 6508037
+        }
+      },
+      "scenarios": {
+        "main": {
+          "sdkStats": {
+            "tables": 6,
+            "groups": 604,
+            "namedGroups": 398,
+            "groupsWithSource": 489,
+            "parameters": 310
+          },
+          "sdkDiagnostics": [],
+          "inspectorComposeNodes": 105,
+          "matchedInspectorNodes": 105,
+          "missingInspectorNodes": [],
+          "inspectorParameters": 275,
+          "matchedInspectorParameterNames": 275,
+          "missingInspectorParameterNames": []
+        },
+        "dialog": {
+          "sdkStats": {
+            "tables": 7,
+            "groups": 680,
+            "namedGroups": 450,
+            "groupsWithSource": 543,
+            "parameters": 333
+          },
+          "sdkDiagnostics": [],
+          "inspectorComposeNodes": 113,
+          "matchedInspectorNodes": 113,
+          "missingInspectorNodes": [],
+          "inspectorParameters": 291,
+          "matchedInspectorParameterNames": 291,
+          "missingInspectorParameterNames": []
+        },
+        "popup": {
+          "sdkStats": {
+            "tables": 7,
+            "groups": 704,
+            "namedGroups": 468,
+            "groupsWithSource": 564,
+            "parameters": 339
+          },
+          "sdkDiagnostics": [],
+          "inspectorComposeNodes": 114,
+          "matchedInspectorNodes": 114,
+          "missingInspectorNodes": [],
+          "inspectorParameters": 295,
+          "matchedInspectorParameterNames": 295,
+          "missingInspectorParameterNames": []
+        }
+      },
+      "recompositionCount": 8
+    },
+    "1.10.6": {
+      "businessSourceSha256": "2607ffbf673f340d881e7e3150b5378c27a918362d4540bf7bbb43f524b1c279",
+      "inspectorJarSha256": "20dd20f344c3827460e824be03dbfe80971312d48770cbae0caf5524fbcffdad",
+      "hostComposeVersionsUnchanged": true,
+      "apkChecks": {
+        "sdkApk": {
+          "initializerInDex": true,
+          "initializerInManifest": true,
+          "sha256": "f2e761f1062e7b05e71b4f81c3ee559b014dc85050921c3fa32ff9d0ce448458",
+          "bytes": 9204339
+        },
+        "baselineApk": {
+          "initializerInDex": false,
+          "initializerInManifest": false,
+          "sha256": "dc3b66e56c508a875570862b6d369bf92cdce17d7cb86080d8b636fe1001c1b2",
+          "bytes": 9204067
+        },
+        "releaseApk": {
+          "initializerInDex": false,
+          "initializerInManifest": false,
+          "sha256": "922a4cf67b810ab9f167427aeb9292eed2a1e1b1ab52401a24746aafb392f205",
+          "bytes": 6182692
+        }
+      },
+      "scenarios": {
+        "main": {
+          "sdkStats": {
+            "tables": 6,
+            "groups": 621,
+            "namedGroups": 414,
+            "groupsWithSource": 506,
+            "parameters": 315
+          },
+          "sdkDiagnostics": [],
+          "inspectorComposeNodes": 105,
+          "matchedInspectorNodes": 105,
+          "missingInspectorNodes": [],
+          "inspectorParameters": 275,
+          "matchedInspectorParameterNames": 275,
+          "missingInspectorParameterNames": []
+        },
+        "dialog": {
+          "sdkStats": {
+            "tables": 7,
+            "groups": 719,
+            "namedGroups": 487,
+            "groupsWithSource": 582,
+            "parameters": 343
+          },
+          "sdkDiagnostics": [],
+          "inspectorComposeNodes": 113,
+          "matchedInspectorNodes": 113,
+          "missingInspectorNodes": [],
+          "inspectorParameters": 291,
+          "matchedInspectorParameterNames": 291,
+          "missingInspectorParameterNames": []
+        },
+        "popup": {
+          "sdkStats": {
+            "tables": 7,
+            "groups": 743,
+            "namedGroups": 505,
+            "groupsWithSource": 603,
+            "parameters": 349
+          },
+          "sdkDiagnostics": [],
+          "inspectorComposeNodes": 114,
+          "matchedInspectorNodes": 114,
+          "missingInspectorNodes": [],
+          "inspectorParameters": 295,
+          "matchedInspectorParameterNames": 295,
+          "missingInspectorParameterNames": []
+        }
+      },
+      "recompositionCount": 8
+    }
+  }
+}

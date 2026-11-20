@@ -5,6 +5,85 @@ import SwiftUI
 @testable import ComposeInspectCore
 
 final class CurrentSessionTests: XCTestCase {
+    @MainActor func testSourceFilterPromotesMatchingDescendantsAndSelectionKeepsClickedNode() async throws {
+        let suite = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = WorkspaceStore(filterDefaults: defaults)
+        let originalClickable = store.onlyClickableNodes, originalCompact = store.hideInternalNodes
+        defer { store.onlyClickableNodes = originalClickable; store.hideInternalNodes = originalCompact }
+        store.onlyClickableNodes = false
+        store.hideInternalNodes = false
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: root) }
+        try "package dev.composeinspect.sample".write(to: root.appendingPathComponent("Screen.kt"), atomically: true, encoding: .utf8)
+        store.projectSources.open(root.path)
+        defer { store.projectSources.open("") }
+        let deadline = ContinuousClock.now + .seconds(8)
+        while !store.projectSources.status.isEmpty && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let bounds = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let localSource = SourceAnchor(file: "Screen.kt", line: 10, packageHash: 577838147)
+        let leaf = InspectorNode(id: "leaf", rawID: 3, name: "Local", bounds: .zero, source: localSource)
+        let wrapper = InspectorNode(id: "wrapper", rawID: 4, name: "Wrapper", bounds: .zero, children: [leaf])
+        let child = InspectorNode(id: "impl", rawID: 2, name: "Implementation", bounds: bounds,
+                                  source: SourceAnchor(file: "Screen.kt", line: 1, packageHash: 123), children: [wrapper])
+        let parent = InspectorNode(id: "owner", rawID: 1, name: "Action", bounds: bounds,
+                                   source: SourceAnchor(file: "Screen.kt", line: 10, packageHash: 577838147), children: [child])
+        let image = try captured().imageData
+        for backend in [CaptureBackend.sdk, .uiInspector] {
+            let metadata = CaptureMetadata(serial: "s", packageName: "app", startedAt: Date(), finishedAt: Date(),
+                                           includeFacets: "", stableLayout: true, stableImage: true,
+                                           diagnostics: [], baselineJSON: Data(), backend: backend)
+            let snapshot = InspectorSnapshot(packageName: "app", deviceName: "test", pixelSize: bounds.size,
+                                             roots: [parent], captureMetadata: metadata)
+            try await store.applyCapture(CapturedSnapshot(snapshot: snapshot, imageData: image, aligned: true))
+            let mapper = CoordinateMapper(imageSize: bounds.size, canvasSize: bounds.size)
+            store.select(child.id)
+            XCTAssertEqual(store.selectedNodeID, child.id)
+            store.selectImage(at: CGPoint(x: 50, y: 50), mapper: mapper)
+            XCTAssertEqual(Set(store.hitCandidates), [child.id, parent.id])
+            store.select(wrapper.id)
+            XCTAssertEqual(store.selectedNodeID, wrapper.id)
+
+            store.onlySourceNodes = true
+            XCTAssertNil(store.selectedNodeID)
+            XCTAssertNil(store.presentationIndex.byID[wrapper.id])
+            XCTAssertEqual(store.presentationIndex.parentIDs[leaf.id], backend == .sdk ? parent.id : child.id)
+            store.selectImage(at: CGPoint(x: 50, y: 50), mapper: mapper)
+            XCTAssertEqual(Set(store.hitCandidates), backend == .sdk ? [parent.id] : [child.id, parent.id])
+            store.searchesAllComponents = true
+            XCTAssertNotNil(store.presentationIndex.byID[wrapper.id])
+            store.searchesAllComponents = false
+            store.onlySourceNodes = false
+        }
+    }
+
+    @MainActor func testEscapeExitsColorPickerBeforeClearingSelection() async throws {
+        let store = WorkspaceStore()
+        try await store.applyCapture(captured())
+        store.select("login")
+        let originalWireframes = store.showWireframes
+        defer { store.showWireframes = originalWireframes }
+        for show in [false, true] {
+            store.showWireframes = show
+            store.pickingColor = true
+            store.handleEscape()
+            XCTAssertFalse(store.pickingColor)
+            XCTAssertEqual(store.showWireframes, show)
+            XCTAssertEqual(store.selectedNodeID, "login")
+        }
+        store.handleEscape()
+        XCTAssertNil(store.selectedNodeID)
+        store.pickingColor = true
+        store.handleEscape()
+        XCTAssertFalse(store.pickingColor)
+        XCTAssertNil(store.selectedNodeID)
+    }
+
     @MainActor func testSwitchAfterCutRejectsPreviousEditorCallbacksIncludingAfterReselection() async throws {
         _ = NSApplication.shared
         let store = WorkspaceStore()
@@ -86,7 +165,7 @@ final class CurrentSessionTests: XCTestCase {
         return CapturedSnapshot(snapshot: .demo(), imageData: try XCTUnwrap(bitmap.representation(using: .png, properties: [:])), aligned: true)
     }
 
-    @MainActor func testNewCaptureReplacesEntireSessionAndRejectsOldEditorCallbacks() async throws {
+    @MainActor func testNewCaptureRetainsAnnotatedSnapshotAndRejectsOldEditorCallbacks() async throws {
         _ = NSApplication.shared
         let store = WorkspaceStore()
         XCTAssertTrue(store.snapshot.nodes.isEmpty)
@@ -97,13 +176,56 @@ final class CurrentSessionTests: XCTestCase {
         store.edit("修改按钮", for: oldKey, revision: oldRevision)
         XCTAssertEqual(store.issues.count, 1)
         try await store.applyCapture(captured())
-        XCTAssertTrue(store.issues.isEmpty)
-        XCTAssertEqual(store.snapshots.count, 1)
-        XCTAssertEqual(store.images.count, 1)
-        XCTAssertNil(store.snapshots[oldKey.snapshotID])
+        let latest = store.snapshot.id
+        XCTAssertEqual(store.snapshots.count, 2)
+        XCTAssertEqual(store.images.count, 2)
         store.edit("迟到的输入", for: oldKey, revision: oldRevision)
-        XCTAssertTrue(store.issues.isEmpty)
+        store.selectIssue(try XCTUnwrap(store.issues.first))
+        XCTAssertEqual(store.selectedKey, oldKey)
+        XCTAssertEqual(store.description, "修改按钮")
+        store.showLatestCapture()
+        XCTAssertEqual(store.snapshot.id, latest)
+        store.clearIssues()
+        XCTAssertNil(store.snapshots[oldKey.snapshotID])
         XCTAssertTrue(WorkspaceStore().snapshot.nodes.isEmpty)
+    }
+
+    @MainActor func testFailedRecapturePreservesWorkspace() async throws {
+        let store = WorkspaceStore()
+        try await store.applyCapture(captured())
+        store.select("screen")
+        let key = try XCTUnwrap(store.selectedKey)
+        store.edit("保留描述", for: key, revision: store.issueEditRevision)
+        store.zoom = 2
+        await store.capture(settings: ToolchainSettings())
+        XCTAssertNotNil(store.errorMessage)
+        XCTAssertEqual(store.selectedKey, key)
+        XCTAssertEqual(store.description, "保留描述")
+        XCTAssertEqual(store.zoom, 2)
+        XCTAssertNotNil(store.image)
+    }
+
+    @MainActor func testSearchAllComponentsKeepsQueryAndRestoresFilterOnClear() async throws {
+        let defaults = UserDefaults.standard
+        let compact = defaults.object(forKey: "hideInternalNodes")
+        let clickable = defaults.object(forKey: "onlyClickableNodes")
+        defer {
+            defaults.set(compact, forKey: "hideInternalNodes")
+            defaults.set(clickable, forKey: "onlyClickableNodes")
+        }
+        let store = WorkspaceStore()
+        store.onlyClickableNodes = true
+        try await store.applyCapture(captured())
+        store.search = "邮箱"
+        XCTAssertEqual(store.searchMatches, [])
+        store.searchesAllComponents = true
+        XCTAssertEqual(store.search, "邮箱")
+        XCTAssertTrue(store.searchMatches?.contains("email") == true)
+        store.search = ""
+        XCTAssertTrue(store.onlyClickableNodes)
+        XCTAssertFalse(store.searchesAllComponents)
+        XCTAssertNil(store.searchMatches)
+        XCTAssertNil(store.presentationIndex.byID["email"])
     }
 
     @MainActor func testClearSelectionPreservesIssueAndResetsHitCycle() async throws {

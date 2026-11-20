@@ -27,11 +27,12 @@ struct InspectorView: View {
                             Text("\(node.kind) · #\(node.rawID)\(node.label.map { " · \($0)" } ?? "")")
                                 .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
                         }
-                        Button { store.copyCurrentLocator() } label: {
-                            Label("复制 AI 定位信息", systemImage: "doc.on.doc")
-                                .frame(maxWidth: .infinity)
-                        }.buttonStyle(.borderedProminent)
-                            .help("⌘⌥C · 描述可选，复制当前组件及已选参数")
+                        SourceNavigationButton(source: store.sourceAnchor, project: tools.androidProjectPath,
+                                               inherited: LocatorTextBuilder.usableSource(node.source) != store.sourceAnchor,
+                                               index: store.usesProjectSources ? store.projectSources : nil,
+                                               copy: { store.copy($0) }, showNotice: { store.notice = $0 })
+                            .id(store.selectedKey)
+                            .id(tools.androidProjectPath)
                         VStack(alignment: .leading, spacing: 5) {
                             SectionCaption(text: "源码定位线索")
                             HStack(spacing: 7) {
@@ -133,6 +134,27 @@ struct InspectorView: View {
 private struct ComponentStylePreview: View {
     let node: InspectorNode
     let ancestors: [InspectorNode]
+    var includeInternalStyles = true
+
+    private var internalStyles: [InspectorNode] {
+        guard includeInternalStyles, node.isClickable else { return [] }
+        var result: [InspectorNode] = []
+        var seen = Set<String>()
+        if let identity = node.clickTargetID { seen.insert(identity) }
+        var pending = Array(node.children.reversed())
+        while let child = pending.popLast() {
+            // Independent actions own their visuals; inspect them by selecting that action.
+            if child.isClickable && (child.clickTargetID == nil || child.clickTargetID != node.clickTargetID) { continue }
+            let identity = child.clickTargetID ?? child.id
+            if let style = child.style,
+               style.layers.contains(where: { $0.kind == "background" || $0.kind == "clip" }),
+               seen.insert(identity).inserted {
+                result.append(child)
+            }
+            pending.append(contentsOf: child.children.reversed())
+        }
+        return result
+    }
     private var relatedShape: (InspectorNode, ComponentStyle, ComponentStyle.Layer)? {
         for ancestor in ancestors.reversed() {
             guard let style = ancestor.style, style.contentBounds == node.bounds else { continue }
@@ -147,7 +169,11 @@ private struct ComponentStylePreview: View {
     private func number(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(0...1))) }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionCaption(text: "当前组件 · 分层样式")
+            SectionCaption(text: includeInternalStyles ? "当前组件 · 自身样式" : "内部组件 · 自身样式")
+            if includeInternalStyles && node.isClickable {
+                Text("点击布局范围 · x \(number(node.bounds.minX)) y \(number(node.bounds.minY)) · \(number(node.bounds.width)) × \(number(node.bounds.height)) px")
+                    .foregroundStyle(.secondary)
+            }
             if let style = node.style {
                 let paddingCount = style.layers.reduce(0) { $0 + ($1.padding == nil ? 0 : 1) }
                 StyleLayerCanvas(style: style).frame(height: 170)
@@ -211,6 +237,19 @@ private struct ComponentStylePreview: View {
                     CornerRadiiDiagram(shape: shape, density: style.density, bounds: layer.bounds)
                     Text("以上来自外层组件，不计入当前节点的样式或 padding。")
                         .foregroundStyle(.secondary)
+                }
+            }
+            if !internalStyles.isEmpty {
+                Divider()
+                SectionCaption(text: "内部视觉样式 · 不改变点击范围")
+                ForEach(internalStyles) { child in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("归属：" + child.name).fontWeight(.medium)
+                        if let source = child.source { Text(source.text).foregroundStyle(.secondary) }
+                        Text("位置：x \(number(child.bounds.minX)) y \(number(child.bounds.minY)) · \(number(child.bounds.width)) × \(number(child.bounds.height)) px").foregroundStyle(.secondary)
+                        ComponentStylePreview(node: child, ancestors: [], includeInternalStyles: false)
+                    }.padding(8)
+                        .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 6))
                 }
             }
         }.font(.system(size: 10, design: .monospaced)).fixedSize(horizontal: false, vertical: true)

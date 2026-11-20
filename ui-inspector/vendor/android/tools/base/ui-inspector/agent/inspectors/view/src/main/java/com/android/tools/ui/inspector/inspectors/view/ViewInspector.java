@@ -91,6 +91,22 @@ public final class ViewInspector extends Inspector {
         }
     }
 
+    // Read optional field 100 without changing the pinned generated protocol runtime.
+    private static boolean skipOverlayWindows(DumpViewsCommand command) {
+        com.android.tools.idea.protobuf.CodedInputStream input =
+                com.android.tools.idea.protobuf.CodedInputStream.newInstance(command.toByteArray());
+        try {
+            int tag;
+            while ((tag = input.readTag()) != 0) {
+                if (tag == 800) return input.readBool();
+                if (!input.skipField(tag)) break;
+            }
+            return false;
+        } catch (java.io.IOException error) {
+            throw new IllegalArgumentException("Invalid window selection option", error);
+        }
+    }
+
     private void handleDumpViewsCommand(
             DumpViewsCommand dumpViewsCommand, CommandCallback callback) {
         boolean includeAttributes = dumpViewsCommand.getIncludeAttributes();
@@ -122,7 +138,7 @@ public final class ViewInspector extends Inspector {
                                 List<WindowInfo> windows;
                                 List<Display> displays;
                                 try {
-                                    List<View> roots = RootsDetector.getRootViews(xrHelper);
+                                    List<View> roots = RootsDetector.getRootViews(xrHelper, skipOverlayWindows(dumpViewsCommand));
                                     windows = new ArrayList<>(roots.size());
                                     for (View root : roots) {
                                         windows.add(

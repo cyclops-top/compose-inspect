@@ -30,7 +30,7 @@ final class ShapeAssociationTests: XCTestCase {
         let surface: [String: Any] = ["id": 2, "type": "ComposeNode", "className": "Surface", "bounds": bounds,
             "sourceLocation": ["fileName": "ResidentCard.kt", "lineNumber": 44], group: [evidence]]
         let root: [String: Any] = ["id": 1, "type": "ViewNode", "className": "AndroidComposeView", "bounds": outer,
-            "attributes": [["name": ComponentStyleCatalog.attribute, "value": String(decoding: catalog, as: UTF8.self)]], "children": [surface]]
+            "attributes": [["name": UIInspectorSnapshotAdapter.styleAttribute, "value": String(decoding: catalog, as: UTF8.self)]], "children": [surface]]
         let data = try JSONSerialization.data(withJSONObject: ["windows": [["root": root]]])
         return try SnapshotImporter.decode(data, imageSize: CGSize(width: 1080, height: 2400), packageName: "test.app")
     }

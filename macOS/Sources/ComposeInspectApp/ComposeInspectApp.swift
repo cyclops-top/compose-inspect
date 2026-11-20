@@ -8,22 +8,23 @@ struct ComposeInspectApp: App {
     @State private var toolchain = ToolchainSettings()
 
     var body: some Scene {
-        WindowGroup {
+        Window("CompScope", id: "workspace") {
             WorkspaceView(store: store)
                 .environment(toolchain)
                 .onAppear { appDelegate.store = store }
+                .onChange(of: toolchain.androidProjectPath, initial: true) { _, path in store.projectSources.open(path) }
                 .sheet(isPresented: $toolchain.showEnvironmentSetup) {
                     VStack(alignment: .leading, spacing: 12) {
                         Label("抓取环境需要配置", systemImage: "exclamationmark.triangle.fill")
                             .font(.headline).foregroundStyle(.orange)
-                        Text("启动检测发现工具缺失或版本不兼容，请在下方配置后重新检测。")
+                        Text("请先配置可用的 ADB。应用会优先通过 SDK 获取界面，需要 ui-inspector 时才使用 Java 和 JAR。")
                             .font(.callout)
                         ToolchainSettingsView(settings: toolchain)
                         HStack {
                             Spacer()
                             Button("稍后配置") { toolchain.showEnvironmentSetup = false }
                             Button("完成") { toolchain.showEnvironmentSetup = false }
-                                .disabled(!toolchain.environmentProblems.isEmpty || !toolchain.checking.isEmpty)
+                                .disabled(!toolchain.startupEnvironmentProblems.isEmpty || !toolchain.checking.isEmpty)
                         }
                     }.padding(20)
                 }
@@ -35,12 +36,35 @@ struct ComposeInspectApp: App {
             CommandGroup(replacing: .appSettings) {
                 SettingsLink { Text("设置…") }.keyboardShortcut(",", modifiers: .command)
             }
-            CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .newItem) {
+                Button("打开 Android 工程…") { toolchain.chooseAndroidProject() }
+                    .keyboardShortcut("o")
+                Menu("打开最近工程") {
+                    ForEach(toolchain.recentProjects, id: \.self) { path in
+                        Button {
+                            toolchain.openProject(path)
+                        } label: {
+                            let name = (path as NSString).lastPathComponent
+                            let duplicate = toolchain.recentProjects.contains {
+                                $0 != path && ($0 as NSString).lastPathComponent == name
+                            }
+                            let title = duplicate ? (path as NSString).abbreviatingWithTildeInPath : name
+                            if path == toolchain.androidProjectPath { Label(title, systemImage: "checkmark") }
+                            else { Text(title) }
+                        }
+                    }
+                    Divider()
+                    Button("管理最近工程…") { toolchain.managingProjects = true }
+                }
+                Button("关闭当前工程") { toolchain.closeProject() }
+                    .disabled(toolchain.androidProjectPath.isEmpty)
+            }
             CommandMenu("检查") {
-                Button("取消选择") { store.clearSelection() }
-                    .keyboardShortcut(.escape, modifiers: []).disabled(store.selectedNodeID == nil)
+                Button(store.pickingColor ? "退出取色" : "取消选择") { store.handleEscape() }
+                    .keyboardShortcut(.escape, modifiers: []).disabled(!store.pickingColor && store.selectedNodeID == nil)
                 Divider()
                 Toggle("显示组件线框", isOn: $store.showWireframes).keyboardShortcut("b", modifiers: [.command, .shift])
+                    .disabled(store.pickingColor)
                 Button("适合窗口") { store.fitImage() }.keyboardShortcut("0")
                 Divider()
                 Button("复制 AI 定位信息") { store.copyCurrentLocator() }
@@ -65,25 +89,63 @@ struct ComposeInspectApp: App {
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var store: WorkspaceStore?
     private var escapeMonitor: Any?
+    private var titleBarMonitor: Any?
+    private var previousFrame: NSRect?
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        titleBarMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            let handled = MainActor.assumeIsolated {
+                self?.handleTitleBarDoubleClick(event) ?? false
+            }
+            return handled ? nil : event
+        }
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let handled = MainActor.assumeIsolated {
                 guard event.keyCode == 53,
                       event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
                       let window = event.window, window == NSApp.keyWindow,
-                      window.title == "ComposeInspect", window.attachedSheet == nil,
-                      let store = self?.store, store.selectedNodeID != nil else { return false }
+                      window.title == "CompScope", window.attachedSheet == nil,
+                      let store = self?.store, store.pickingColor || store.selectedNodeID != nil else { return false }
                 // Let the input method dismiss its composition before clearing selection.
                 if let editor = window.firstResponder as? NSTextView, editor.hasMarkedText() { return false }
-                store.clearSelection()
+                if !event.isARepeat { store.handleEscape() }
                 return true
             }
             return handled ? nil : event
         }
     }
+    func handleTitleBarDoubleClick(_ event: NSEvent) -> Bool {
+        guard event.clickCount == 2, let window = event.window, window.title == "CompScope",
+              window.attachedSheet == nil, !window.styleMask.contains(.fullScreen),
+              let screen = window.screen else { return false }
+        let point = event.locationInWindow
+        guard point.y >= window.contentLayoutRect.maxY,
+              point.y < window.frame.height else { return false }
+
+        // Leave the standard window buttons and the app's toolbar controls to AppKit.
+        let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        let controls = buttons.compactMap { window.standardWindowButton($0) }
+        let items = (window.toolbar?.visibleItems ?? []).filter {
+            $0.itemIdentifier != .space && $0.itemIdentifier != .flexibleSpace
+        }.compactMap(\.view)
+        guard !(controls + items).contains(where: { view in
+            view.convert(view.bounds, to: nil).contains(point)
+        }) else { return false }
+        let available = screen.visibleFrame
+        if let previousFrame, window.frame.equalTo(available) {
+            window.setFrame(previousFrame, display: true)
+            self.previousFrame = nil
+        } else {
+            guard !window.frame.equalTo(available) else { return false }
+            previousFrame = window.frame
+            window.setFrame(available, display: true)
+        }
+        return true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
+        if let titleBarMonitor { NSEvent.removeMonitor(titleBarMonitor) }
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
         NSApp.keyWindow?.makeFirstResponder(nil)
     }

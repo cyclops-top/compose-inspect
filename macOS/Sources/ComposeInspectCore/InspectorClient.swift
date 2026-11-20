@@ -104,6 +104,10 @@ public struct InspectorToolchain: Sendable {
     }
 }
 
+public enum CaptureBackend: String, Codable, Sendable {
+    case sdk, uiInspector
+}
+
 public struct CaptureMetadata: Codable, Equatable, Sendable {
     public let serial: String
     public let packageName: String
@@ -114,6 +118,17 @@ public struct CaptureMetadata: Codable, Equatable, Sendable {
     public let stableImage: Bool
     public let diagnostics: [String]
     public let baselineJSON: Data
+    /// Optional for archives created before automatic SDK capture was introduced.
+    public let backend: CaptureBackend?
+
+    public init(serial: String, packageName: String, startedAt: Date, finishedAt: Date,
+                includeFacets: String, stableLayout: Bool, stableImage: Bool,
+                diagnostics: [String], baselineJSON: Data, backend: CaptureBackend? = nil) {
+        self.serial = serial; self.packageName = packageName
+        self.startedAt = startedAt; self.finishedAt = finishedAt; self.includeFacets = includeFacets
+        self.stableLayout = stableLayout; self.stableImage = stableImage
+        self.diagnostics = diagnostics; self.baselineJSON = baselineJSON; self.backend = backend
+    }
 }
 
 public struct ParameterRead: Codable, Equatable, Sendable, Identifiable {
@@ -161,7 +176,7 @@ public struct InspectorClient: Sendable {
         return String(text[range])
     }
 
-    public func capture(serial: String, package: String, deviceName: String, verifyConsistency: Bool = false,
+    public func capture(serial: String, package: String, deviceName: String, verifyConsistency: Bool = false, skipOverlayWindows: Bool = false,
                         progress: @escaping @Sendable (String) async -> Void = { _ in }) async throws -> CapturedSnapshot {
         guard Self.validPackage(package) else { throw CommandFailure.configuration("请输入合法的 Android 包名。") }
         guard FileManager.default.fileExists(atPath: tools.jar.path) else { throw CommandFailure.configuration("ui-inspector.jar 不存在，请重新构建应用或在设置中选择 JAR。") }
@@ -173,7 +188,7 @@ public struct InspectorClient: Sendable {
         guard try await devices().contains(where: { $0.serial == serial && $0.online }) else { throw CommandFailure.configuration("设备未授权、离线或已断开。") }
         var logs: [String] = []
         await progress("连接 inspector，读取组件树…")
-        let first = try await dump(serial: serial, package: package, output: directory.appendingPathComponent("first.json"))
+        let first = try await dump(serial: serial, package: package, skipOverlayWindows: skipOverlayWindows, output: directory.appendingPathComponent("first.json"))
         logs.append(first.log)
         await progress(verifyConsistency ? "获取截图并校验界面…" : "获取截图…")
         // shell v2 with no PTY keeps PNG bytes and remote stderr on separate streams.
@@ -192,7 +207,7 @@ public struct InspectorClient: Sendable {
             return CapturedSnapshot(snapshot: candidate.withCaptureContext(deviceName: deviceName, metadata: metadata),
                                     imageData: image1, aligned: false)
         }
-        let second = try await dump(serial: serial, package: package, output: directory.appendingPathComponent("tree.json"))
+        let second = try await dump(serial: serial, package: package, skipOverlayWindows: skipOverlayWindows, output: directory.appendingPathComponent("tree.json"))
         logs.append(second.log)
         let screen2 = try await adb(["-s", serial, "shell", "-T", "screencap", "-p"])
         let image2 = screen2.stdout
@@ -231,12 +246,12 @@ public struct InspectorClient: Sendable {
         return try InspectorDocument(data: result.stdout)
     }
     private var facets: String { "attributes,semantics,system-composables" + (tools.resolutionStack ? ",resolution-stack" : "") }
-    private func dump(serial: String, package: String, output: URL) async throws -> (data: Data, log: String) {
-        let result = try await invoke(["dump-ui", "--device", serial, "--package", package, "--include", facets, "--output", output.path])
+    private func dump(serial: String, package: String, skipOverlayWindows: Bool, output: URL) async throws -> (data: Data, log: String) {
+        let result = try await invoke(["dump-ui", "--device", serial, "--package", package, "--include", facets, "--output", output.path], skipOverlayWindows: skipOverlayWindows)
         return (try Data(contentsOf: output), String(decoding: result.stderr, as: UTF8.self))
     }
-    private func invoke(_ arguments: [String]) async throws -> CommandOutput {
-        let result = try await CommandRunner.run(tools.java, arguments: ["-jar", tools.jar.path] + arguments,
+    private func invoke(_ arguments: [String], skipOverlayWindows: Bool = false) async throws -> CommandOutput {
+        let result = try await CommandRunner.run(tools.java, arguments: (skipOverlayWindows ? ["-Dcomposeinspect.skipOverlays=true"] : []) + ["-jar", tools.jar.path] + arguments,
                                                  environment: tools.environment, timeout: 180)
         guard result.exitCode == 0 else {
             let diagnostic = String(decoding: result.stderr, as: UTF8.self)

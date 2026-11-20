@@ -1,10 +1,13 @@
 # UI Inspector
 
-ComposeInspect 下的 UI Inspector 子项目，源码、依赖、构建和运行产物均收纳在本目录内。以下命令在 `ui-inspector/` 目录执行；从工作区根目录执行时需添加 `ui-inspector/` 前缀。当前模块用于 Android UI 检查。
+CompScope 下的 UI Inspector 子项目，源码、依赖、构建和运行产物均收纳在本目录内。以下命令在 `ui-inspector/` 目录执行；从工作区根目录执行时需添加 `ui-inspector/` 前缀。当前模块用于 Android UI 检查。
 
 ## 编译与运行
 
-当前工具链适用于 Apple Silicon macOS。原生编译需要系统安装 Xcode Command Line Tools（`xcode-select -p` 可检查）；JDK、Bazel、Android SDK/NDK 和 Java/Kotlin 依赖均位于项目内。
+当前工具链适用于 Apple Silicon macOS。支持两种构建方式：
+
+- 完整 Android 工作区：沿用 Bazel，重建包括底层 Agent 在内的全部模块。
+- 当前源码快照：`build.sh` 在未安装项目内 Bazel 时自动调用 `build-standalone.py`，从源码重编 Kotlin CLI/Core、Java View Inspector 并生成 DEX；复用经过 SHA-256 固定的基线 JAR 中未修改的底层 Agent、协议和第三方运行库。这是增量源码构建，不是完整 AOSP 构建。
 
 ```sh
 ./build.sh
@@ -12,9 +15,13 @@ ComposeInspect 下的 UI Inspector 子项目，源码、依赖、构建和运行
 ./bin/ui-inspector dump-ui --help
 ```
 
-`build.sh` 从源码构建 deploy JAR，成功后更新 `lib/ui-inspector.jar`。默认使用 4 个并行任务，可通过 `BUILD_JOBS` 调整。附加参数会传给 Bazel，例如 `./build.sh --verbose_failures`。
+增量构建需要 Java 25+、Python 3、Android SDK platform `android-36` 和 build-tools `36.0.0`。可通过 `JAVA_HOME`、`ANDROID_HOME` 指定；macOS 默认检测本机 JDK 和 `~/Library/Android/sdk`。所需编译依赖从本机 Gradle 缓存或上游下载，按 `standalone-build.lock.json` 中的 SHA-256 验证。
 
-运行入口使用项目内 JBR 25 和 ADB，不依赖原 `~/.local/share/ui-inspector` 安装，也不依赖全局 `JAVA_HOME` 或 Android SDK 配置。JAR 缺失时会自动执行构建。源码改动后应重新运行 `./build.sh`。
+基线 JAR 保存在 `.build/standalone/bootstrap.jar`。清理 `.build` 前请保留它；在新机器上用 `UI_INSPECTOR_BOOTSTRAP=/path/to/original.jar ./build.sh` 指定符合锁文件哈希的原始包。不能拿优化后的 JAR 替代原始基线。脚本检查复用层的源码指纹，若 common/protocol、payload 或 art-tooling 改动，会拒绝增量构建，要求完整 Bazel 构建和重新锁定基线。
+
+成功后原子更新 `lib/ui-inspector.jar`；构建失败保留旧产物。构建来源和源码哈希写入 JAR 的 `META-INF/composeinspect-build.json` 及 `.build/standalone/build-info.json`。完整 Bazel 模式仍支持 `BUILD_JOBS` 和附加 Bazel 参数；增量模式不接收 Bazel 参数。
+
+运行入口优先尊重 `JAVA_HOME`/`ANDROID_HOME`，其次使用项目内工具，缺失时检测本机环境。源码变更后运行 `./build.sh`；JAR 不存在时启动脚本也会触发构建。
 
 ## 目录
 
@@ -44,10 +51,14 @@ ComposeInspect 下的 UI Inspector 子项目，源码、依赖、构建和运行
 
 ## 版本控制范围
 
-主仓库保存 `vendor/android/tools/base/ui-inspector/` 的源码快照，包含 ComposeInspect 的分层样式采集扩展；原上游仓库保留在本地。上游来源为 `https://android.googlesource.com/platform/tools/base`，快照基于提交 `45628254f0f8a9bb3755d73f3d30ca78fbb2153d`。其余 Android 构建工作区、SDK/JDK、Bazel 缓存及生成的 JAR 不纳入主仓库，需要在本地另行准备。
+主仓库保存 `vendor/android/tools/base/ui-inspector/` 的源码快照，包含 CompScope 的分层样式采集扩展；原上游仓库保留在本地。上游来源为 `https://android.googlesource.com/platform/tools/base`，快照基于提交 `45628254f0f8a9bb3755d73f3d30ca78fbb2153d`。其余 Android 构建工作区、SDK/JDK、Bazel 缓存及生成的 JAR 不纳入主仓库，需要在本地另行准备。
 
 ## Kotlin metadata 2.4 兼容
 
 Compose 1.12.1 的官方 inspector 内嵌 metadata 解析库最多接受 2.3，读取 Kotlin 2.4 应用参数时会失败。目前对 **Compose 1.12.1** 自动选择内置兼容版：保留原 inspector 与协议，只升级其隔离命名空间中的 `kotlin-metadata-jvm` 至 2.4.21，继续严格校验版本。其他 Compose 版本仍使用官方下载流程；显式 `--compose-inspector` 优先。官方缓存不覆盖，兼容版缓存损坏会重新提取。
 
 可复现构建、固定输入校验值和验证方式见 [compat/README.md](compat/README.md)。源码构建缺少兼容产物时会自动调用其构建脚本。
+
+## 本地性能优化维护
+
+优化基线、逐项补丁说明、验证限制及新版选择性合并流程见 [OPTIMIZATIONS.md](OPTIMIZATIONS.md)。

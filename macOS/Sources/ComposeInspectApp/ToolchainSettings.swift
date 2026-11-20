@@ -35,8 +35,18 @@ final class ToolchainSettings {
     private(set) var checking: Set<ToolKind> = []
     private var revisions: [ToolKind: UUID] = [:]
     private let defaults: UserDefaults
+    private(set) var recentProjects: [String] {
+        didSet { defaults.set(recentProjects, forKey: "source.recentProjects") }
+    }
+    var managingProjects = false
+    private(set) var androidProjectPath: String {
+        didSet { defaults.set(androidProjectPath, forKey: "source.androidProjectPath") }
+    }
     var inspectorJarOverride: String {
         didSet { defaults.set(inspectorJarOverride, forKey: "toolchain.inspectorJar") }
+    }
+    var skipOverlayWindows: Bool {
+        didSet { defaults.set(skipOverlayWindows, forKey: "capture.skipOverlays") }
     }
     var verifyCaptureConsistency: Bool {
         didSet { defaults.set(verifyCaptureConsistency, forKey: "capture.verifyConsistency") }
@@ -49,9 +59,13 @@ final class ToolchainSettings {
         self.defaults = defaults
         self.environment = environment
         self.inheritedEnvironment = environment
+        let current = defaults.string(forKey: "source.androidProjectPath") ?? ""
+        recentProjects = defaults.stringArray(forKey: "source.recentProjects") ?? (current.isEmpty ? [] : [current])
+        androidProjectPath = current
         adbOverride = defaults.string(forKey: "toolchain.adbPath") ?? ""
         javaOverride = defaults.string(forKey: "toolchain.javaPath") ?? ""
         inspectorJarOverride = defaults.string(forKey: "toolchain.inspectorJar") ?? ""
+        skipOverlayWindows = defaults.bool(forKey: "capture.skipOverlays")
         verifyCaptureConsistency = defaults.bool(forKey: "capture.verifyConsistency")
         includeResolutionStack = defaults.bool(forKey: "capture.resolutionStack")
     }
@@ -76,6 +90,38 @@ final class ToolchainSettings {
         if requireJava && !FileManager.default.fileExists(atPath: jar.path) { throw CommandFailure.configuration("未找到 ui-inspector.jar，请在设置的“检查”页选择，或重新构建应用。") }
         return InspectorToolchain(adb: adb.url, java: java ?? URL(fileURLWithPath: "/usr/bin/java"), jar: jar,
                                   environment: environment, resolutionStack: includeResolutionStack)
+    }
+
+    func chooseAndroidProject() {
+        let panel = NSOpenPanel()
+        panel.title = "选择 Android 工程目录"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        if !androidProjectPath.isEmpty { panel.directoryURL = URL(fileURLWithPath: androidProjectPath) }
+        if panel.runModal() == .OK, let url = panel.url { openProject(url.path) }
+    }
+
+    func openProject(_ path: String) {
+        var directory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &directory), directory.boolValue else {
+            let alert = NSAlert()
+            alert.messageText = "工程目录不存在"
+            alert.informativeText = path
+            alert.runModal()
+            return
+        }
+        androidProjectPath = path
+        recentProjects = Array(([path] + recentProjects.filter { $0 != path }).prefix(10))
+    }
+
+    func closeProject() { androidProjectPath = "" }
+
+    func forgetProject(_ path: String) {
+        recentProjects.removeAll { $0 == path }
+    }
+
+    func clearRecentProjects() {
+        recentProjects = []
     }
 
     func chooseInspectorJar() {
@@ -159,11 +205,17 @@ final class ToolchainSettings {
         return problems
     }
 
+    var startupEnvironmentProblems: [String] {
+        guard let result = results[.adb], !result.succeeded else { return [] }
+        return ["ADB：\(result.message)"]
+    }
+
     func checkStartupEnvironment() async {
         guard !hasCheckedStartup else { return }
         hasCheckedStartup = true
-        await validateEnvironment()
-        showEnvironmentSetup = !environmentProblems.isEmpty
+        // SDK capture needs only ADB. Java/JAR remain checked in Settings and on fallback.
+        await validate(.adb)
+        showEnvironmentSetup = !startupEnvironmentProblems.isEmpty
     }
 
     func validateEnvironment() async {
