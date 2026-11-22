@@ -6,7 +6,8 @@ struct PreviewView: View {
     @Bindable var store: WorkspaceStore
     @GestureState private var pinch: MagnifyGesture.Value?
     private static let zoomRange: ClosedRange<CGFloat> = 0.5...4
-    @State private var dragOrigin: CGSize?
+    private static let canvasInset = CGSize(width: 18, height: 16)
+    @State private var lastDragTranslation: CGSize?
     @State private var spaceHeld = false
     private var pickingColor: Bool { store.pickingColor }
     @State private var bitmap: ScreenshotPixels?
@@ -15,7 +16,7 @@ struct PreviewView: View {
     @AppStorage("colorLoupeMagnification") private var magnification = LoupeMagnification.x12
     @State private var cursorPixel: CGPoint?
     @State private var loupeCursor: NSCursor?
-    private var panning: Bool { spaceHeld || (!pickingColor && !store.selectionEnabled) || dragOrigin != nil }
+    private var panning: Bool { spaceHeld || (!pickingColor && !store.selectionEnabled) || lastDragTranslation != nil }
     @State private var canvasSize: CGSize = .zero
     @State private var hoverPoint: CGPoint?
     @State private var commandHeld = false
@@ -70,36 +71,19 @@ struct PreviewView: View {
                                 }
                                 measurement?.draw(in: context, size: size, mapper: mapper)
                             }.allowsHitTesting(false)
-                            if !commandHeld, store.canPickImage, let node = store.highlightedNode,
-                               store.isInVisibleWindow(node.id), !node.bounds.isEmpty {
-                                let rect = mapper.display(node.bounds)
-                                Text("\(node.shortName) · #\(node.rawID)")
-                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                    .padding(.horizontal, 6).padding(.vertical, 3)
-                                    .foregroundStyle(.white).background(Color.accentColor, in: RoundedRectangle(cornerRadius: 3))
-                                    .position(x: min(max(rect.minX + 50, 55), geometry.size.width - 55),
-                                              y: max(12, rect.minY - 12))
-                                    .allowsHitTesting(false)
-                            }
-                            if measurement == nil, let hovered, let point = hoverPoint, hovered.id != store.selectedNodeID {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(hovered.displayName).fontWeight(.medium)
-                                    Text(LocatorTextBuilder.sourceSummary(for: hovered.id, index: store.snapshotIndex))
-                                        .foregroundStyle(.secondary)
-                                }.font(.system(size: 10)).lineLimit(2).padding(6)
-                                    .frame(width: min(240, geometry.size.width - 12), alignment: .leading)
-                                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
-                                    .position(x: min(max(point.x, 126), max(126, geometry.size.width - 126)),
-                                              y: min(max(point.y + 40, 30), geometry.size.height - 30))
-                                    .allowsHitTesting(false)
-                            }
                         }
                     } else {
-                        EmptyState(icon: "camera", title: "尚未获取界面", subtitle: "选择设备和应用，点击右上角相机。")
+                        EmptyState(icon: "camera", title: "尚未获取界面", subtitle: "选择设备，待页面稳定后点击右上角相机。")
                     }
                 }
                 .contentShape(Rectangle())
-                .onChange(of: geometry.size, initial: true) { _, size in canvasSize = size }
+                .onChange(of: geometry.size, initial: true) { _, size in
+                    canvasSize = size
+                    store.imagePan = clampedPan(store.imagePan, zoom: store.zoom, in: size)
+                }
+                .onChange(of: store.zoom) { _, zoom in
+                    store.imagePan = clampedPan(store.imagePan, zoom: zoom, in: geometry.size)
+                }
                 .onContinuousHover { phase in
                     switch phase {
                     case .active(let point):
@@ -121,7 +105,7 @@ struct PreviewView: View {
                 .onChange(of: store.snapshot.id) { _, _ in hoverPoint = nil }
                 .onChange(of: store.presentationRevision) { _, _ in hoverPoint = nil }
                 .gesture(SpatialTapGesture().onEnded { event in
-                    guard !spaceHeld, dragOrigin == nil else { return }
+                    guard !spaceHeld, lastDragTranslation == nil else { return }
                     if pickingColor {
                         if let hex = sample(at: event.location, mapper: mapper),
                            store.copy(hex, successNotice: "已复制 " + hex) {
@@ -142,48 +126,37 @@ struct PreviewView: View {
                 .simultaneousGesture(DragGesture(minimumDistance: 3)
                     .onChanged { value in
                         guard panning, store.image != nil else { return }
-                        let origin = dragOrigin ?? store.imagePan
-                        dragOrigin = origin
-                        store.imagePan = CGSize(width: origin.width + value.translation.width,
-                                                height: origin.height + value.translation.height)
+                        let previous = lastDragTranslation ?? .zero
+                        lastDragTranslation = value.translation
+                        panBy(dx: value.translation.width - previous.width, dy: value.translation.height - previous.height,
+                              in: geometry.size)
                         updateCursor()
                     }
                     .onEnded { _ in
-                        dragOrigin = nil
+                        lastDragTranslation = nil
                         updateCursor()
                     })
                 .clipped()
             }
-            .padding(.horizontal, 18).padding(.top, 16).padding(.bottom, 16)
+            .padding(.horizontal, Self.canvasInset.width).padding(.vertical, Self.canvasInset.height)
             .background(AppStyle.canvas)
             .allowsHitTesting(!store.isCapturing)
-            .overlay(alignment: .bottomTrailing) {
-                floatingTools.padding(12)
-            }
-            .overlay(alignment: .bottomLeading) {
-                if !pickingColor && store.hitCandidates.count > 1 {
-                    HStack(spacing: 6) {
-                        Button { store.cycleHitCandidate(-1) } label: { Image(systemName: "chevron.left") }
-                            .help("上一个重叠组件（⌘⌥[）").accessibilityLabel("上一个重叠组件")
-                        Menu {
-                            ForEach(store.hitCandidates, id: \.self) { id in
-                                if let node = store.presentationIndex.byID[id] {
-                                    Button {
-                                        store.selectHitCandidate(id)
-                                    } label: {
-                                        Text((id == store.selectedNodeID ? "✓ " : "") + node.displayName)
-                                        Text(LocatorTextBuilder.sourceSummary(for: id, index: store.snapshotIndex))
-                                    }
-                                }
-                            }
-                        } label: {
-                            Text("\((store.selectedNodeID.flatMap { store.hitCandidates.firstIndex(of: $0) } ?? 0) + 1)/\(store.hitCandidates.count) 重叠组件")
-                        }.menuStyle(.borderlessButton).fixedSize()
-                        Button { store.cycleHitCandidate(1) } label: { Image(systemName: "chevron.right") }
-                            .help("下一个重叠组件（⌘⌥]）").accessibilityLabel("下一个重叠组件")
-                    }.buttonStyle(.plain).font(.system(size: 10))
-                        .padding(7).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6)).padding(12)
+            .overlay(alignment: .bottom) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        overlapPicker
+                        Spacer(minLength: 0)
+                        floatingTools.fixedSize()
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        overlapPicker
+                        HStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            floatingTools
+                        }
+                    }
                 }
+                .padding(12)
             }
             .overlay(alignment: .topLeading) {
                 if !pickingColor && store.snapshot.roots.count > 1 {
@@ -262,7 +235,7 @@ struct PreviewView: View {
                 let consumed = MainActor.assumeIsolated {
                     if event.type == .smartMagnify {
                         guard event.window?.isKeyWindow == true, let hoverPoint,
-                              store.image != nil, !store.isCapturing, dragOrigin == nil, pinch == nil else { return false }
+                              store.image != nil, !store.isCapturing, lastDragTranslation == nil, pinch == nil else { return false }
                         if store.zoom > 1 {
                             store.fitImage()
                         } else {
@@ -275,9 +248,8 @@ struct PreviewView: View {
                     if event.type == .scrollWheel {
                         guard event.hasPreciseScrollingDeltas, event.window?.isKeyWindow == true,
                               hoverPoint != nil, store.image != nil, !store.isCapturing,
-                              dragOrigin == nil, pinch == nil else { return false }
-                        store.imagePan = CGSize(width: store.imagePan.width + event.scrollingDeltaX,
-                                                height: store.imagePan.height + event.scrollingDeltaY)
+                              lastDragTranslation == nil, pinch == nil else { return false }
+                        panBy(dx: event.scrollingDeltaX, dy: event.scrollingDeltaY, in: canvasSize)
                         return true
                     }
                     if event.type == .flagsChanged {
@@ -335,13 +307,13 @@ struct PreviewView: View {
 
     private func updateCursor() {
         guard hoverPoint != nil else { return }
-        (dragOrigin != nil ? NSCursor.closedHand : panning ? NSCursor.openHand : pickingColor ? (loupeCursor ?? NSCursor.arrow) : NSCursor.arrow).set()
+        (lastDragTranslation != nil ? NSCursor.closedHand : panning ? NSCursor.openHand : pickingColor ? (loupeCursor ?? NSCursor.arrow) : NSCursor.arrow).set()
     }
 
     private func clearMeasurementHover() {
         if (panning || pickingColor) && hoverPoint != nil { NSCursor.arrow.set() }
         spaceHeld = false
-        dragOrigin = nil
+        lastDragTranslation = nil
         commandHeld = false
         hoverPoint = nil
     }
@@ -351,6 +323,26 @@ struct PreviewView: View {
               store.isInVisibleWindow(selected.id), store.isInVisibleWindow(hovered.id) else { return nil }
         return ComponentMeasurement(from: selected.bounds, to: hovered.bounds,
                                     selectedDensity: selected.style?.density, hoveredDensity: hovered.style?.density)
+    }
+
+    static func clampedPan(_ proposed: CGSize, imageSize: CGSize, canvasSize: CGSize, zoom: CGFloat) -> CGSize {
+        guard imageSize.width > 0, imageSize.height > 0, canvasSize.width > 0, canvasSize.height > 0 else { return .zero }
+        let centered = CoordinateMapper(imageSize: imageSize, canvasSize: canvasSize, zoom: zoom)
+        // About 1 cm on a typical Mac display, including the padding outside the clipped image area.
+        let edgeGap: CGFloat = 40
+        let limitX = max(0, edgeGap - canvasInset.width - centered.offset.x)
+        let limitY = max(0, edgeGap - canvasInset.height - centered.offset.y)
+        return CGSize(width: min(limitX, max(-limitX, proposed.width)),
+                      height: min(limitY, max(-limitY, proposed.height)))
+    }
+
+    private func clampedPan(_ pan: CGSize, zoom: CGFloat, in size: CGSize) -> CGSize {
+        Self.clampedPan(pan, imageSize: store.snapshot.pixelSize, canvasSize: size, zoom: zoom)
+    }
+
+    private func panBy(dx: CGFloat, dy: CGFloat, in size: CGSize) {
+        let proposed = CGSize(width: store.imagePan.width + dx, height: store.imagePan.height + dy)
+        store.imagePan = clampedPan(proposed, zoom: store.zoom, in: size)
     }
 
     private func pinchedViewport(_ gesture: MagnifyGesture.Value?, in size: CGSize) -> (zoom: CGFloat, pan: CGSize) {
@@ -366,7 +358,32 @@ struct PreviewView: View {
         // Keep the image pixel under the gesture anchor fixed as the screenshot scales.
         let x = point.x - size.width / 2
         let y = point.y - size.height / 2
-        return (zoom, CGSize(width: x + (pan.width - x) * ratio, height: y + (pan.height - y) * ratio))
+        let proposed = CGSize(width: x + (pan.width - x) * ratio, height: y + (pan.height - y) * ratio)
+        return (zoom, clampedPan(proposed, zoom: zoom, in: size))
+    }
+
+    @ViewBuilder private var overlapPicker: some View {
+        if !pickingColor && store.hitCandidates.count > 1 {
+            HStack(spacing: 6) {
+                Button { store.cycleHitCandidate(-1) } label: { Image(systemName: "chevron.left") }
+                    .help("上一个重叠组件（⌘⌥[）").accessibilityLabel("上一个重叠组件")
+                Menu {
+                    ForEach(store.hitCandidates, id: \.self) { id in
+                        if let node = store.presentationIndex.byID[id] {
+                            Button { store.selectHitCandidate(id) } label: {
+                                Text((id == store.selectedNodeID ? "✓ " : "") + node.displayName)
+                                Text(store.sourceSummary(for: id))
+                            }
+                        }
+                    }
+                } label: {
+                    Text("\((store.selectedNodeID.flatMap { store.hitCandidates.firstIndex(of: $0) } ?? 0) + 1)/\(store.hitCandidates.count) 重叠组件")
+                }.menuStyle(.borderlessButton).fixedSize()
+                Button { store.cycleHitCandidate(1) } label: { Image(systemName: "chevron.right") }
+                    .help("下一个重叠组件（⌘⌥]）").accessibilityLabel("下一个重叠组件")
+            }.buttonStyle(.plain).font(.system(size: 10)).fixedSize()
+                .padding(7).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+        }
     }
 
     private var floatingTools: some View {
@@ -422,7 +439,7 @@ struct PreviewView: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 14))
-                .frame(width: 30, height: 30)
+                .frame(minWidth: 24, idealWidth: 30, maxWidth: 30, minHeight: 30, maxHeight: 30)
                 .foregroundStyle(active ? Color.accentColor : Color.primary)
                 .background(active ? Color.accentColor.opacity(0.14) : .clear, in: RoundedRectangle(cornerRadius: 6))
         }

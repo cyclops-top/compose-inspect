@@ -30,7 +30,7 @@ final class FilterConfigurationTests: XCTestCase {
                                      bytesPerRow: 4, bitsPerPixel: 32)!
         bitmap.bitmapData?.initialize(repeating: 0, count: 4)
         try await store.applyCapture(CapturedSnapshot(snapshot: snapshot,
-            imageData: XCTUnwrap(bitmap.representation(using: .png, properties: [:])), aligned: true))
+            imageData: XCTUnwrap(bitmap.representation(using: .png, properties: [:]))))
         store.select("layout")
         let key = try XCTUnwrap(store.selectedKey)
         store.edit("调整布局", for: key, revision: store.issueEditRevision)

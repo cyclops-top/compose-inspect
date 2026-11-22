@@ -5,6 +5,24 @@ import SwiftUI
 @testable import ComposeInspectCore
 
 final class CurrentSessionTests: XCTestCase {
+    @MainActor func testPreviewPanStopsAtEdgesAndCentersLetterboxedAxes() {
+        let image = CGSize(width: 200, height: 400)
+        let canvas = CGSize(width: 300, height: 400)
+        let outside = CGSize(width: 2000, height: -2000)
+        func clamp(_ proposed: CGSize, zoom: CGFloat) -> CGSize {
+            PreviewView.clampedPan(proposed, imageSize: image, canvasSize: canvas, zoom: zoom)
+        }
+        let limit = clamp(outside, zoom: 2)
+        XCTAssertEqual(limit, CGSize(width: 72, height: -224))
+        XCTAssertEqual(clamp(CGSize(width: -2000, height: 2000), zoom: 2), CGSize(width: -72, height: 224))
+        let inward = CGSize(width: limit.width - 1, height: limit.height + 1)
+        XCTAssertEqual(clamp(inward, zoom: 2), inward)
+        XCTAssertEqual(clamp(limit, zoom: 1), CGSize(width: 0, height: -24))
+        XCTAssertEqual(clamp(limit, zoom: 0.5), .zero)
+        XCTAssertEqual(PreviewView.clampedPan(limit, imageSize: image, canvasSize: CGSize(width: 500, height: 400), zoom: 2),
+                       CGSize(width: 0, height: -224))
+    }
+
     @MainActor func testSourceFilterPromotesMatchingDescendantsAndSelectionKeepsClickedNode() async throws {
         let suite = UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -18,7 +36,9 @@ final class CurrentSessionTests: XCTestCase {
         let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: root) }
-        try "package dev.composeinspect.sample".write(to: root.appendingPathComponent("Screen.kt"), atomically: true, encoding: .utf8)
+        let feature = root.appendingPathComponent("feature/src")
+        try fm.createDirectory(at: feature, withIntermediateDirectories: true)
+        try "package dev.composeinspect.sample".write(to: feature.appendingPathComponent("Screen.kt"), atomically: true, encoding: .utf8)
         store.projectSources.open(root.path)
         defer { store.projectSources.open("") }
         let deadline = ContinuousClock.now + .seconds(8)
@@ -40,10 +60,19 @@ final class CurrentSessionTests: XCTestCase {
                                            diagnostics: [], baselineJSON: Data(), backend: backend)
             let snapshot = InspectorSnapshot(packageName: "app", deviceName: "test", pixelSize: bounds.size,
                                              roots: [parent], captureMetadata: metadata)
-            try await store.applyCapture(CapturedSnapshot(snapshot: snapshot, imageData: image, aligned: true))
+            try await store.applyCapture(CapturedSnapshot(snapshot: snapshot, imageData: image))
             let mapper = CoordinateMapper(imageSize: bounds.size, canvasSize: bounds.size)
             store.select(child.id)
             XCTAssertEqual(store.selectedNodeID, child.id)
+            let location = try XCTUnwrap(store.sourceLocation(for: child.id))
+            XCTAssertTrue(location.inherited)
+            XCTAssertEqual(location.anchor.text, "feature/src/Screen.kt:10")
+            XCTAssertTrue(store.sourceSummary.contains(location.anchor.text))
+            store.edit("调整子组件", for: try XCTUnwrap(store.selectedKey), revision: store.issueEditRevision)
+            XCTAssertTrue(store.currentText.contains("位于 feature/src/Screen.kt:10 的 Action 内"))
+            XCTAssertTrue(store.currentText.contains("工程内调用处：feature/src/Screen.kt:10"))
+            XCTAssertTrue(store.currentText.contains("组件自身采集位置：Screen.kt:1"))
+            XCTAssertEqual(store.batchText, "# 问题 1\n\n" + store.currentText)
             store.selectImage(at: CGPoint(x: 50, y: 50), mapper: mapper)
             XCTAssertEqual(Set(store.hitCandidates), [child.id, parent.id])
             store.select(wrapper.id)
@@ -162,10 +191,10 @@ final class CurrentSessionTests: XCTestCase {
                                      samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
                                      bytesPerRow: 4, bitsPerPixel: 32)!
         bitmap.bitmapData?.initialize(repeating: 0, count: 4)
-        return CapturedSnapshot(snapshot: .demo(), imageData: try XCTUnwrap(bitmap.representation(using: .png, properties: [:])), aligned: true)
+        return CapturedSnapshot(snapshot: .demo(), imageData: try XCTUnwrap(bitmap.representation(using: .png, properties: [:])))
     }
 
-    @MainActor func testNewCaptureRetainsAnnotatedSnapshotAndRejectsOldEditorCallbacks() async throws {
+    @MainActor func testNewCaptureDiscardsIssuesParametersAndOldEditorCallbacks() async throws {
         _ = NSApplication.shared
         let store = WorkspaceStore()
         XCTAssertTrue(store.snapshot.nodes.isEmpty)
@@ -173,34 +202,56 @@ final class CurrentSessionTests: XCTestCase {
         try await store.applyCapture(captured())
         store.select("login")
         let oldKey = try XCTUnwrap(store.selectedKey), oldRevision = store.issueEditRevision
+        store.toggleParameter("修饰符.height", enabled: true)
         store.edit("修改按钮", for: oldKey, revision: oldRevision)
-        XCTAssertEqual(store.issues.count, 1)
+        let oldIssue = try XCTUnwrap(store.currentIssue)
         try await store.applyCapture(captured())
-        let latest = store.snapshot.id
-        XCTAssertEqual(store.snapshots.count, 2)
-        XCTAssertEqual(store.images.count, 2)
+        XCTAssertNotEqual(store.snapshot.id, oldKey.snapshotID)
+        XCTAssertNil(store.selectedKey)
+        XCTAssertTrue(store.issues.isEmpty)
+        XCTAssertNil(store.batchText)
         store.edit("迟到的输入", for: oldKey, revision: oldRevision)
-        store.selectIssue(try XCTUnwrap(store.issues.first))
-        XCTAssertEqual(store.selectedKey, oldKey)
-        XCTAssertEqual(store.description, "修改按钮")
-        store.showLatestCapture()
-        XCTAssertEqual(store.snapshot.id, latest)
-        store.clearIssues()
-        XCTAssertNil(store.snapshots[oldKey.snapshotID])
-        XCTAssertTrue(WorkspaceStore().snapshot.nodes.isEmpty)
+        store.selectIssue(oldIssue)
+        XCTAssertNil(store.selectedKey)
+        store.select("login")
+        XCTAssertFalse(store.selectedParameters.contains("修饰符.height"))
+        XCTAssertTrue(store.issues.isEmpty)
+        XCTAssertFalse(store.canUndoClearIssues)
     }
 
-    @MainActor func testFailedRecapturePreservesWorkspace() async throws {
+    @MainActor func testSwitchingWindowClearsOldLocatorAndIssueSelectionReturnsToItsWindow() async throws {
+        let store = WorkspaceStore()
+        let sample = try captured()
+        let dialog = InspectorNode(id: "dialog", rawID: 100, name: "Dialog", bounds: .zero)
+        let snapshot = InspectorSnapshot(packageName: "test.app", deviceName: "test", pixelSize: sample.snapshot.pixelSize,
+                                         roots: sample.snapshot.roots + [dialog])
+        try await store.applyCapture(CapturedSnapshot(snapshot: snapshot, imageData: sample.imageData))
+        store.select("login")
+        store.edit("修改按钮", for: try XCTUnwrap(store.selectedKey), revision: store.issueEditRevision)
+        let issue = try XCTUnwrap(store.currentIssue)
+        store.windowRootID = dialog.id
+        XCTAssertNil(store.selectedKey)
+        XCTAssertTrue(store.currentText.isEmpty)
+        store.selectIssue(issue)
+        XCTAssertEqual(store.selectedKey, issue.component)
+        XCTAssertTrue(store.isInVisibleWindow("login"))
+    }
+
+    @MainActor func testStartingCaptureDiscardsIssuesEvenIfItFailsAndKeepsDisplayedImage() async throws {
         let store = WorkspaceStore()
         try await store.applyCapture(captured())
         store.select("screen")
         let key = try XCTUnwrap(store.selectedKey)
-        store.edit("保留描述", for: key, revision: store.issueEditRevision)
+        let revision = store.issueEditRevision
+        store.edit("上一轮的问题", for: key, revision: revision)
         store.zoom = 2
         await store.capture(settings: ToolchainSettings())
         XCTAssertNotNil(store.errorMessage)
-        XCTAssertEqual(store.selectedKey, key)
-        XCTAssertEqual(store.description, "保留描述")
+        XCTAssertNil(store.selectedKey)
+        store.edit("旧编辑回调", for: key, revision: revision)
+        XCTAssertTrue(store.issues.isEmpty)
+        XCTAssertFalse(store.canUndoClearIssues)
+        XCTAssertEqual(store.snapshot.id, key.snapshotID)
         XCTAssertEqual(store.zoom, 2)
         XCTAssertNotNil(store.image)
     }
@@ -278,6 +329,35 @@ final class CurrentSessionTests: XCTestCase {
         XCTAssertTrue(store.issues.isEmpty)
         XCTAssertTrue(store.description.isEmpty)
         XCTAssertEqual(store.selectedKey, key)
+    }
+
+    @MainActor func testUndoClearRestoresOrderAndParametersOnlyWithinCurrentCapture() async throws {
+        let store = WorkspaceStore()
+        try await store.applyCapture(captured())
+        for id in ["login", "email"] {
+            store.select(id)
+            store.toggleParameter("参数-\(id)", enabled: true)
+            store.edit("修改 \(id)", for: try XCTUnwrap(store.selectedKey), revision: store.issueEditRevision)
+        }
+        let before = store.issues
+        store.clearIssues()
+        XCTAssertTrue(store.canUndoClearIssues)
+        let clearedRevision = store.issueEditRevision
+        store.undoClearIssues()
+        store.edit("", for: try XCTUnwrap(store.selectedKey), revision: clearedRevision)
+        XCTAssertEqual(store.issues, before)
+        XCTAssertEqual(store.selectedParameters, ["参数-email"])
+        XCTAssertFalse(store.canUndoClearIssues)
+
+        store.clearIssues()
+        store.edit("新输入", for: try XCTUnwrap(store.selectedKey), revision: store.issueEditRevision)
+        store.undoClearIssues()
+        XCTAssertEqual(store.issues.map(\.description), ["新输入"])
+        store.clearIssues()
+        try await store.applyCapture(captured())
+        store.undoClearIssues()
+        XCTAssertFalse(store.canUndoClearIssues)
+        XCTAssertTrue(store.issues.isEmpty)
     }
     @MainActor func testClickableFilterLocksCompactAndHiddenIssueDoesNotChangeFiltersOrTreePath() async throws {
         _ = NSApplication.shared

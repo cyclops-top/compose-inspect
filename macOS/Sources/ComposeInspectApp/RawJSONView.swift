@@ -20,7 +20,7 @@ struct RawJSONView: View {
     private var scopes: [String] {
         var values = ["完整 JSON"]
         if presentation.nodePointer != nil { values = ["节点", "窗口", "完整 JSON"] }
-        if presentation.metadata != nil { values += ["采集信息", "首次抓取"] }
+        if presentation.metadata != nil { values += ["采集信息", "原始采集"] }
         if !presentation.reads.isEmpty { values.append("后续读取") }
         return values
     }
@@ -31,7 +31,7 @@ struct RawJSONView: View {
         case "窗口":
             return Data((presentation.document.window(for: presentation.nodePointer ?? "")?.jsonString(pretty: true) ?? "null").utf8)
         case "采集信息": return (try? JSONEncoder().encode(presentation.metadata)) ?? Data()
-        case "首次抓取": return presentation.metadata?.baselineJSON ?? Data()
+        case "原始采集": return presentation.metadata?.baselineJSON ?? Data()
         case "后续读取":
             return Data(InspectorJSON.array(presentation.reads.map { .object([
                 "parameterID": .string($0.parameterID), "readAt": .string($0.readAt.ISO8601Format()),

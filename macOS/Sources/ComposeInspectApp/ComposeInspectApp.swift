@@ -67,7 +67,7 @@ struct ComposeInspectApp: App {
                     .disabled(store.pickingColor)
                 Button("适合窗口") { store.fitImage() }.keyboardShortcut("0")
                 Divider()
-                Button("复制 AI 定位信息") { store.copyCurrentLocator() }
+                Button("复制当前组件") { store.copyCurrentLocator() }
                     .keyboardShortcut("c", modifiers: [.command, .option]).disabled(store.selectedNodeID == nil)
                 Button("选择父组件") { if let id = store.selectedParentID { store.select(id) } }
                     .keyboardShortcut(.upArrow, modifiers: [.command, .option]).disabled(store.selectedParentID == nil)

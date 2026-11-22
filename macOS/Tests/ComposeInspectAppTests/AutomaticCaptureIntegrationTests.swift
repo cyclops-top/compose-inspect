@@ -40,7 +40,6 @@ final class AutomaticCaptureIntegrationTests: XCTestCase {
         settings.adbOverride = try XCTUnwrap(env["COMPOSEINSPECT_ADB"])
         settings.javaOverride = expected == .sdk ? "/missing/java" : try XCTUnwrap(env["COMPOSEINSPECT_JAVA"])
         settings.inspectorJarOverride = expected == .sdk ? "/missing/jar" : try XCTUnwrap(env["COMPOSEINSPECT_JAR"])
-        settings.verifyCaptureConsistency = env["COMPOSEINSPECT_SINGLE_CAPTURE"] != "1"
         let standard = UserDefaults.standard
         let oldCompact = standard.object(forKey: "hideInternalNodes")
         let oldClickable = standard.object(forKey: "onlyClickableNodes")

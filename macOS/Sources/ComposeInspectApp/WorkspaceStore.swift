@@ -123,8 +123,9 @@ final class WorkspaceStore {
         imageHitCycle.reset(); hitCandidates = []
         if let selected = selectedNodeID, presentationIndex.byID[selected] == nil { clearSelection() }
     }
-    private(set) var snapshots: [UUID: InspectorSnapshot]
     private(set) var ledger = IssueLedger()
+    private var clearedIssues: (ledger: IssueLedger, parameters: [ComponentKey: Set<String>])?
+    var canUndoClearIssues: Bool { clearedIssues != nil }
     private(set) var selectedNodeID: String?
     private(set) var selectionRevision: UInt = 0
     var expandedNodes: Set<String> = []
@@ -151,12 +152,17 @@ final class WorkspaceStore {
     func fitImage() { zoom = 1; imagePan = .zero }
     var hitCandidates: [String] = []
     var windowRootID: String? {
-        didSet { if oldValue != windowRootID { imageHitCycle.reset(); hitCandidates = [] } }
+        didSet {
+            guard oldValue != windowRootID else { return }
+            imageHitCycle.reset()
+            hitCandidates = []
+            if let selectedNodeID, !isInVisibleWindow(selectedNodeID) { clearSelection() }
+        }
     }
     @ObservationIgnored private var imageHitCycle = ImageHitCycle()
     var errorMessage: String?
     var notice = "等待获取界面"
-    private(set) var images: [UUID: NSImage] = [:]
+    private(set) var image: NSImage?
     private var transientParameters: [ComponentKey: Set<String>] = [:]
     let deviceSession = DeviceSession()
     var rawPresentation: RawJSONPresentation?
@@ -169,7 +175,6 @@ final class WorkspaceStore {
         guard let key = selectedKey else { return [] }
         return Set(parameterRequests.keys.filter { $0.component == key }.map(\.parameterID))
     }
-    private(set) var latestSnapshotID: UUID?
     private(set) var issueEditRevision: UInt = 0
 
     init(filterDefaults: UserDefaults = .standard) {
@@ -179,7 +184,7 @@ final class WorkspaceStore {
             .flatMap { try? JSONDecoder().decode(NodeFilterConfiguration.self, from: $0) } ?? .defaults
         filterConfiguration = configuration
         let initial = Self.emptySnapshot()
-        snapshot = initial; snapshots = [initial.id: initial]
+        snapshot = initial
         let full = InspectorSnapshotIndex(initial)
         let compact = InspectorSnapshotIndex(initial, hidingInternals: true, configuration: configuration)
         snapshotIndex = full
@@ -212,7 +217,6 @@ final class WorkspaceStore {
         return ledger.issue(for: key)?.parameterIDs ?? transientParameters[key]
             ?? Set((selectedNode?.selectableParameters ?? []).filter { $0.name == "item.key" }.map(\.id))
     }
-    var image: NSImage? { images[snapshot.id] }
     var canPickImage: Bool {
         image != nil && (snapshot.document?.displays.count ?? 0) <= 1
     }
@@ -224,29 +228,26 @@ final class WorkspaceStore {
     var currentText: String {
         guard let key = selectedKey else { return "" }
         let target = ComponentIssue(component: key, description: description, parameterIDs: selectedParameters)
-        return LocatorTextBuilder.text(for: target, in: snapshot, index: snapshotIndex) ?? ""
+        return locatorText(for: target) ?? ""
     }
     let projectSources = ProjectSourceIndex()
     var usesProjectSources: Bool {
         snapshot.captureMetadata?.backend == .sdk && !projectSources.project.isEmpty
     }
-    private func projectNode(for id: String) -> InspectorNode? {
-        guard usesProjectSources else { return nil }
-        return snapshotIndex.path(to: id).reversed().first { projectSources.confirms($0.source) }
+    private func projectFile(for source: SourceAnchor) -> String? {
+        guard !projectSources.project.isEmpty else { return nil }
+        return projectSources.uniqueFile(for: source, requirePackageHash: snapshot.captureMetadata?.backend == .sdk)
     }
-    var sourceSummary: String {
-        if let id = selectedNodeID, let owner = projectNode(for: id), let anchor = owner.source {
-            return (id == owner.id ? "" : "父组件调用处 · ") + anchor.text
-        }
-        return selectedNodeID.map { LocatorTextBuilder.sourceSummary(for: $0, index: snapshotIndex) } ?? "未选择组件"
+    private func locatorText(for issue: ComponentIssue) -> String? {
+        LocatorTextBuilder.text(for: issue, in: snapshot, index: snapshotIndex, projectFile: projectFile)
     }
-    var sourceAnchor: SourceAnchor? {
-        guard let selectedNodeID else { return nil }
-        if let owner = projectNode(for: selectedNodeID) { return owner.source }
-        return snapshotIndex.path(to: selectedNodeID).reversed().lazy
-            .compactMap { LocatorTextBuilder.usableSource($0.source) }
-            .first
+    func sourceLocation(for id: String) -> LocatorTextBuilder.SourceLocation? {
+        LocatorTextBuilder.sourceLocation(in: snapshotIndex.path(to: id), projectFile: projectFile)
     }
+    func sourceSummary(for id: String) -> String {
+        sourceLocation(for: id)?.summary ?? "无源码位置：请按组件名、文字及资源线索搜索"
+    }
+    var sourceSummary: String { selectedNodeID.map(sourceSummary(for:)) ?? "未选择组件" }
     var selectedParentID: String? { path.dropLast().last?.id }
 
     func selectHitCandidate(_ id: String) {
@@ -262,11 +263,11 @@ final class WorkspaceStore {
         let next = (current + direction % hitCandidates.count + hitCandidates.count) % hitCandidates.count
         selectHitCandidate(hitCandidates[next])
     }
-    var batchText: String? { LocatorTextBuilder.batch(issues, snapshots: snapshots) }
+    var batchText: String? { LocatorTextBuilder.batch(issues, textForIssue: locatorText) }
     var path: [InspectorNode] { selectedNodeID.map { presentationIndex.path(to: $0) } ?? [] }
 
     func select(_ nodeID: String) {
-        guard presentationIndex.byID[nodeID] != nil else { return }
+        guard !isCapturing, presentationIndex.byID[nodeID] != nil else { return }
         selectNode(nodeID)
     }
 
@@ -322,22 +323,23 @@ final class WorkspaceStore {
     }
 
     func selectIssue(_ issue: ComponentIssue) {
-        showSnapshot(issue.component.snapshotID)
-        guard issue.component.snapshotID == snapshot.id, snapshotIndex.byID[issue.component.nodeID] != nil else { return }
+        guard issue.component.snapshotID == snapshot.id, ledger.issue(for: issue.component)?.id == issue.id else { return }
         if presentationIndex.byID[issue.component.nodeID] != nil { search = "" }
         selectNode(issue.component.nodeID)
     }
 
     /// Both the component and editing session must still be current for delayed AppKit events.
     func edit(_ text: String, for key: ComponentKey, revision: UInt) {
-        guard revision == issueEditRevision, key == selectedKey,
+        guard !isCapturing, revision == issueEditRevision, key == selectedKey, text != description,
               key.snapshotID == snapshot.id, snapshotIndex.byID[key.nodeID] != nil else { return }
         let parameters = selectedParameters
+        clearedIssues = nil
         ledger.update(key, description: text, parameterIDs: parameters)
     }
 
     func toggleParameter(_ id: String, enabled: Bool) {
-        guard let key = selectedKey else { return }
+        guard !isCapturing, let key = selectedKey, selectedParameters.contains(id) != enabled else { return }
+        clearedIssues = nil
         var ids = selectedParameters
         if enabled { ids.insert(id) } else { ids.remove(id) }
         transientParameters[key] = ids
@@ -346,52 +348,36 @@ final class WorkspaceStore {
 
     func remove(_ issue: ComponentIssue) {
         NSApp.keyWindow?.makeFirstResponder(nil)
+        guard ledger.issue(for: issue.component)?.id == issue.id else { return }
         issueEditRevision &+= 1
+        clearedIssues = nil
         ledger.update(issue.component, description: "", parameterIDs: [])
         transientParameters.removeValue(forKey: issue.component)
-        pruneSnapshots()
     }
 
     func clearIssues() {
         NSApp.keyWindow?.makeFirstResponder(nil)
+        guard !issues.isEmpty else { return }
         issueEditRevision &+= 1
+        clearedIssues = (ledger, transientParameters)
         ledger = IssueLedger()
         transientParameters = [:]
-        pruneSnapshots()
     }
 
-    func showLatestCapture() {
-        guard let latestSnapshotID else { return }
-        showSnapshot(latestSnapshotID)
+    func undoClearIssues() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        guard let previous = clearedIssues else { return }
+        issueEditRevision &+= 1
+        clearedIssues = nil
+        ledger = previous.ledger
+        transientParameters = previous.parameters
     }
 
-    private func showSnapshot(_ id: UUID) {
-        guard id != snapshot.id, let source = snapshots[id] else { return }
-        let indexes = PreparedIndexes(source, configuration: filterConfiguration, checkpoint: {})
-        display(source, indexes: indexes)
-        pruneSnapshots()
-    }
-
-    private func display(_ source: InspectorSnapshot, indexes: PreparedIndexes) {
+    private func discardCaptureIssues() {
         clearSelection()
-        cancelFilterIndexes()
-        rawPresentation = nil
-        parameterRequests = [:]
-        snapshot = source
-        search = ""
-        installIndexes(indexes)
-        expandedNodes = Set(source.roots.map(\.id))
-        windowRootID = source.roots.first?.id
-        fitImage()
-    }
-
-    private func pruneSnapshots() {
-        var retained = Set(issues.map { $0.component.snapshotID })
-        retained.insert(snapshot.id)
-        if let latestSnapshotID { retained.insert(latestSnapshotID) }
-        snapshots = snapshots.filter { retained.contains($0.key) }
-        images = images.filter { retained.contains($0.key) }
-        transientParameters = transientParameters.filter { retained.contains($0.key.snapshotID) }
+        ledger = IssueLedger()
+        transientParameters.removeAll()
+        clearedIssues = nil
     }
 
     func copyCurrentLocator(to pasteboard: NSPasteboard = .general) {
@@ -404,7 +390,7 @@ final class WorkspaceStore {
 
     func copyAllIssues() {
         NSApp.keyWindow?.makeFirstResponder(nil)
-        if let text = batchText { copy(text) }
+        if let text = batchText { _ = copy(text, successNotice: "已复制全部 \(issues.count) 条问题") }
     }
 
     func copy(_ text: String) {
@@ -442,7 +428,7 @@ final class WorkspaceStore {
         captureRequestID = UUID()
         parameterRequests = [:]
         let requestID = captureRequestID
-        NSApp.keyWindow?.makeFirstResponder(nil)
+        discardCaptureIssues()
         await deviceSession.waitForCaptureCancellation()
         guard captureRequestID == requestID else { return }
         do {
@@ -492,13 +478,18 @@ final class WorkspaceStore {
             if configuration == filterConfiguration { break }
             configuration = filterConfiguration
         }
-        guard let image = NSImage(data: captured.imageData) else { throw CocoaError(.fileReadCorruptFile) }
-        let source = captured.snapshot
-        snapshots[source.id] = source
-        images[source.id] = image
-        latestSnapshotID = source.id
-        display(source, indexes: indexes)
-        pruneSnapshots()
+        guard let newImage = NSImage(data: captured.imageData) else { throw CocoaError(.fileReadCorruptFile) }
+        discardCaptureIssues()
+        cancelFilterIndexes()
+        rawPresentation = nil
+        parameterRequests = [:]
+        snapshot = captured.snapshot
+        image = newImage
+        search = ""
+        installIndexes(indexes)
+        expandedNodes = Set(snapshot.roots.map(\.id))
+        windowRootID = snapshot.roots.first?.id
+        fitImage()
         notice = "已获取界面"
     }
 
@@ -512,7 +503,7 @@ final class WorkspaceStore {
     }
 
     func canRead(_ parameter: NodeParameter) -> Bool {
-        guard parameter.continuationToken != nil, snapshot.id == latestSnapshotID, !isCapturing, let metadata = snapshot.captureMetadata else { return false }
+        guard parameter.continuationToken != nil, !isCapturing, let metadata = snapshot.captureMetadata else { return false }
         return metadata.backend != .sdk && !deviceSession.capturing && metadata.serial == deviceSession.selectedSerial && metadata.packageName == deviceSession.packageName
     }
 
@@ -527,7 +518,7 @@ final class WorkspaceStore {
     func readParameter(_ parameter: NodeParameter,
                        operation: @MainActor () async throws -> InspectorDocument) async {
         guard canRead(parameter), let token = parameter.continuationToken, let key = selectedKey,
-              let source = snapshots[key.snapshotID], let metadata = source.captureMetadata else { return }
+              let metadata = snapshot.captureMetadata else { return }
         let requestKey = ParameterRequestKey(component: key, parameterID: parameter.id)
         guard parameterRequests[requestKey] == nil else { return }
         let requestID = UUID()
@@ -546,7 +537,6 @@ final class WorkspaceStore {
             var updated = snapshot
             let read = ParameterRead(nodeID: key.nodeID, parameterID: parameter.id, token: token, document: document)
             updated.parameterReads = (updated.parameterReads ?? []) + [read]
-            snapshots[key.snapshotID] = updated
             snapshot = updated
             if selectedKey == key { rawPresentation = RawJSONPresentation(title: "后续参数读取 · \(parameter.name)", document: document) }
             notice = "参数已继续读取；结果单独保存，原快照未被覆盖。"

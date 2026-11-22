@@ -436,6 +436,19 @@ public struct IssueLedger: Codable, Sendable {
 }
 
 public enum LocatorTextBuilder {
+    public struct SourceLocation {
+        public let anchor: SourceAnchor
+        public let ownerName: String
+        public let inherited: Bool
+        public let inProject: Bool
+
+        public var summary: String {
+            if inProject { return (inherited ? "父组件调用处 · " : "工程内调用处 · ") + anchor.text }
+            if inherited { return "祖先定位线索：\(anchor.text) · \(ownerName)（非当前组件位置）" }
+            return "自身采集位置：" + anchor.text + (anchor.line == nil ? "（行号未知）" : "")
+        }
+    }
+
     /// A reported callsite is a search anchor, never a verified declaration.
     public static func usableSource(_ source: SourceAnchor?) -> SourceAnchor? {
         guard let source else { return nil }
@@ -444,31 +457,42 @@ public enum LocatorTextBuilder {
         return SourceAnchor(file: file, line: source.line.flatMap { $0 > 0 ? $0 : nil }, packageHash: source.packageHash)
     }
 
+    public static func sourceLocation(in path: [InspectorNode], projectFile: (SourceAnchor) -> String? = { _ in nil }) -> SourceLocation? {
+        var nearest: SourceLocation?
+        for owner in path.reversed() {
+            guard let source = usableSource(owner.source) else { continue }
+            let inherited = owner.id != path.last?.id
+            if let file = projectFile(source) {
+                let anchor = SourceAnchor(file: file, line: source.line, packageHash: source.packageHash)
+                return SourceLocation(anchor: anchor, ownerName: owner.shortName, inherited: inherited, inProject: true)
+            }
+            if nearest == nil {
+                nearest = SourceLocation(anchor: source, ownerName: owner.shortName, inherited: inherited, inProject: false)
+            }
+        }
+        return nearest
+    }
+
     public static func sourceSummary(for nodeID: String, index: InspectorSnapshotIndex) -> String {
-        guard let node = index.byID[nodeID] else { return "未找到组件" }
-        if let source = usableSource(node.source) {
-            return "自身采集位置：" + source.text + (source.line == nil ? "（行号未知）" : "")
-        }
-        if let ancestor = index.path(to: nodeID).dropLast().reversed().first(where: { usableSource($0.source) != nil }),
-           let source = usableSource(ancestor.source) {
-            return "祖先定位线索：\(source.text) · \(ancestor.shortName)（非当前组件位置）"
-        }
-        return "无源码位置：请按组件名、文字及资源线索搜索"
+        guard index.byID[nodeID] != nil else { return "未找到组件" }
+        return sourceLocation(in: index.path(to: nodeID))?.summary ?? "无源码位置：请按组件名、文字及资源线索搜索"
     }
 
     public static func text(for issue: ComponentIssue, in snapshot: InspectorSnapshot,
-                            index suppliedIndex: InspectorSnapshotIndex? = nil) -> String? {
+                            index suppliedIndex: InspectorSnapshotIndex? = nil,
+                            projectFile: (SourceAnchor) -> String? = { _ in nil }) -> String? {
         let index = suppliedIndex ?? InspectorSnapshotIndex(snapshot)
         guard issue.component.snapshotID == snapshot.id, let node = index.byID[issue.component.nodeID] else { return nil }
         let path = index.path(to: node.id)
+        let source = sourceLocation(in: path, projectFile: projectFile)
         let location: String
-        if let source = usableSource(node.source) { location = source.text }
-        else if let ancestor = path.dropLast().reversed().first(where: { usableSource($0.source) != nil }), let source = usableSource(ancestor.source) {
-            location = "位于 \(source.text) 的 \(ancestor.shortName) 内"
+        if let source {
+            location = source.inherited ? "位于 \(source.anchor.text) 的 \(source.ownerName) 内" : source.anchor.text
         } else { location = path.map(\.shortName).joined(separator: " > ") }
         // A source callsite can have multiple runtime instances. Keep the shortest useful ancestor label.
-        let duplicates = index.nodes.filter { usableSource($0.source) == usableSource(node.source) && $0.displayName == node.displayName }
-        let context = duplicates.count > 1 ? path.dropLast().reversed().first(where: { $0.label != nil })?.displayName : nil
+        let capturedSource = usableSource(node.source)
+        let hasDuplicate = index.nodes.contains { $0.id != node.id && usableSource($0.source) == capturedSource && $0.displayName == node.displayName }
+        let context = hasDuplicate ? path.dropLast().reversed().first(where: { $0.label != nil })?.displayName : nil
         let target = context.map { "\($0) > \(node.displayName)" } ?? node.displayName
         let parameters = node.selectableParameters.filter { issue.parameterIDs.contains($0.id) }.map {
             "\($0.name)=\($0.value)\($0.isTruncated ? "（截断值）" : "")"
@@ -485,8 +509,11 @@ public enum LocatorTextBuilder {
         let hasRequest = !issue.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let locator = ["## 组件路径", "已省略包装组件，末项为目标。", "", codeBlock(route.enumerated().map { $0.offset == 0 ? $0.element : "  → " + $0.element }.joined(separator: "\n"))]
         var clues = ["", "注：文件和行号为运行时采集的调用位置线索，请结合当前源码确认。"]
-        if usableSource(node.source)?.line == nil {
-            clues.append(sourceSummary(for: node.id, index: index))
+        if let source, source.inProject {
+            clues.append("工程内调用处：\(source.anchor.text)" + (source.inherited ? "（父组件 \(source.ownerName)）" : ""))
+            clues.append("组件自身采集位置：" + (capturedSource?.text ?? "未提供"))
+        } else if capturedSource?.line == nil {
+            clues.append(source?.summary ?? "无源码位置：请按组件名、文字及资源线索搜索")
         }
         if let resource = node.idResource { clues.append("资源 ID：" + resource) }
         if let resource = node.layoutResource { clues.append("布局资源：" + resource) }
@@ -508,9 +535,18 @@ public enum LocatorTextBuilder {
     ]
 
     public static func batch(_ issues: [ComponentIssue], snapshots: [UUID: InspectorSnapshot]) -> String? {
+        var indexes: [UUID: InspectorSnapshotIndex] = [:]
+        return batch(issues) { issue in
+            guard let snapshot = snapshots[issue.component.snapshotID] else { return nil }
+            if indexes[snapshot.id] == nil { indexes[snapshot.id] = InspectorSnapshotIndex(snapshot) }
+            return text(for: issue, in: snapshot, index: indexes[snapshot.id])
+        }
+    }
+
+    public static func batch(_ issues: [ComponentIssue], textForIssue: (ComponentIssue) -> String?) -> String? {
         var sections: [String] = []
         for (index, issue) in issues.enumerated() {
-            guard let snapshot = snapshots[issue.component.snapshotID], let text = text(for: issue, in: snapshot) else { return nil }
+            guard let text = textForIssue(issue) else { return nil }
             sections.append("# 问题 \(index + 1)\n\n\(text)")
         }
         return sections.isEmpty ? nil : sections.joined(separator: "\n\n")

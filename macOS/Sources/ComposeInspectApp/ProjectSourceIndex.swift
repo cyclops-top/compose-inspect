@@ -186,7 +186,13 @@ final class ProjectSourceIndex {
     }
 
     func confirms(_ source: SourceAnchor?) -> Bool {
-        guard let source, let hash = source.packageHash, hash != -1 else { return false }
-        return matches(source).count == 1
+        guard let source else { return false }
+        return uniqueFile(for: source, requirePackageHash: true) != nil
+    }
+
+    func uniqueFile(for source: SourceAnchor, requirePackageHash: Bool) -> String? {
+        if requirePackageHash && (source.packageHash == nil || source.packageHash == -1) { return nil }
+        let paths = matches(source)
+        return paths.count == 1 ? paths.first : nil
     }
 }

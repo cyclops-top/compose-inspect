@@ -30,7 +30,7 @@ final class AsyncCaptureTests: XCTestCase {
         let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1, pixelsHigh: 1, bitsPerSample: 8,
             samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 4, bitsPerPixel: 32)!
         bitmap.bitmapData?.initialize(repeating: 0, count: 4)
-        return CapturedSnapshot(snapshot: snapshot, imageData: try XCTUnwrap(bitmap.representation(using: .png, properties: [:])), aligned: true)
+        return CapturedSnapshot(snapshot: snapshot, imageData: try XCTUnwrap(bitmap.representation(using: .png, properties: [:])))
     }
 
     private func store() -> WorkspaceStore {

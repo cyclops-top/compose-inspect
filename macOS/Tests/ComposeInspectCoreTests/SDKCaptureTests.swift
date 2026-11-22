@@ -84,7 +84,7 @@ final class SDKCaptureTests: XCTestCase {
                                        includeFacets: "attributes", stableLayout: false, stableImage: false,
                                        diagnostics: ["inspector diagnostic"], baselineJSON: Data("original".utf8))
         return CapturedSnapshot(snapshot: InspectorSnapshot(packageName: "dev.sample", deviceName: "test", pixelSize: .zero, roots: [], captureMetadata: metadata),
-                                imageData: Data([1, 2, 3]), aligned: false)
+                                imageData: Data([1, 2, 3]))
     }
 
     func testSDKSuccessNeverInvokesInspector() async throws {

@@ -28,10 +28,9 @@ enum AndroidSourceFiles {
     }
 }
 
-struct SourceNavigationButton: View {
-    let source: SourceAnchor?
+struct SourceNavigationButtons: View {
+    let location: LocatorTextBuilder.SourceLocation?
     let project: String
-    let inherited: Bool
     let index: ProjectSourceIndex?
     let copy: (String) -> Void
     let showNotice: (String) -> Void
@@ -41,58 +40,53 @@ struct SourceNavigationButton: View {
     @State private var failure: String?
 
     private static let studio = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.android.studio")
-    private static let icon = studio.map { NSWorkspace.shared.icon(forFile: $0.path) }
-    private var title: String {
-        if project.isEmpty { return "复制源码路径" }
-        return inherited && source != nil ? "在 Android Studio 中打开父组件调用处" : "在 Android Studio 中打开"
+    private static let studioIcon = studio.map { NSWorkspace.shared.icon(forFile: $0.path) }
+    private var source: SourceAnchor? { location?.anchor }
+    private var canOpen: Bool { source != nil && !project.isEmpty && !searching }
+    private var jumpTitle: String {
+        location?.inherited == true ? "跳转到父组件调用处" : "跳转到源码"
+    }
+    private var jumpHelp: String {
+        guard let source else { return "没有可用的源码位置" }
+        guard !project.isEmpty else { return "请先打开 Android 工程" }
+        return "在 Android Studio 中打开 " + source.text
     }
 
     var body: some View {
-        Button {
-            guard let source else { return }
-            if project.isEmpty { copy(source.text) } else { searching = true }
-        } label: {
-            HStack {
-                if searching {
-                    ProgressView().controlSize(.mini)
-                } else if !project.isEmpty, let icon = Self.icon {
-                    Image(nsImage: icon).resizable().frame(width: 18, height: 18)
-                } else {
-                    Image(systemName: project.isEmpty ? "doc.on.doc" : "hammer")
+        HStack(spacing: 0) {
+            Button { searching = true } label: {
+                ZStack {
+                    if searching { ProgressView().controlSize(.mini) }
+                    else if let icon = Self.studioIcon {
+                        Image(nsImage: icon).renderingMode(.original).resizable()
+                            .aspectRatio(contentMode: .fit).frame(width: 20, height: 20)
+                    } else { Image(systemName: "hammer") }
                 }
-                Text(title)
-            }.frame(maxWidth: .infinity)
+                .frame(width: 30, height: 26).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(jumpTitle)
+            .help(jumpHelp)
+            .disabled(!canOpen)
+
+            Divider().frame(height: 16)
+            Menu {
+                Button("打开") { searching = true }.disabled(!canOpen)
+                Button("复制") { if let source { copy(source.text) } }.disabled(source == nil)
+            } label: {
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold))
+                    .frame(width: 22, height: 26).contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel("源码操作").help("打开或复制源码位置")
+            .disabled(source == nil)
         }
-        .buttonStyle(.borderedProminent)
-        .disabled(source == nil || searching)
-        .help(source == nil ? "没有可用的源码位置" : (project.isEmpty ? "粘贴到 Android Studio 的文件搜索框" : title))
+        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
+        .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(.separator, lineWidth: 0.5).allowsHitTesting(false) }
         .contextMenu {
             if let source { Button("复制源码路径") { copy(source.text) } }
         }
-        .task(id: searching) {
-            guard searching, let source else { return }
-            defer { searching = false }
-            do {
-                let matches: [String]
-                if let index {
-                    guard index.project == project, index.status.isEmpty else {
-                        showNotice(index.status.isEmpty ? "工程源码索引正在切换" : index.status)
-                        return
-                    }
-                    matches = index.matches(source)
-                } else {
-                    matches = try await AndroidSourceFiles.matches(file: source.file, project: URL(fileURLWithPath: project))
-                }
-                try Task.checkCancellation()
-                if matches.isEmpty { showNotice("工程中未找到 " + source.file) }
-                else if matches.count == 1 && (index == nil || index?.confirms(source) == true) { open(matches[0]) }
-                else { candidates = matches; choosing = true }
-            } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
-                if !Task.isCancelled { showNotice(error.localizedDescription) }
-            } catch {
-                if !Task.isCancelled { failure = error.localizedDescription }
-            }
-        }
+        .task(id: searching) { await findSource() }
         .sheet(isPresented: $choosing) {
             VStack(alignment: .leading, spacing: 12) {
                 Text("选择源码文件").font(.headline)
@@ -111,6 +105,31 @@ struct SourceNavigationButton: View {
         .alert("无法打开源码", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
             Button("好") { failure = nil }
         } message: { Text(failure ?? "") }
+    }
+
+    private func findSource() async {
+        guard searching, let source else { return }
+        defer { searching = false }
+        do {
+            let matches: [String]
+            if let index {
+                guard index.project == project, index.status.isEmpty else {
+                    showNotice(index.status.isEmpty ? "工程源码索引正在切换" : index.status)
+                    return
+                }
+                matches = index.matches(source)
+            } else {
+                matches = try await AndroidSourceFiles.matches(file: source.file, project: URL(fileURLWithPath: project))
+            }
+            try Task.checkCancellation()
+            if matches.isEmpty { showNotice("工程中未找到 " + source.file) }
+            else if matches.count == 1 && (index == nil || (location?.inProject == true && source.file == matches[0])) { open(matches[0]) }
+            else { candidates = matches; choosing = true }
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile {
+            if !Task.isCancelled { showNotice(error.localizedDescription) }
+        } catch {
+            if !Task.isCancelled { failure = error.localizedDescription }
+        }
     }
 
     private func open(_ relativePath: String) {

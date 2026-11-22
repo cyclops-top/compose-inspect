@@ -4,11 +4,12 @@ import SwiftUI
 struct InspectorView: View {
     @Bindable var store: WorkspaceStore
     @Environment(ToolchainSettings.self) private var tools
+    @State private var moreExpanded = false
     @State private var expandedGroups: Set<NodeParameter.Group> = [.layout, .font, .modifier, .parameter, .attribute]
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("组件与参数选择").font(.system(size: 12, weight: .medium))
+                Text("组件属性").font(.system(size: 12, weight: .medium))
                 Spacer()
                 Button { store.showRawJSON() } label: { Image(systemName: "curlybraces") }
                     .buttonStyle(.plain).help("查看节点、窗口、显示配置和完整原始 JSON")
@@ -16,87 +17,110 @@ struct InspectorView: View {
                     .disabled(store.snapshot.document == nil)
             }.padding(.horizontal, 14).frame(height: 35).overlay(alignment: .bottom) { Divider() }
             if let node = store.selectedNode {
-                let visibleParameters = node.selectableParameters.filter {
-                    $0.hasDisplayContent || store.selectedParameters.contains($0.id)
-                }
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Label(node.shortName, systemImage: "square.on.square")
-                                .font(.system(size: 16, weight: .semibold))
-                            Text("\(node.kind) · #\(node.rawID)\(node.label.map { " · \($0)" } ?? "")")
-                                .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text(node.shortName)
+                                .font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                                .textSelection(.enabled)
+                            Spacer()
+                            let location = store.sourceLocation(for: node.id)
+                            SourceNavigationButtons(location: location, project: tools.androidProjectPath,
+                                index: store.usesProjectSources || location?.inProject == true ? store.projectSources : nil,
+                                copy: { store.copy($0) }, showNotice: { store.notice = $0 })
+                                .id(store.selectedKey).id(tools.androidProjectPath)
                         }
-                        SourceNavigationButton(source: store.sourceAnchor, project: tools.androidProjectPath,
-                                               inherited: LocatorTextBuilder.usableSource(node.source) != store.sourceAnchor,
-                                               index: store.usesProjectSources ? store.projectSources : nil,
-                                               copy: { store.copy($0) }, showNotice: { store.notice = $0 })
-                            .id(store.selectedKey)
-                            .id(tools.androidProjectPath)
-                        VStack(alignment: .leading, spacing: 5) {
-                            SectionCaption(text: "源码定位线索")
-                            HStack(spacing: 7) {
-                                Image(systemName: "doc.text").foregroundStyle(.secondary)
-                                Text(store.sourceSummary)
-                                    .font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
-                                Spacer(minLength: 0)
-                            }.padding(8).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
-                        }
-                        VStack(alignment: .leading, spacing: 5) {
-                            SectionCaption(text: node.isVirtualLayoutGroup ? "组合范围 · 屏幕像素" : "布局 · 屏幕像素")
-                            HStack {
-                                Text("x \(Int(node.bounds.minX))  y \(Int(node.bounds.minY))")
-                                Spacer()
-                                Text("\(Int(node.bounds.width)) × \(Int(node.bounds.height))")
-                            }.font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
-                        }
-                        if let text = TextComponentPreview(node: node) { TextComponentPreviewView(preview: text) }
-                        ComponentStylePreview(node: node, ancestors: Array(store.snapshotIndex.path(to: node.id).dropLast()))
+                        PrimaryAttributes(node: node, moreExpanded: $moreExpanded)
                         Divider()
-                        if node.idResource != nil || node.layoutResource != nil {
-                            VStack(alignment: .leading, spacing: 4) {
-                                SectionCaption(text: "资源")
-                                if let resource = node.idResource { Text(resource).textSelection(.enabled) }
-                                if let resource = node.layoutResource { Text(resource).textSelection(.enabled) }
-                            }.font(.system(size: 10, design: .monospaced))
-                        }
-                        VStack(alignment: .leading, spacing: 3) {
-                            SectionCaption(text: "选择要提供给 AI 的参数")
-                            Text("仅勾选需要的项；输入描述后自动记录。")
-                                .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        }
-                        if visibleParameters.isEmpty {
-                            Text("没有可用参数").font(.system(size: 11)).foregroundStyle(.tertiary).padding(.vertical, 10)
-                        }
-                        ForEach(NodeParameter.Group.allCases, id: \.self) { group in
-                            let parameters = visibleParameters.filter { $0.presentationGroup(isText: ["Text", "BasicText"].contains(node.shortName)) == group }
-                            if !parameters.isEmpty {
-                                DisclosureGroup(isExpanded: Binding(get: { expandedGroups.contains(group) }, set: {
-                                    if $0 { expandedGroups.insert(group) } else { expandedGroups.remove(group) }
-                                })) {
-                                    LazyVStack(spacing: 0) {
-                                        ForEach(parameters) { parameter in parameterRow(parameter) }
-                                    }.padding(.top, 3)
-                                } label: {
-                                    HStack {
-                                        Text(group.rawValue).font(.system(size: 11, weight: .medium))
-                                        Text("\(parameters.count)").font(.system(size: 10)).foregroundStyle(.tertiary)
-                                    }
-                                }
+                        DisclosureGroup(isExpanded: $moreExpanded) {
+                            if moreExpanded {
+                                VStack(alignment: .leading, spacing: 10) { details(for: node) }
+                                    .padding(.top, 6)
                             }
+                        } label: {
+                            Text("更多属性")
+                                .font(.subheadline.weight(.medium))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .onTapGesture { moreExpanded.toggle() }
                         }
                     }.padding(12)
                 }
-                HStack(spacing: 7) {
-                    Image(systemName: "checklist")
-                    Text("已选 \(store.selectedParameters.count) 项 · 当前组件")
-                    Spacer(minLength: 0)
-                }.font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 12).frame(height: 30)
-                    .background(AppStyle.sidebar).overlay(alignment: .top) { Divider() }
+                if moreExpanded || !store.selectedParameters.isEmpty {
+                    HStack(spacing: 7) {
+                        Image(systemName: "checklist")
+                        Text("已选 \(store.selectedParameters.count) 项 · 当前组件")
+                        Spacer(minLength: 0)
+                    }.font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 12).frame(height: 30)
+                        .background(AppStyle.sidebar).overlay(alignment: .top) { Divider() }
+                }
             } else {
                 EmptyState(icon: "cursorarrow", title: "未选中组件", subtitle: "点击截图或左侧组件树，查看参数。")
             }
         }.background(AppStyle.background)
+    }
+
+    @ViewBuilder
+    private func details(for node: InspectorNode) -> some View {
+        let visibleParameters = node.selectableParameters.filter {
+            $0.hasDisplayContent || store.selectedParameters.contains($0.id)
+        }
+        Text("\(node.kind) · #\(node.rawID)\(node.label.map { " · " + $0 } ?? "")")
+            .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        VStack(alignment: .leading, spacing: 5) {
+            SectionCaption(text: "源码定位线索")
+            HStack(spacing: 7) {
+                Image(systemName: "doc.text").foregroundStyle(.secondary)
+                Text(store.sourceSummary)
+                    .font(.system(size: 11, design: .monospaced)).textSelection(.enabled)
+                Spacer(minLength: 0)
+            }.padding(8).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
+        }
+        VStack(alignment: .leading, spacing: 5) {
+            SectionCaption(text: node.isVirtualLayoutGroup ? "组合范围 · 屏幕像素" : "布局 · 屏幕像素")
+            HStack {
+                Text("x \(Int(node.bounds.minX))  y \(Int(node.bounds.minY))")
+                Spacer()
+                Text("\(Int(node.bounds.width)) × \(Int(node.bounds.height))")
+            }.font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+        }
+        if let text = TextComponentPreview(node: node), let content = text.content {
+            TextComponentPreviewView(content: content, preview: text)
+        }
+        ComponentStylePreview(node: node, ancestors: Array(store.snapshotIndex.path(to: node.id).dropLast()))
+        Divider()
+        if node.idResource != nil || node.layoutResource != nil {
+            VStack(alignment: .leading, spacing: 4) {
+                SectionCaption(text: "资源")
+                if let resource = node.idResource { Text(resource).textSelection(.enabled) }
+                if let resource = node.layoutResource { Text(resource).textSelection(.enabled) }
+            }.font(.system(size: 10, design: .monospaced))
+        }
+        VStack(alignment: .leading, spacing: 3) {
+            SectionCaption(text: "选择要提供给 AI 的参数")
+            Text("仅勾选需要的项；输入描述后自动记录。")
+                .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        if visibleParameters.isEmpty {
+            Text("没有可用参数").font(.system(size: 11)).foregroundStyle(.tertiary).padding(.vertical, 10)
+        }
+        ForEach(NodeParameter.Group.allCases, id: \.self) { group in
+            let parameters = visibleParameters.filter { $0.presentationGroup(isText: ["Text", "BasicText"].contains(node.shortName)) == group }
+            if !parameters.isEmpty {
+                DisclosureGroup(isExpanded: Binding(get: { expandedGroups.contains(group) }, set: {
+                    if $0 { expandedGroups.insert(group) } else { expandedGroups.remove(group) }
+                })) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(parameters) { parameter in parameterRow(parameter) }
+                    }.padding(.top, 3)
+                } label: {
+                    HStack {
+                        Text(group.rawValue).font(.system(size: 11, weight: .medium))
+                        Text("\(parameters.count)").font(.system(size: 10)).foregroundStyle(.tertiary)
+                    }
+                }
+            }
+        }
     }
 
     private func parameterRow(_ parameter: NodeParameter) -> some View {
@@ -404,30 +428,150 @@ private struct CornerRadiusGlyph: Shape {
 private struct ParameterColorSwatch: View {
     let argb: String
     var alpha: Double = 1
+    var side: CGFloat = 16
     var body: some View {
         Canvas { context, size in
+            let tile = size.width / 4
             for row in 0..<4 {
                 for column in 0..<4 {
-                    context.fill(Path(CGRect(x: CGFloat(column) * 4, y: CGFloat(row) * 4, width: 4, height: 4)),
+                    context.fill(Path(CGRect(x: CGFloat(column) * tile, y: CGFloat(row) * tile, width: tile, height: tile)),
                         with: .color((row + column) % 2 == 0 ? .white : Color(white: 0.65)))
                 }
             }
             if let color = styleColor(argb) {
                 context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(color.opacity(alpha)))
             }
-        }.frame(width: 16, height: 16).clipShape(RoundedRectangle(cornerRadius: 3))
+        }.frame(width: side, height: side).clipShape(RoundedRectangle(cornerRadius: 3))
             .overlay { RoundedRectangle(cornerRadius: 3).strokeBorder(.secondary.opacity(0.5), lineWidth: 0.5) }
             .help("#\(argb) · 棋盘格表示透明")
             .accessibilityLabel("颜色预览 #\(argb)")
     }
 }
 
+private struct PrimaryAttributes: View {
+    let node: InspectorNode
+    @Binding var moreExpanded: Bool
+
+    private var isSurface: Bool {
+        node.shortName.hasSuffix("Button") || node.shortName.hasSuffix("Card")
+            || node.shortName.hasSuffix("CardView") || node.shortName == "Surface"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let text = TextComponentPreview(node: node) {
+                if let content = text.content {
+                    Text(verbatim: content.isEmpty ? "（空文本）" : content)
+                        .font(.system(size: 16, weight: .medium)).lineLimit(4).help(content)
+                }
+                if text.fontSize != nil || text.fontWeight != nil {
+                    HStack(spacing: 6) {
+                        if let size = text.fontSize, let unit = text.fontUnit { field("字号", number(size) + " " + unit) }
+                        if let weight = text.fontWeight { field("字重", String(weight)) }
+                    }
+                }
+                if let color = text.colorARGB { colorField("文字颜色", color) }
+            } else if !node.isVirtualLayoutGroup {
+                if isSurface { surface } else { layout }
+            }
+        }.font(.callout).textSelection(.enabled)
+    }
+
+    @ViewBuilder private var layout: some View {
+        let style = node.style
+        let bounds = style?.outerBounds ?? node.bounds
+        let density = style?.density ?? 1
+        let unit = style == nil ? " px" : " dp"
+        field("尺寸", number(bounds.width / density) + " × " + number(bounds.height / density) + unit)
+        if let style, style.layers.contains(where: { $0.padding != nil }) {
+            field("内边距", padding(style.totalPadding, unit: " dp"))
+        } else if node.kind == "ViewNode" {
+            let sides = ["paddingLeft", "paddingTop", "paddingRight", "paddingBottom"].compactMap { name in
+                node.parameters.first { $0.group == .attribute && $0.name == name }?.original?["value"]?.double
+            }
+            if sides.count == 4, sides.allSatisfy({ $0.isFinite && $0 >= 0 }) {
+                field("内边距", padding(.init(left: sides[0], top: sides[1], right: sides[2], bottom: sides[3]), unit: " px"))
+            }
+        }
+    }
+
+    @ViewBuilder private var surface: some View {
+        let backgrounds = node.style?.layers.filter { $0.kind == "background" } ?? []
+        if backgrounds.count > 1 {
+            attributeTile("背景") {
+                Button("\(backgrounds.count) 层背景") { moreExpanded = true }.buttonStyle(.link)
+            }
+        } else if let layer = backgrounds.first, let argb = layer.argb, styleColor(argb) != nil {
+            colorField("背景色", argb, alpha: layer.alpha)
+        } else if backgrounds.isEmpty, node.kind == "ViewNode",
+                  let color = node.parameters.first(where: { $0.group == .attribute && $0.name == "background" })?.colorARGB {
+            colorField("背景色", color)
+        }
+        if isSurface, node.style == nil, node.kind == "ComposeNode",
+           let color = node.parameters.first(where: { $0.group == .parameter && ["containerColor", "backgroundColor"].contains($0.name) && $0.colorARGB != nil })?.colorARGB {
+            colorField("背景色（参数）", color)
+        }
+        if let style = node.style {
+            let clips = style.layers.filter { $0.kind == "clip" }
+            let layers = clips.isEmpty ? backgrounds : clips
+            if let shape = layers.first?.shape, shape.kind == "rounded",
+               layers.allSatisfy({ $0.shape == shape }) {
+                let radii = [shape.topLeft, shape.topRight, shape.bottomRight, shape.bottomLeft].map { number($0 / style.density) }
+                if radii.allSatisfy({ $0 == radii[0] }) {
+                    field("圆角", radii[0] + " dp")
+                } else {
+                    field("圆角", "左上 " + radii[0] + " · 右上 " + radii[1] + "\n右下 " + radii[2] + " · 左下 " + radii[3] + " dp")
+                }
+            }
+        }
+    }
+
+    private func number(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(0...2))) }
+
+    private func padding(_ inset: ComponentStyle.Insets, unit: String) -> String {
+        if inset.left == inset.right && inset.top == inset.bottom {
+            if inset.left == inset.top { return number(inset.left) + unit }
+            return "水平 " + number(inset.left) + " · 垂直 " + number(inset.top) + unit
+        }
+        return "左 " + number(inset.left) + " · 右 " + number(inset.right) + "\n上 " + number(inset.top) + " · 下 " + number(inset.bottom) + unit
+    }
+
+    private func attributeTile(_ label: String, swatch: ParameterColorSwatch? = nil, @ViewBuilder value: () -> some View) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(label).font(.caption).foregroundStyle(.secondary)
+                value()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            swatch
+        }
+        .padding(9)
+        .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 7))
+    }
+
+    private func field(_ label: String, _ value: String) -> some View {
+        attributeTile(label) {
+            Text(verbatim: value).font(.system(size: 14, weight: .medium)).monospacedDigit()
+        }
+    }
+
+    private func colorField(_ label: String, _ argb: String, alpha: Double = 1) -> some View {
+        attributeTile(label, swatch: ParameterColorSwatch(argb: argb, alpha: alpha, side: 22)) {
+            HStack(spacing: 6) {
+                Text(verbatim: "#" + (argb.hasPrefix("FF") ? String(argb.dropFirst(2)) : argb))
+                if alpha != 1 { Text(verbatim: "× " + alpha.formatted(.percent)) }
+            }.font(.system(.body, design: .monospaced))
+        }
+    }
+}
+
 private struct TextComponentPreviewView: View {
+    let content: String
     let preview: TextComponentPreview
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             SectionCaption(text: "文本预览")
-            Text(preview.content.isEmpty ? "（空文本）" : preview.content)
+            Text(verbatim: content.isEmpty ? "（空文本）" : content)
                 .font(.system(size: preview.fontUnit == "sp" ? min(preview.fontSize ?? 14, 96) : 14))
                 .foregroundStyle(preview.colorARGB.flatMap(styleColor) ?? .primary)
                 .textSelection(.enabled).padding(12).frame(maxWidth: .infinity, alignment: .leading)
@@ -441,16 +585,6 @@ private struct TextComponentPreviewView: View {
                         }
                     }
                 }.clipShape(RoundedRectangle(cornerRadius: 5))
-            HStack(spacing: 6) {
-                if let argb = preview.colorARGB {
-                    ParameterColorSwatch(argb: argb)
-                    Text("#" + argb)
-                } else { Text("颜色未采集 · 使用示意色") }
-                Spacer(minLength: 0)
-                if let size = preview.fontSize, let unit = preview.fontUnit {
-                    Text(size.formatted(.number.precision(.fractionLength(0...1))) + unit)
-                } else { Text("字号未采集") }
-            }.font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
         }
     }
 }

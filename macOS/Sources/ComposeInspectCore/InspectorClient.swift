@@ -114,15 +114,16 @@ public struct CaptureMetadata: Codable, Equatable, Sendable {
     public let startedAt: Date
     public let finishedAt: Date
     public let includeFacets: String
-    public let stableLayout: Bool
-    public let stableImage: Bool
+    // Older archives may contain measurements from a second capture.
+    public let stableLayout: Bool?
+    public let stableImage: Bool?
     public let diagnostics: [String]
     public let baselineJSON: Data
     /// Optional for archives created before automatic SDK capture was introduced.
     public let backend: CaptureBackend?
 
     public init(serial: String, packageName: String, startedAt: Date, finishedAt: Date,
-                includeFacets: String, stableLayout: Bool, stableImage: Bool,
+                includeFacets: String, stableLayout: Bool? = nil, stableImage: Bool? = nil,
                 diagnostics: [String], baselineJSON: Data, backend: CaptureBackend? = nil) {
         self.serial = serial; self.packageName = packageName
         self.startedAt = startedAt; self.finishedAt = finishedAt; self.includeFacets = includeFacets
@@ -147,7 +148,6 @@ public struct ParameterRead: Codable, Equatable, Sendable, Identifiable {
 public struct CapturedSnapshot: Sendable {
     public let snapshot: InspectorSnapshot
     public let imageData: Data
-    public let aligned: Bool
 }
 
 public struct InspectorClient: Sendable {
@@ -176,7 +176,7 @@ public struct InspectorClient: Sendable {
         return String(text[range])
     }
 
-    public func capture(serial: String, package: String, deviceName: String, verifyConsistency: Bool = false, skipOverlayWindows: Bool = false,
+    public func capture(serial: String, package: String, deviceName: String, skipOverlayWindows: Bool = false,
                         progress: @escaping @Sendable (String) async -> Void = { _ in }) async throws -> CapturedSnapshot {
         guard Self.validPackage(package) else { throw CommandFailure.configuration("请输入合法的 Android 包名。") }
         guard FileManager.default.fileExists(atPath: tools.jar.path) else { throw CommandFailure.configuration("ui-inspector.jar 不存在，请重新构建应用或在设置中选择 JAR。") }
@@ -186,46 +186,20 @@ public struct InspectorClient: Sendable {
         defer { try? FileManager.default.removeItem(at: directory) }
         // Also starts/connects the ADB server using the exact executable selected in Settings.
         guard try await devices().contains(where: { $0.serial == serial && $0.online }) else { throw CommandFailure.configuration("设备未授权、离线或已断开。") }
-        var logs: [String] = []
         await progress("连接 inspector，读取组件树…")
-        let first = try await dump(serial: serial, package: package, skipOverlayWindows: skipOverlayWindows, output: directory.appendingPathComponent("first.json"))
-        logs.append(first.log)
-        await progress(verifyConsistency ? "获取截图并校验界面…" : "获取截图…")
+        let tree = try await dump(serial: serial, package: package, skipOverlayWindows: skipOverlayWindows, output: directory.appendingPathComponent("tree.json"))
+        await progress("获取截图…")
         // shell v2 with no PTY keeps PNG bytes and remote stderr on separate streams.
         // exec-out merges remote warnings into stdout on some Android versions.
-        let screen1 = try await adb(["-s", serial, "shell", "-T", "screencap", "-p"])
-        let image1 = screen1.stdout
-        logs.append(String(decoding: screen1.stderr, as: UTF8.self))
-        if !verifyConsistency {
-            let size = try Self.imageSize(image1)
-            let candidate = try SnapshotImporter.decode(first.data, imageSize: size, packageName: package)
-            logs.append("未启用采集一致性校验，仅采集一轮节点树和截图。")
-            let metadata = CaptureMetadata(serial: serial, packageName: package, startedAt: started, finishedAt: Date(),
-                                           includeFacets: facets, stableLayout: false, stableImage: false,
-                                           diagnostics: logs, baselineJSON: first.data)
-            try Task.checkCancellation()
-            return CapturedSnapshot(snapshot: candidate.withCaptureContext(deviceName: deviceName, metadata: metadata),
-                                    imageData: image1, aligned: false)
-        }
-        let second = try await dump(serial: serial, package: package, skipOverlayWindows: skipOverlayWindows, output: directory.appendingPathComponent("tree.json"))
-        logs.append(second.log)
-        let screen2 = try await adb(["-s", serial, "shell", "-T", "screencap", "-p"])
-        let image2 = screen2.stdout
-        logs.append(String(decoding: screen2.stderr, as: UTF8.self))
-        let size1 = try Self.imageSize(image1), size2 = try Self.imageSize(image2)
-        guard size1 == size2 else { throw CommandFailure.failed("采集期间屏幕方向或分辨率变化，请停留后重新获取。") }
-        let baseline = try SnapshotImporter.decode(first.data, imageSize: size1, packageName: package)
-        let candidate = try SnapshotImporter.decode(second.data, imageSize: size2, packageName: package)
-        let stableLayout = Self.hasSameGeometry(baseline, candidate)
-        let ambiguousDisplay = logs.contains { $0.contains("Multiple displays") }
-        let stableImage = image1 == image2 && !ambiguousDisplay
+        let screen = try await adb(["-s", serial, "shell", "-T", "screencap", "-p"])
+        let size = try Self.imageSize(screen.stdout)
+        let snapshot = try SnapshotImporter.decode(tree.data, imageSize: size, packageName: package)
         let metadata = CaptureMetadata(serial: serial, packageName: package, startedAt: started, finishedAt: Date(),
-                                       includeFacets: facets, stableLayout: stableLayout, stableImage: stableImage,
-                                       diagnostics: logs, baselineJSON: first.data)
+                                       includeFacets: facets, diagnostics: [tree.log, String(decoding: screen.stderr, as: UTF8.self)],
+                                       baselineJSON: tree.data)
         try Task.checkCancellation()
-        let snapshot = candidate.withCaptureContext(deviceName: deviceName, metadata: metadata)
-        return CapturedSnapshot(snapshot: snapshot, imageData: image2,
-                                aligned: stableLayout && stableImage && (snapshot.document?.displays.count ?? 0) <= 1)
+        return CapturedSnapshot(snapshot: snapshot.withCaptureContext(deviceName: deviceName, metadata: metadata),
+                                imageData: screen.stdout)
     }
 
     /// Compare in tree order without flattening trees or allocating formatted geometry strings.

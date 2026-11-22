@@ -31,7 +31,7 @@ public enum AutomaticCapture {
                                            diagnostics: [sdkFailure] + original.diagnostics,
                                            baselineJSON: original.baselineJSON, backend: .uiInspector)
             return CapturedSnapshot(snapshot: result.snapshot.withCaptureContext(deviceName: result.snapshot.deviceName, metadata: metadata),
-                                    imageData: result.imageData, aligned: result.aligned)
+                                    imageData: result.imageData)
         } catch is CancellationError { throw CancellationError() }
         catch {
             try Task.checkCancellation()

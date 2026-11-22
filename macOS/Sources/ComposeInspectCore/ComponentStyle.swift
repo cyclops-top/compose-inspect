@@ -82,7 +82,13 @@ struct ComponentStyleCatalog {
                 let padding = raw["padding"].flatMap { Self.insets($0) }
                 let shape = raw["shape"].map { value in
                     let radii = value["radiiPx"]
-                    var shape = ComponentStyle.Shape(name: value["name"]?.string ?? "未提供名称", kind: value["kind"]?.string ?? "unknown",
+                    var kind = value["kind"]?.string ?? "unknown"
+                    if ["rounded", "cut"].contains(kind),
+                       !["topLeft", "topRight", "bottomLeft", "bottomRight"].allSatisfy({ key in
+                           guard let radius = radii?[key]?.double else { return false }
+                           return radius.isFinite && radius >= 0
+                       }) { kind = "unknown" }
+                    var shape = ComponentStyle.Shape(name: value["name"]?.string ?? "未提供名称", kind: kind,
                         topLeft: radii?["topLeft"]?.double ?? 0, topRight: radii?["topRight"]?.double ?? 0,
                         bottomLeft: radii?["bottomLeft"]?.double ?? 0, bottomRight: radii?["bottomRight"]?.double ?? 0)
                     var corners: [String: ComponentStyle.CornerConfiguration] = [:]

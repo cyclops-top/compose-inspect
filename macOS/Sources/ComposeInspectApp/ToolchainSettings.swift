@@ -48,9 +48,6 @@ final class ToolchainSettings {
     var skipOverlayWindows: Bool {
         didSet { defaults.set(skipOverlayWindows, forKey: "capture.skipOverlays") }
     }
-    var verifyCaptureConsistency: Bool {
-        didSet { defaults.set(verifyCaptureConsistency, forKey: "capture.verifyConsistency") }
-    }
     var includeResolutionStack: Bool {
         didSet { defaults.set(includeResolutionStack, forKey: "capture.resolutionStack") }
     }
@@ -66,7 +63,6 @@ final class ToolchainSettings {
         javaOverride = defaults.string(forKey: "toolchain.javaPath") ?? ""
         inspectorJarOverride = defaults.string(forKey: "toolchain.inspectorJar") ?? ""
         skipOverlayWindows = defaults.bool(forKey: "capture.skipOverlays")
-        verifyCaptureConsistency = defaults.bool(forKey: "capture.verifyConsistency")
         includeResolutionStack = defaults.bool(forKey: "capture.resolutionStack")
     }
 

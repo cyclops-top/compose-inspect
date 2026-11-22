@@ -2,7 +2,7 @@
 
 macOS 工具开发工作区。
 
-- [macOS 应用工程](macOS/README.md)：SwiftUI 原生界面、Xcode 工程、快照导入与按组件记录问题。
+- [macOS 应用工程](macOS/README.md) 支持从 Android 设备抓取静态页面、检查组件并记录本轮问题。
 - [Android SDK 验证工程](android/README.md)：只加 `debugImplementation` 的 Compose 采集实验、分模块 SDK 与 ui-inspector 对照验证。
 - [ui-inspector/](ui-inspector/)：UI Inspector 源码、依赖、构建脚本和运行产物，详见 [构建说明](ui-inspector/README.md)。
 - [macOS 技术方案](docs/macos-technical-plan.md)：ui-inspector 接入、截图与组件树关联、精简 AI 定位文本及实施阶段。
@@ -21,4 +21,4 @@ macOS 工具开发工作区。
 open macOS/ComposeInspect.xcodeproj
 ```
 
-或执行 `./macOS/scripts/build-app.sh` 后打开 `macOS/dist/CompScope.app`。当前支持示例/导入快照检查，实时设备抓取尚未接入。
+或执行 `./macOS/scripts/build-app.sh` 后打开 `macOS/dist/CompScope.app`。在设备上停留到目标页面稳定后，点击相机抓取。

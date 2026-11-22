@@ -125,7 +125,7 @@ struct WorkspaceView: View {
                             .opacity(canCapture || store.isCapturing ? 1 : 0.4)
                     }.buttonStyle(.plain)
                         .accessibilityLabel(store.isCapturing ? "停止获取界面" : "获取界面")
-                        .help(store.isCapturing ? "停止本次获取界面" : "重新获取界面")
+                        .help(store.isCapturing ? "停止本次获取界面" : (store.issues.isEmpty ? "获取当前界面" : "抓取新界面并清空当前 \(store.issues.count) 条问题"))
                         .disabled(!canCapture && !store.isCapturing)
                 }
             }
@@ -167,9 +167,6 @@ struct WorkspaceView: View {
             } else {
                 Circle().fill(store.snapshot.captureMetadata == nil ? Color.secondary : Color.green).frame(width: 5, height: 5)
                 Text(store.notice).lineLimit(1)
-            }
-            if let latest = store.latestSnapshotID, latest != store.snapshot.id {
-                Button("返回最新快照") { store.showLatestCapture() }
             }
             Spacer()
             if !tools.androidProjectPath.isEmpty {

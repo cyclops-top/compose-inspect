@@ -18,9 +18,13 @@ struct IssuesWorkspaceView: View {
                 Text("问题列表").font(.system(size: 12, weight: .medium))
                 Text("\(store.issues.count)").font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
+                if store.canUndoClearIssues {
+                    Button("撤销清空") { store.undoClearIssues() }
+                        .buttonStyle(.link).font(.system(size: 11))
+                }
                 Button { store.clearIssues() } label: { Image(systemName: "trash") }
                     .buttonStyle(.plain).foregroundStyle(.secondary)
-                    .accessibilityLabel("清空所有问题").disabled(store.issues.isEmpty)
+                    .help("清空所有问题").accessibilityLabel("清空所有问题").disabled(store.issues.isEmpty)
             }.padding(.horizontal, 12).frame(height: 33)
             if store.issues.isEmpty {
                 EmptyState(icon: "text.bubble", title: "还没有问题", subtitle: "")
@@ -35,7 +39,7 @@ struct IssuesWorkspaceView: View {
             }
         }.background(AppStyle.sidebar)
             .overlay(alignment: .bottomTrailing) {
-                copyButton("复制全部问题", disabled: store.issues.isEmpty) { store.copyAllIssues() }
+                copyButton("复制全部 \(store.issues.count) 条", help: "复制全部问题（⌘⇧C）", disabled: store.issues.isEmpty) { store.copyAllIssues() }
             }
     }
 
@@ -45,21 +49,21 @@ struct IssuesWorkspaceView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.quaternary.opacity(0.15)).accessibilityLabel("AI 定位文本预览")
             .overlay(alignment: .bottomTrailing) {
-                copyButton("复制 AI 定位信息（⌘⌥C）", disabled: text.isEmpty) {
+                copyButton("复制当前组件", help: "复制当前组件的 AI 定位信息（⌘⌥C）", disabled: text.isEmpty) {
                     store.copyCurrentLocator()
                 }
             }
     }
 
-    private func copyButton(_ title: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+    private func copyButton(_ title: String, help: String, disabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: "doc.on.doc").font(.system(size: 15, weight: .medium))
-                .frame(width: 36, height: 36)
+            Label(title, systemImage: "doc.on.doc").font(.system(size: 11, weight: .medium))
+                .fixedSize().padding(.horizontal, 10).frame(height: 32)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
                 .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(AppStyle.divider.opacity(0.6)) }
                 .shadow(color: .black.opacity(0.12), radius: 5, y: 2)
         }.buttonStyle(.plain).disabled(disabled)
-            .help(title).accessibilityLabel(title)
+            .help(help).accessibilityLabel(title)
             .padding(12)
     }
 
@@ -137,7 +141,7 @@ private struct CurrentIssueRow: View {
     @State private var hovering = false
 
     var body: some View {
-        let node = store.snapshots[issue.component.snapshotID]?.node(issue.component.nodeID)
+        let node = store.snapshotIndex.byID[issue.component.nodeID]
         return ZStack(alignment: .trailing) {
         Button {
             NSApp.keyWindow?.makeFirstResponder(nil)

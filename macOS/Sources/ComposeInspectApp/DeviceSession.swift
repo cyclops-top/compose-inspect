@@ -100,19 +100,18 @@ final class DeviceSession {
         capturing = true
         defer { capturing = false; captureTask = nil; progress = "" }
         let skipOverlayWindows = settings.skipOverlayWindows
-        let verifyConsistency = settings.verifyCaptureConsistency
         let task = Task { [weak self] in
             let progress: @Sendable (String) async -> Void = { [weak session = self] value in
                 await session?.setProgress(value)
             }
             return try await AutomaticCapture.capture(sdk: {
                 try await sdk.capture(serial: device.serial, package: package, deviceName: device.model,
-                                      verifyConsistency: verifyConsistency, skipOverlayWindows: skipOverlayWindows, progress: progress)
+                                      skipOverlayWindows: skipOverlayWindows, progress: progress)
             }, inspector: {
                 // SDK-only users don't need Java/JAR. Resolve these only after SDK fallback.
                 let tools = try await MainActor.run { try settings.resolvedTools() }
                 return try await InspectorClient(tools: tools).capture(serial: device.serial, package: package,
-                    deviceName: device.model, verifyConsistency: verifyConsistency, skipOverlayWindows: skipOverlayWindows, progress: progress)
+                    deviceName: device.model, skipOverlayWindows: skipOverlayWindows, progress: progress)
             }, progress: progress)
         }
         captureTask = task
