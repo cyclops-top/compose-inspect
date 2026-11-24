@@ -1,6 +1,6 @@
 # ComposeInspect Android SDK 验证工程
 
-验证业务应用**只增加 `debugImplementation`**、不修改 Kotlin/Java/业务 Manifest 时，能否采集 Compose 调用树、参数和源码位置。本工程已接入 macOS 自动抓取，已配置 Maven Central 发布，尚未上传远端制品。
+验证业务应用**只增加 `debugImplementation`**、不修改 Kotlin/Java/业务 Manifest 时，能否采集 Compose 调用树、参数和源码位置。本工程已接入 macOS 自动抓取，SDK 通过 Maven Central 分发。
 
 ## 模块
 
@@ -83,12 +83,12 @@ python3 tools/validate.py --serial DEVICE_SERIAL --versions 1.12.1
 ## Maven 发布
 
 与 spear 使用相同的 `com.vanniktech.maven.publish:0.37.0` 插件，签名后发布到 Maven Central。
-版本由 `gradle.properties` 的 `sdkVersion` 统一控制，默认 `0.1.2-snapshot`。
+版本由 `gradle.properties` 的 `sdkVersion` 统一控制，当前版本为 `0.1.2`。
 
-用户仅需添加（远端发布完成后可用）：
+在业务应用的调试依赖中添加：
 
 ```kotlin
-debugImplementation("top.cyclops:compose-inspector:0.1.2-snapshot")
+debugImplementation("top.cyclops:compose-inspector:0.1.2")
 ```
 
 同时发布 `compose-inspector-collector` 和 `compose-inspector-protocol`，均属于 `top.cyclops`；主制品会传递依赖它们。发布的是库的 release 变体，使用方仍须使用 `debugImplementation`，不要加入生产包。
@@ -111,9 +111,9 @@ debugImplementation("top.cyclops:compose-inspector:0.1.2-snapshot")
 上传后在 Central Portal 检查并发布；如需同时自动发布，运行 `./gradlew publishAndReleaseToMavenCentral`。Maven Central 制品及 sources JAR 将公开，GitHub 仓库可以继续私有。Android SDK 源码采用本目录 `LICENSE` 中的 Apache-2.0。
 
 
-## 性能与压缩协议（本地 0.1.2-snapshot）
+## 性能与压缩协议（0.1.2）
 
-本地优化版仍使用 `top.cyclops:compose-inspector:0.1.2-snapshot`；更新同名本地制品后，请刷新 Gradle 依赖并重新安装应用。
+升级采集 SDK 后，重新构建并安装业务应用的调试包。
 
 - `hello` 声明 `gzip-json-v1` 时，新 macOS 客户端发送 `capture-gzip`。响应为 4 字节大端压缩长度 + 单个 gzip member，解压后仍为完整、以换行结尾的原始 JSON。桌面端要求运行时 SDK 0.1.2、协议 1 和压缩采集能力。
 - Compose/View 状态只在主线程读取；对象字段元数据仅在单次采集中缓存，实际值始终重新读取。编码、快速压缩和 socket 写入在 SDK 工作线程执行。
