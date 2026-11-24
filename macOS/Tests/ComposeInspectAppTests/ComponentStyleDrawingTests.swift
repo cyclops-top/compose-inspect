@@ -5,6 +5,25 @@ import SceneKit
 @testable import ComposeInspectCore
 
 final class ComponentStyleDrawingTests: XCTestCase {
+    func testCustomPathScalesToLayerAndKeepsEvenOddHole() {
+        var shape = ComponentStyle.Shape(name: "Ring", kind: "path",
+            topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0)
+        func contour(_ low: Double, _ high: Double) -> [ComponentStyle.Shape.Command] {
+            [.init(verb: "Move", coordinates: [low, low]),
+             .init(verb: "Line", coordinates: [high, low]),
+             .init(verb: "Line", coordinates: [high, high]),
+             .init(verb: "Line", coordinates: [low, high]),
+             .init(verb: "Close", coordinates: [])]
+        }
+        shape.commands = contour(0, 1) + contour(0.25, 0.75)
+        shape.evenOdd = true
+        let box = CGRect(x: 12, y: 40, width: 120, height: 60)
+        let path = ComponentStyleDrawing.path(in: box, shape: shape, scale: 3)
+        XCTAssertEqual(path.boundingRect, box)
+        XCTAssertTrue(path.contains(CGPoint(x: 16, y: 70)))
+        XCTAssertFalse(path.contains(CGPoint(x: box.midX, y: box.midY)))
+    }
+
     @MainActor
     func testPageZoomKeepsOffCenterSurfaceUnderPointer() throws {
         _ = NSApplication.shared

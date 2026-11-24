@@ -21,7 +21,7 @@ struct PagePreviewGroup: Identifiable {
         outline = ComponentStyleDrawing.path(in: node.bounds, shape: outer?.shape, scale: 1)
         var mask: Path?
         for layer in node.style?.layers ?? [] where layer.kind == "clip" && layer.unsupported == nil {
-            guard let shape = layer.shape, ["rectangle", "rounded", "cut"].contains(shape.kind) else { continue }
+            guard let shape = layer.shape, ["rectangle", "rounded", "cut", "path"].contains(shape.kind) else { continue }
             let path = ComponentStyleDrawing.path(in: layer.bounds, shape: shape, scale: 1)
             mask = mask?.intersection(path) ?? path
         }

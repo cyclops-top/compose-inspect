@@ -363,7 +363,7 @@ private struct ComponentStylePreview: View {
                                         Text(shape.name).textSelection(.enabled).foregroundStyle(.secondary)
                                     } else if ["rounded", "cut"].contains(shape.kind) {
                                         CornerRadiiDiagram(shape: shape, density: style.density, bounds: layer.bounds)
-                                    } else { Text("矩形").foregroundStyle(.secondary) }
+                                    } else { Text(shape.title(in: layer.bounds)).foregroundStyle(.secondary) }
                                 }
                                 if let unsupported = layer.unsupported { Text(unsupported).foregroundStyle(.orange).textSelection(.enabled) }
                             }

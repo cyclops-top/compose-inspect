@@ -12,6 +12,24 @@ enum ComponentStyleDrawing {
 
     static func path(in rect: CGRect, shape: ComponentStyle.Shape?, scale: CGFloat) -> Path {
         guard let shape else { return Path(rect) }
+        if shape.kind == "path", let commands = shape.commands {
+            var path = Path()
+            for command in commands {
+                let values = command.coordinates
+                func point(_ index: Int) -> CGPoint {
+                    CGPoint(x: rect.minX + values[index] * rect.width, y: rect.minY + values[index + 1] * rect.height)
+                }
+                switch (command.verb, values.count) {
+                case ("Move", 2): path.move(to: point(0))
+                case ("Line", 2): path.addLine(to: point(0))
+                case ("Quadratic", 4): path.addQuadCurve(to: point(2), control: point(0))
+                case ("Cubic", 6): path.addCurve(to: point(4), control1: point(0), control2: point(2))
+                case ("Close", 0): path.closeSubpath()
+                default: return Path(rect)
+                }
+            }
+            return shape.evenOdd == true ? path.normalized(eoFill: true) : path
+        }
         if shape.kind == "cut" {
             let tl = shape.topLeft * scale, tr = shape.topRight * scale
             let bl = shape.bottomLeft * scale, br = shape.bottomRight * scale

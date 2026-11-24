@@ -507,12 +507,16 @@ struct PreviewView: View {
 struct ComponentWireframeOutline: Hashable {
     let bounds: CGRect
     let kind: String
+    var commands: [ComponentStyle.Shape.Command]?
+    var evenOdd: Bool?
     let radii: [Double]
 
     init(_ node: InspectorNode) {
         bounds = node.bounds
         if let shape = ComponentStyleDrawing.outlineShape(style: node.style, bounds: bounds),
-           shape.kind == "cut" || shape.kind == "rounded" {
+           ["cut", "rounded", "path"].contains(shape.kind) {
+            commands = shape.commands
+            evenOdd = shape.evenOdd
             kind = shape.kind
             radii = [shape.topLeft, shape.topRight, shape.bottomLeft, shape.bottomRight]
         } else {
@@ -557,7 +561,7 @@ private struct ComponentWireframes: View, Equatable {
             for node in outlines {
                 // Right-angle corner marks would obscure a measured rounded outline.
                 let kind = ComponentStyleDrawing.outlineShape(style: node.style, bounds: node.bounds)?.kind
-                guard kind != "rounded", kind != "cut" else { continue }
+                guard kind != "rounded", kind != "cut", kind != "path" else { continue }
                 let rect = mapper.display(node.bounds)
                 let length = min(3, rect.width / 2, rect.height / 2)
                 for (x, dx) in [(rect.minX, length), (rect.maxX, -length)] {

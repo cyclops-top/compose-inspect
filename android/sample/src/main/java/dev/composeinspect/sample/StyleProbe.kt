@@ -16,6 +16,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -24,6 +26,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+
+private val TicketShape = GenericShape { size, _ ->
+    val w = size.width
+    val h = size.height
+    val notch = h * 0.18f
+    fillType = PathFillType.EvenOdd
+    moveTo(0f, 0f)
+    lineTo(w, 0f)
+    lineTo(w, h / 2 - notch)
+    cubicTo(w - notch, h / 2 - notch, w - notch, h / 2 + notch, w, h / 2 + notch)
+    lineTo(w, h)
+    lineTo(0f, h)
+    close()
+    addOval(Rect(h * 0.18f, h * 0.38f, h * 0.42f, h * 0.62f))
+}
 
 /** Real modifier chains for SDK style integration checks; no inspector-specific API. */
 @Composable
@@ -50,6 +67,11 @@ fun StyleProbe() {
             RoundedCornerShape(CornerSize(10.dp), CornerSize(20), CornerSize(8f), CornerSize(6.dp))))
         Box(Modifier.size(50.dp).background(Brush.horizontalGradient(listOf(Color.Red, Color.Blue))))
         Spacer(Modifier.height(16.dp))
+        Box(Modifier.width(180.dp).height(52.dp).clip(TicketShape)
+            .background(Color(0xFF245C60), TicketShape), contentAlignment = Alignment.Center) {
+            BasicText("导览票", style = TextStyle(color = Color.White, fontWeight = FontWeight.Bold))
+        }
+        Spacer(Modifier.height(12.dp))
         FloorPlanCard()
     }
 }

@@ -32,7 +32,7 @@ struct StylePlane {
         var visible = shape
         // All masks use the measured screen coordinates, before separating the planes.
         for clip in style.layers[..<index] where clip.kind == "clip" && clip.unsupported == nil {
-            guard let kind = clip.shape?.kind, ["rectangle", "rounded", "cut"].contains(kind) else { continue }
+            guard let kind = clip.shape?.kind, ["rectangle", "rounded", "cut", "path"].contains(kind) else { continue }
             let mask = ComponentStyleDrawing.path(in: clip.bounds, shape: clip.shape, scale: 1)
             visible = visible.intersection(mask)
         }

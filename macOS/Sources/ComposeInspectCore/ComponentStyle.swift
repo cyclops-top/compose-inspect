@@ -18,9 +18,16 @@ public struct ComponentStyle: Codable, Equatable, Sendable {
         public let name: String
         public let kind: String
         public let topLeft: Double, topRight: Double, bottomLeft: Double, bottomRight: Double
+        public struct Command: Codable, Hashable, Sendable {
+            public let verb: String
+            public let coordinates: [Double]
+        }
+        public var commands: [Command]? = nil
+        public var evenOdd: Bool? = nil
         public var corners: [String: CornerConfiguration]? = nil
         public func title(in bounds: CGRect) -> String {
             if kind == "rectangle" { return "矩形" }
+            if kind == "path" { return "自定义路径" }
             if kind == "cut" { return "切角" }
             guard kind == "rounded" else { return "未知形状" }
             let half = min(bounds.width, bounds.height) / 2
@@ -88,9 +95,26 @@ struct ComponentStyleCatalog {
                            guard let radius = radii?[key]?.double else { return false }
                            return radius.isFinite && radius >= 0
                        }) { kind = "unknown" }
+                    var commands: [ComponentStyle.Shape.Command]?
+                    if kind == "path" {
+                        let lengths = ["Move": 2, "Line": 2, "Quadratic": 4, "Cubic": 6, "Close": 0]
+                        if let rows = value["commands"]?.array, rows.count <= 16384 {
+                            let parsed = rows.compactMap { row -> ComponentStyle.Shape.Command? in
+                                guard let fields = row.array, let verb = fields.first?.string,
+                                      lengths[verb] == fields.count - 1 else { return nil }
+                                let coordinates = fields.dropFirst().compactMap(\.double)
+                                guard coordinates.count == fields.count - 1, coordinates.allSatisfy(\.isFinite) else { return nil }
+                                return .init(verb: verb, coordinates: coordinates)
+                            }
+                            if parsed.count == rows.count { commands = parsed }
+                        }
+                        if commands == nil { kind = "unknown" }
+                    }
                     var shape = ComponentStyle.Shape(name: value["name"]?.string ?? "未提供名称", kind: kind,
                         topLeft: radii?["topLeft"]?.double ?? 0, topRight: radii?["topRight"]?.double ?? 0,
                         bottomLeft: radii?["bottomLeft"]?.double ?? 0, bottomRight: radii?["bottomRight"]?.double ?? 0)
+                    shape.commands = commands
+                    shape.evenOdd = value["evenOdd"]?.boolean
                     var corners: [String: ComponentStyle.CornerConfiguration] = [:]
                     for key in ["topLeft", "topRight", "bottomLeft", "bottomRight"] {
                         if let item = value["corners"]?[key], let number = item["value"]?.double,
