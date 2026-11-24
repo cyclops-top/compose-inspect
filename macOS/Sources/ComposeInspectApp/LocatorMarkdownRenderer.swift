@@ -9,17 +9,24 @@ enum LocatorMarkdownRenderer {
         }
         let output = NSMutableAttributedString(string: "")
         var previous: PresentationIntent?
+        var codeBlock: NSTextTableBlock?
         for run in markdown.runs {
             let intent = run.presentationIntent
             let newBlock = intent != previous
-            if newBlock && output.length > 0 { output.append(NSAttributedString(string: "\n\n")) }
+            if newBlock {
+                if output.length > 0 {
+                    let separator = codeBlock != nil && output.string.hasSuffix("\n") ? "\n" : "\n\n"
+                    output.append(NSAttributedString(string: separator))
+                }
+                codeBlock = nil
+            }
             var font = NSFont.systemFont(ofSize: 12)
-            var code = false
             var prefix = ""
             for component in intent?.components ?? [] {
                 switch component.kind {
                 case .header(let level): font = .systemFont(ofSize: level == 1 ? 18 : 15, weight: .semibold)
-                case .codeBlock: code = true
+                case .codeBlock:
+                    if codeBlock == nil { codeBlock = makeCodeBlock() }
                 case .listItem(let ordinal):
                     let ordered = intent?.components.contains { if case .orderedList = $0.kind { return true }; return false } ?? false
                     prefix = ordered ? "\(ordinal). " : "• "
@@ -27,18 +34,29 @@ enum LocatorMarkdownRenderer {
                 }
             }
             let inline = run.inlinePresentationIntent ?? []
-            if code || inline.contains(.code) { font = .monospacedSystemFont(ofSize: 11, weight: .regular) }
+            if codeBlock != nil || inline.contains(.code) { font = .monospacedSystemFont(ofSize: 11, weight: .regular) }
             if inline.contains(.stronglyEmphasized) { font = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) }
             if inline.contains(.emphasized) { font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) }
             let paragraph = NSMutableParagraphStyle()
             paragraph.lineSpacing = 3
+            if let codeBlock { paragraph.textBlocks = [codeBlock] }
             var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: paragraph]
-            if code || inline.contains(.code) { attributes[.backgroundColor] = NSColor.quaternaryLabelColor }
+            if codeBlock == nil && inline.contains(.code) { attributes[.backgroundColor] = NSColor.quaternaryLabelColor }
             if inline.contains(.strikethrough) { attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
             if let link = run.link { attributes[.link] = link }
             output.append(NSAttributedString(string: (newBlock ? prefix : "") + String(markdown[run.range].characters), attributes: attributes))
             previous = intent
         }
         return output
+    }
+
+    private static func makeCodeBlock() -> NSTextTableBlock {
+        let table = NSTextTable()
+        table.numberOfColumns = 1
+        table.setValue(100, type: .percentageValueType, for: .width)
+        let cell = NSTextTableBlock(table: table, startingRow: 0, rowSpan: 1, startingColumn: 0, columnSpan: 1)
+        cell.backgroundColor = .quaternaryLabelColor
+        cell.setWidth(6, type: .absoluteValueType, for: .padding)
+        return cell
     }
 }

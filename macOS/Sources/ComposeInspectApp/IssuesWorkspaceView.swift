@@ -108,6 +108,8 @@ private struct SelectableLocatorText: NSViewRepresentable {
         scroll.hasHorizontalScroller = false
         scroll.contentInsets.bottom = 56
         let editor = scroll.documentView as! NSTextView
+        // Use TextKit 1 so the text view draws NSTextTableBlock backgrounds.
+        _ = editor.layoutManager
         editor.isEditable = false
         editor.isSelectable = true
         editor.isRichText = true
