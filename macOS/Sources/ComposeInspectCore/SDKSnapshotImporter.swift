@@ -18,7 +18,7 @@ public enum SDKSnapshotImporter {
         guard let windows = document.root["windows"]?.array else { throw SnapshotImportError.schema("SDK 缺少 windows") }
         var normalized: [InspectorJSON] = []
         var nextID: Int64 = 1
-        for window in windows {
+        for (windowIndex, window) in windows.enumerated() {
             try Task.checkCancellation()
             guard let tables = window["tables"]?.array, let offset = window["screenOffset"]?.array,
                   offset.count == 2, let x = offset[0].double, let y = offset[1].double,
@@ -40,7 +40,7 @@ public enum SDKSnapshotImporter {
                         var host: [String: InspectorJSON] = [
                             "type": .string("ViewNode"), "id": .number(String(nextID)),
                             "className": .string(table["hostView"]?.string ?? "ComposeHost"),
-                            "bounds": bounds(box), "children": .array(nodes), "styleCatalog": catalog
+                            "bounds": bounds(box), "children": .array(nodes), "styleCatalogIndex": .number(String(index))
                         ]
                         var warnings = catalog["diagnostics"]?.array?.map(\.display) ?? []
                         if let error = catalog["error"]?.string { warnings.append(error) }
@@ -64,7 +64,8 @@ public enum SDKSnapshotImporter {
             ])
             nextID += 1
             normalized.append(.object(["root": root, "sdkWindow": .object([
-                "index": window["index"] ?? .null, "screenOffset": .array(offset)
+                "index": window["index"] ?? .null, "screenOffset": .array(offset),
+                "captureIndex": .number(String(windowIndex))
             ])]))
         }
         guard !normalized.isEmpty else { throw CommandFailure.failed("SDK 未返回可用的 Compose 组件树。") }

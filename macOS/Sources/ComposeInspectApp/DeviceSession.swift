@@ -19,7 +19,6 @@ final class DeviceSession {
     private(set) var captureStartedAt: Date?
     var showApplications = false
     var packageSearch = ""
-    private var captureTask: Task<CapturedSnapshot, Error>?
     private var discoveryRevision = UUID()
     private var packageRefreshRevision = UUID()
     var selectedDevice: ADBDevice? { devices.first { $0.serial == selectedSerial } }
@@ -98,25 +97,12 @@ final class DeviceSession {
         let sdk = SDKInspectorClient(tools: try settings.resolvedTools())
         captureStartedAt = Date()
         capturing = true
-        defer { capturing = false; captureTask = nil; progress = "" }
+        defer { capturing = false; progress = "" }
         let skipOverlayWindows = settings.skipOverlayWindows
-        let task = Task { [weak self] in
-            let progress: @Sendable (String) async -> Void = { [weak session = self] value in
-                await session?.setProgress(value)
-            }
-            return try await sdk.capture(serial: device.serial, package: package, deviceName: device.model,
-                                         skipOverlayWindows: skipOverlayWindows, progress: progress)
+        return try await sdk.capture(serial: device.serial, package: package, deviceName: device.model,
+                                     skipOverlayWindows: skipOverlayWindows) { [weak self] value in
+            await self?.setProgress(value)
         }
-        captureTask = task
-        let result = try await task.value
-        guard !task.isCancelled else { throw CancellationError() }
-        return result
-    }
-    func cancel() { captureTask?.cancel() }
-    func waitForCaptureCancellation() async {
-        guard let task = captureTask else { return }
-        task.cancel()
-        _ = await task.result
     }
     private func setProgress(_ value: String) { progress = value }
 }

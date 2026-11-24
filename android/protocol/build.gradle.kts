@@ -17,17 +17,28 @@ dependencies {
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 
 // The optional real-device fixture stays in build/, never in the published library or sources.
-val prepareBenchmarkFixture by tasks.registering(Copy::class) {
-    val fixture = providers.gradleProperty("benchmarkJson")
-    onlyIf { fixture.isPresent }
-    from(fixture)
-    into(layout.buildDirectory.dir("benchmark-assets"))
-    rename { "capture.json" }
-}
-tasks.matching { it.name == "mergeDebugAndroidTestAssets" }.configureEach { dependsOn(prepareBenchmarkFixture) }
+abstract class PrepareBenchmarkFixture : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val fixture: RegularFileProperty
 
-androidComponents {
-    onVariants { variant ->
-        variant.androidTest?.sources?.assets?.addStaticSourceDirectory(layout.buildDirectory.dir("benchmark-assets").get().asFile.path)
+    @get:OutputDirectory
+    abstract val assets: DirectoryProperty
+
+    @TaskAction
+    fun copyFixture() {
+        val directory = assets.get().asFile
+        directory.mkdirs()
+        fixture.get().asFile.copyTo(directory.resolve("capture.json"), overwrite = true)
+    }
+}
+
+val benchmarkFixture = providers.gradleProperty("benchmarkJson")
+if (benchmarkFixture.isPresent) {
+    val prepareFixture = tasks.register<PrepareBenchmarkFixture>("prepareBenchmarkFixture") {
+        fixture.set(layout.projectDirectory.file(benchmarkFixture.get()))
+    }
+    androidComponents.onVariants(androidComponents.selector().withBuildType("debug")) { variant ->
+        variant.androidTest?.sources?.assets?.addGeneratedSourceDirectory(prepareFixture, PrepareBenchmarkFixture::assets)
     }
 }

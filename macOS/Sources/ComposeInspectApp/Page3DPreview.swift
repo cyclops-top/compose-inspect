@@ -143,7 +143,7 @@ private struct Page3DPreview: View {
                 }
             VStack(alignment: .leading, spacing: 8) {
                 Text("组件层级").font(.headline)
-                Text("点击选中，拖动旋转，⌘ 拖动平移。指向组件后滚动或双指捏合，可围绕该处缩放。仅有一个可见子组件且边界、采集样式一致时，父子共用一层。× 表示合并数。")
+                Text("点击选中，拖动旋转，按住空格拖动平移。指向组件后滚动或双指捏合，可围绕该处缩放。仅有一个可见子组件且边界、采集样式一致时，父子共用一层。× 表示合并数。")
                     .font(.caption).foregroundStyle(.secondary)
                 ScrollViewReader { scroll in
                     List(selection: Binding(get: { path.last }, set: { id in
@@ -178,28 +178,51 @@ private struct Page3DPreview: View {
 
 final class PageSceneView: SCNView {
     private var panMonitor: Any?
+    private var spaceHeld = false
     private var panAnchor: SCNVector3?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if let panMonitor { NSEvent.removeMonitor(panMonitor) }
         panMonitor = nil
-        panAnchor = nil
-        guard window != nil else { return }
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
+        clearPan()
+        guard let window else { return }
+        NotificationCenter.default.addObserver(self, selector: #selector(clearPan),
+                                               name: NSWindow.didResignKeyNotification, object: window)
         // Claim the whole modified drag before SceneKit's orbit and click recognizers see it.
-        panMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] event in
+        panMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] event in
             let handled = MainActor.assumeIsolated { self?.handlePan(event) == true }
             return handled ? nil : event
         }
     }
 
+    @objc private func clearPan() {
+        spaceHeld = false
+        panAnchor = nil
+    }
+
     private func handlePan(_ event: NSEvent) -> Bool {
         guard let window, event.window === window else { return false }
+        if event.type == .keyDown || event.type == .keyUp {
+            guard event.keyCode == 49 else { return false }
+            if event.type == .keyUp {
+                let handled = spaceHeld
+                spaceHeld = false
+                return handled
+            }
+            guard window.isKeyWindow, !(window.firstResponder is NSTextView),
+                  event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+                  isMousePoint(convert(window.mouseLocationOutsideOfEventStream, from: nil), in: visibleRect)
+            else { return false }
+            spaceHeld = true
+            return true
+        }
         let point = convert(event.locationInWindow, from: nil)
         switch event.type {
         case .leftMouseDown:
             panAnchor = nil
-            guard event.modifierFlags.contains(.command), isMousePoint(point, in: visibleRect) else { return false }
+            guard spaceHeld, isMousePoint(point, in: visibleRect) else { return false }
             defaultCameraController.stopInertia()
             panAnchor = focalPoint(at: point)
             return panAnchor != nil

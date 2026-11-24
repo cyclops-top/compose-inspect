@@ -10,7 +10,7 @@ final class WorkspaceStore {
         observation = ComponentObservation(node: node, field: field, snapshot: snapshot)
     }
     private var captureRevision = UUID()
-    private var captureRequestID = UUID()
+    @ObservationIgnored private var captureTask: Task<Void, Error>?
 
     private struct PreparedIndexes: Sendable {
         let full: InspectorSnapshotIndex
@@ -425,6 +425,8 @@ final class WorkspaceStore {
         let baselineIndex = snapshotIndex
         var phase = "尚未点击"
         let started = ContinuousClock.now
+        let pollDeadline = started + .seconds(16)
+        let skipOverlayWindows = settings.skipOverlayWindows
         var expired = false
         verificationResult = "正在复核目标"
         let worker = Task { @MainActor in
@@ -442,7 +444,8 @@ final class WorkspaceStore {
                 }
                 @MainActor func readSnapshot() async throws -> CapturedSnapshot {
                     try checkTarget()
-                    return try await sdk.capture(serial: original.serial, package: original.package, deviceName: device.model)
+                    return try await sdk.capture(serial: original.serial, package: original.package, deviceName: device.model,
+                                                 skipOverlayWindows: skipOverlayWindows)
                 }
                 let before = try await readSnapshot().snapshot
                 let index = InspectorSnapshotIndex(before)
@@ -457,17 +460,19 @@ final class WorkspaceStore {
                 }
                 try await adb.checkTap(target, expected: expected)
                 try checkTarget()
+                let tapTimeout = try Self.tapTimeout(until: pollDeadline)
                 phase = "点击命令已提交，执行结果未知"
                 verificationResult = phase
                 _ = try await adb.adb(["-s", target.serial, "shell", "input", "-d", "0", "tap",
-                                      String(Int(target.point.x)), String(Int(target.point.y))], timeout: 3)
+                                      String(Int(target.point.x)), String(Int(target.point.y))], timeout: tapTimeout)
                 phase = "已点击一次"
                 verificationResult = phase + "，等待「" + expected + "」"
                 var checks = 0
                 var satisfied = false
-                // Reserve four seconds of the overall budget for the final SDK snapshot.
-                let pollDeadline = started + .seconds(16)
-                while ContinuousClock.now < pollDeadline {
+                guard ContinuousClock.now < pollDeadline else {
+                    throw CommandFailure.failed("剩余时间不足，未检查点击结果。")
+                }
+                repeat {
                     try checkTarget()
                     let remaining = ContinuousClock.now.duration(to: pollDeadline).components
                     let seconds = Double(remaining.seconds) + Double(remaining.attoseconds) / 1e18
@@ -481,7 +486,7 @@ final class WorkspaceStore {
                     checks += 1
                     verificationResult = phase + " · 已检查 " + String(checks) + " 次，尚未出现「" + expected + "」"
                     try await Task.sleep(until: min(pollDeadline, .now + .milliseconds(min(2000, checks * 500))), clock: .continuous)
-                }
+                } while ContinuousClock.now < pollDeadline
                 phase += satisfied ? "，已观察到「" + expected + "」" : "，条件等待超时 · 未观察到「" + expected + "」"
                 verificationResult = phase + "，获取结果快照中"
                 let final = try await readSnapshot()
@@ -506,7 +511,7 @@ final class WorkspaceStore {
         }
         verificationTask = worker
         let deadline = Task { @MainActor in
-            try await Task.sleep(for: .seconds(20))
+            try await Task.sleep(until: started + .seconds(20), clock: .continuous)
             expired = true
             worker.cancel()
         }
@@ -514,39 +519,47 @@ final class WorkspaceStore {
         deadline.cancel()
     }
 
+    static func tapTimeout(until pollDeadline: ContinuousClock.Instant, now: ContinuousClock.Instant = .now) throws -> TimeInterval {
+        // Keep the full six-second accessibility read available after the tap.
+        let remaining = now.duration(to: pollDeadline) - .seconds(6)
+        guard remaining > .zero else {
+            throw CommandFailure.failed("剩余时间不足以复核点击结果，请重试。")
+        }
+        let duration = min(remaining, .seconds(3)).components
+        return Double(duration.seconds) + Double(duration.attoseconds) / 1e18
+    }
+
     func stopCapture() {
         guard isCapturing else { return }
         verificationTask?.cancel()
-        captureRequestID = UUID()
-        captureRevision = UUID()
-        deviceSession.cancel()
-        captureWorker?.cancel()
+        captureTask?.cancel()
         notice = "已停止获取界面。"
     }
 
     func capture(settings: ToolchainSettings) async {
         guard !isCapturing, !deviceSession.resolvingCaptureTarget else { return }
         isCapturing = true
-        defer { isCapturing = false }
+        defer { isCapturing = false; captureTask = nil }
         verificationResult = nil
-        captureRequestID = UUID()
-        let requestID = captureRequestID
         discardCaptureIssues()
-        await deviceSession.waitForCaptureCancellation()
-        guard captureRequestID == requestID else { return }
-        do {
+        let task = Task {
+            try Task.checkCancellation()
             try await deviceSession.prepareCaptureTarget(settings: settings)
-            guard captureRequestID == requestID else { return }
+            try Task.checkCancellation()
             let captured = try await deviceSession.capture(settings: settings)
-            guard captureRequestID == requestID else { return }
+            try Task.checkCancellation()
             let source = captured.snapshot
             guard source.captureMetadata?.serial == deviceSession.selectedSerial,
                   source.packageName == deviceSession.packageName else { return }
             try await applyCapture(captured, requiringCurrentTarget: true)
-        } catch is CancellationError {
-            if captureRequestID == requestID { notice = "已取消抓取。" }
+        }
+        captureTask = task
+        do {
+            try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
         } catch {
-            if captureRequestID == requestID {
+            if task.isCancelled || error is CancellationError {
+                notice = "已停止获取界面。"
+            } else {
                 observation?.interrupt("本次采集失败")
                 notice = "获取界面失败"
                 errorMessage = error.localizedDescription

@@ -14,25 +14,44 @@ private struct SourceCatalog: Sendable {
 
     // Skip comments and strings before the package directive (including @file annotations).
     private static let header = try! NSRegularExpression(pattern:
-        #"(?ms)/\*.*?\*/|//[^\r\n]*|""".*?"""|"(?:\\.|[^"\\])*"|\bpackage\s+((?:`[^`\r\n]+`|[\p{L}_][\p{L}\p{M}\p{N}_]*)(?:\s*\.\s*(?:`[^`\r\n]+`|[\p{L}_][\p{L}\p{M}\p{N}_]*))*)|(?<!:)\b(?:import|class|fun|interface|object|val|var)\b"#)
+        #"(?ms)/\*|//[^\r\n]*|""".*?"""|"(?:\\.|[^"\\])*"|\bpackage\s+((?:`[^`\r\n]+`|[\p{L}_][\p{L}\p{M}\p{N}_]*)(?:\s*\.\s*(?:`[^`\r\n]+`|[\p{L}_][\p{L}\p{M}\p{N}_]*))*)|(?<!:)\b(?:import|class|fun|interface|object|val|var)\b"#)
 
     static func packageHash(in url: URL) -> Int32? {
         guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
               let source = String(data: data, encoding: .utf8) else { return nil }
-        var result: Int32?
-        header.enumerateMatches(in: source, range: NSRange(source.startIndex..., in: source)) { match, _, stop in
-            guard let match else { return }
-            if let range = Range(match.range(at: 1), in: source) {
-                let name = source[range].components(separatedBy: ".").map {
+        let text = source as NSString
+        var offset = 0
+        while let token = header.firstMatch(in: source, range: NSRange(location: offset, length: text.length - offset)) {
+            if token.range(at: 1).location != NSNotFound {
+                let name = text.substring(with: token.range(at: 1)).components(separatedBy: ".").map {
                     $0.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "`"))
                 }.joined(separator: ".")
-                result = hash(name)
-                stop.pointee = true
-            } else if let range = Range(match.range, in: source), source[range].first?.isLetter == true {
-                stop.pointee = true
+                return hash(name)
+            }
+            offset = NSMaxRange(token.range)
+            let matched = text.substring(with: token.range)
+            if matched == "/*" {
+                let nested = url.pathExtension == "kt"
+                var depth = 1
+                while offset + 1 < text.length && depth > 0 {
+                    let first = text.character(at: offset)
+                    let second = text.character(at: offset + 1)
+                    if first == 42 && second == 47 { // */
+                        depth -= 1
+                        offset += 2
+                    } else if nested && first == 47 && second == 42 { // /*
+                        depth += 1
+                        offset += 2
+                    } else {
+                        offset += 1
+                    }
+                }
+                guard depth == 0 else { return nil }
+            } else if matched.first?.isLetter == true {
+                return nil
             }
         }
-        return result
+        return nil
     }
 
     mutating func refresh(_ path: String, root: URL, subtree: Bool) {

@@ -104,6 +104,7 @@ final class AutomaticCaptureIntegrationTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = ToolchainSettings(defaults: defaults)
+        settings.skipOverlayWindows = true
         settings.adbOverride = try XCTUnwrap(env["COMPOSEINSPECT_ADB"])
         let store = WorkspaceStore(filterDefaults: defaults)
         try await store.deviceSession.refresh(settings: settings)

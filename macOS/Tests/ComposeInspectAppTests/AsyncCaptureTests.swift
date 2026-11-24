@@ -23,6 +23,49 @@ final class AsyncCaptureTests: XCTestCase {
         return store
     }
 
+    func testTapBudgetReservesTimeForFirstResultCheck() throws {
+        let now = ContinuousClock.now
+        XCTAssertThrowsError(try WorkspaceStore.tapTimeout(until: now - .seconds(1), now: now))
+        XCTAssertThrowsError(try WorkspaceStore.tapTimeout(until: now + .seconds(6), now: now))
+        XCTAssertEqual(try WorkspaceStore.tapTimeout(until: now + .seconds(7), now: now), 1)
+        XCTAssertEqual(try WorkspaceStore.tapTimeout(until: now + .seconds(16), now: now), 3)
+    }
+
+    func testStopInterruptsForegroundLookupBeforeItChangesThePackage() async throws {
+        let store = store()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let adb = directory.appendingPathComponent("adb")
+        let marker = directory.appendingPathComponent("started")
+        try """
+        #!/bin/sh
+        echo 'topResumedActivity=ActivityRecord u0 dev.stale/.Activity'
+        touch "$MARKER"
+        exec /bin/sleep 8
+        """.write(to: adb, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: adb.path)
+        let suite = UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = ToolchainSettings(defaults: defaults, environment: ["ADB": adb.path, "MARKER": marker.path])
+        store.deviceSession.devices = ADBDevice.parse("test device model:Test")
+        let capture = Task { await store.capture(settings: settings) }
+        let deadline = ContinuousClock.now + .seconds(4)
+        while !FileManager.default.fileExists(atPath: marker.path), ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: marker.path))
+        XCTAssertTrue(store.deviceSession.resolvingCaptureTarget)
+        let stopped = ContinuousClock.now
+        store.stopCapture()
+        await capture.value
+        XCTAssertLessThan(stopped.duration(to: .now), .seconds(3))
+        XCTAssertFalse(store.isCapturing)
+        XCTAssertEqual(store.deviceSession.packageName, "com.example.app")
+        XCTAssertNil(store.errorMessage)
+    }
+
     func testCaptureForPreviousTargetCannotReplaceCurrentSession() async throws {
         let store = store()
         let original = try capture()

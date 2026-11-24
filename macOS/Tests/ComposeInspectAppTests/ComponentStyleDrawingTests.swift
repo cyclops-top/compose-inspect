@@ -109,6 +109,21 @@ final class ComponentStyleDrawingTests: XCTestCase {
         XCTAssertEqual(PagePreviewGroup(fork).children.map(\.id), ["wrapper", "Layout"])
     }
 
+    func testWireframesDeduplicateOnlyMatchingCornerGeometry() {
+        let bounds = CGRect(x: 0, y: 0, width: 80, height: 80)
+        func outline(_ kind: String, topLeft: Double) -> ComponentWireframeOutline {
+            let shape = ComponentStyle.Shape(name: kind, kind: kind, topLeft: topLeft, topRight: 0,
+                                             bottomLeft: 4, bottomRight: 0)
+            let layer = ComponentStyle.Layer(id: 0, name: "shape", kind: "clip", bounds: bounds,
+                padding: nil, argb: nil, alpha: 1, shape: shape, unsupported: nil)
+            let style = ComponentStyle(density: 1, contentBounds: bounds, outerBounds: bounds, layers: [layer])
+            return ComponentWireframeOutline(InspectorNode(id: kind, rawID: 0, name: kind, bounds: bounds, style: style))
+        }
+        let outlines = [outline("rectangle", topLeft: 0), outline("rounded", topLeft: 10),
+                        outline("cut", topLeft: 10), outline("cut", topLeft: 20), outline("cut", topLeft: 10)]
+        XCTAssertEqual(Set(outlines).count, 4)
+    }
+
     func testTransparentClipHasRoundedOutlineAtItsMeasuredBoundsAndScale() {
         let shape = ComponentStyle.Shape(name: "RoundedCornerShape", kind: "rounded",
             topLeft: 20, topRight: 10, bottomLeft: 0, bottomRight: 15)

@@ -106,6 +106,40 @@ final class SDKStyleTests: XCTestCase {
         XCTAssertEqual(snapshot.document?.root["sdkCapture"]?["windows"]?.array?.first?["styleCatalogs"]?.array?.first?["version"]?.int64, 1)
     }
 
+    func testSharedCatalogSurvivesNormalizationAndLegacyInlineCatalogStillImports() throws {
+        let table = try table(color: "FF112233")
+        let catalog = try XCTUnwrap(table["styleCatalog"])
+        var indexed = try XCTUnwrap(table.object)
+        indexed.removeValue(forKey: "styleCatalog")
+        indexed["styleCatalogIndex"] = .number("0")
+        let offset = InspectorJSON.array([.number("30"), .number("50")])
+        let sdk: InspectorJSON = .object(["complete": .bool(true), "diagnostics": .array([]), "windows": .array([
+            .object(["screenOffset": offset, "tables": .array([])]),
+            .object(["screenOffset": offset, "tables": .array([.object(indexed), .object(indexed)]),
+                     "styleCatalogs": .array([catalog])])
+        ])])
+        let size = CGSize(width: 400, height: 600)
+        let snapshot = try SDKSnapshotImporter.decode(InspectorDocument(root: sdk), imageSize: size, packageName: "dev.sample")
+        let document = try XCTUnwrap(snapshot.document)
+        let window = try XCTUnwrap(document.windows.first)
+        XCTAssertEqual(window["sdkWindow"]?["captureIndex"], .number("1"))
+        let hosts = try XCTUnwrap(window["root"]?["children"]?.array)
+        XCTAssertEqual(hosts.count, 2)
+        for host in hosts {
+            XCTAssertNil(host["styleCatalog"])
+            XCTAssertEqual(host["styleCatalogIndex"], .number("0"))
+        }
+        let colors = snapshot.nodes.filter { $0.name == "BasicText" }.map { $0.style?.layers.first?.argb }
+        XCTAssertEqual(colors, ["FF112233", "FF112233"])
+
+        var legacyHost = try XCTUnwrap(hosts.first?.object)
+        legacyHost.removeValue(forKey: "styleCatalogIndex")
+        legacyHost["styleCatalog"] = catalog
+        let legacy = InspectorDocument(root: .object(["windows": .array([.object(["root": .object(legacyHost)])])]))
+        let restored = try SnapshotImporter.decode(legacy, imageSize: size, packageName: "dev.sample")
+        XCTAssertEqual(restored.nodes.last?.style?.layers.first?.argb, "FF112233")
+    }
+
     func testCatalogsNeverAssociateAcrossHostsWithIdenticalBounds() throws {
         let snapshot = try decode([table(color: "FFFF0000"), table(color: "FF0000FF")])
         let nodes = snapshot.nodes.filter { $0.name == "BasicText" }

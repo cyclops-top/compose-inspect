@@ -20,13 +20,24 @@ public enum SnapshotImporter {
         guard !windows.isEmpty else { throw SnapshotImportError.noWindows }
         let roots = try windows.enumerated().map { index, window in
             guard let root = window["root"] else { throw SnapshotImportError.schema("windows[\(index)] 缺少 root") }
-            return try convert(root, pointer: "/windows/\(index)/root")
+            var catalogs: [ComponentStyleCatalog?] = []
+            if let captureIndex = window["sdkWindow"]?["captureIndex"]?.int64 {
+                guard let captured = document.root["sdkCapture"]?["windows"]?.array,
+                      captured.indices.contains(Int(captureIndex)) else {
+                    throw SnapshotImportError.schema("SDK 窗口索引无效")
+                }
+                catalogs = try (captured[Int(captureIndex)]["styleCatalogs"]?.array ?? []).map {
+                    try Task.checkCancellation()
+                    return ComponentStyleCatalog(json: $0)
+                }
+            }
+            return try convert(root, catalogs: catalogs, pointer: "/windows/\(index)/root")
         }
         return InspectorSnapshot(packageName: packageName, deviceName: "导入的快照", pixelSize: imageSize,
                                  roots: roots, document: document)
     }
 
-    private static func convert(_ raw: InspectorJSON, pointer: String) throws -> InspectorNode {
+    private static func convert(_ raw: InspectorJSON, catalogs: [ComponentStyleCatalog?], pointer: String) throws -> InspectorNode {
         // Conversion has a large stack frame in debug builds. Keep depth on the heap so real
         // Compose trees can be decoded safely on Swift concurrency worker threads.
         var pending: [(raw: InspectorJSON, pointer: String, catalog: ComponentStyleCatalog?, ready: Bool)] = [(raw, pointer, nil, false)]
@@ -43,7 +54,16 @@ public enum SnapshotImporter {
                 converted[frame.pointer] = try convertNode(frame.raw, pointer: frame.pointer, catalog: frame.catalog,
                     convertedChildren: nodes)
             } else {
-                let catalog = frame.raw["styleCatalog"].map(ComponentStyleCatalog.init(json:)) ?? frame.catalog
+                let catalog: ComponentStyleCatalog?
+                if let reference = frame.raw["styleCatalogIndex"] {
+                    guard let index = reference.int64, catalogs.indices.contains(Int(index)) else {
+                        throw SnapshotImportError.schema("SDK 样式目录索引无效")
+                    }
+                    catalog = catalogs[Int(index)]
+                } else {
+                    // Older normalized captures embed the catalog on the host node.
+                    catalog = frame.raw["styleCatalog"].map(ComponentStyleCatalog.init(json:)) ?? frame.catalog
+                }
                 pending.append((frame.raw, frame.pointer, catalog, true))
                 for index in children.indices.reversed() {
                     pending.append((children[index], "\(frame.pointer)/children/\(index)", catalog, false))

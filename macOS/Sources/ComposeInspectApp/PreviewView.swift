@@ -504,6 +504,24 @@ struct PreviewView: View {
     }
 }
 
+struct ComponentWireframeOutline: Hashable {
+    let bounds: CGRect
+    let kind: String
+    let radii: [Double]
+
+    init(_ node: InspectorNode) {
+        bounds = node.bounds
+        if let shape = ComponentStyleDrawing.outlineShape(style: node.style, bounds: bounds),
+           shape.kind == "cut" || shape.kind == "rounded" {
+            kind = shape.kind
+            radii = [shape.topLeft, shape.topRight, shape.bottomLeft, shape.bottomRight]
+        } else {
+            kind = "rectangle"
+            radii = []
+        }
+    }
+}
+
 /// Static bounds have no dependency on selection or parameter data. Selecting a row updates only
 /// the lightweight highlight above this layer, not every rectangle on the screen.
 private struct ComponentWireframes: View, Equatable {
@@ -525,15 +543,9 @@ private struct ComponentWireframes: View, Equatable {
 
     var body: some View {
         let mapper = CoordinateMapper(imageSize: imageSize, canvasSize: canvasSize, zoom: zoom, pan: pan)
-        var seen: Set<[CGFloat]> = []
+        var seen = Set<ComponentWireframeOutline>()
         let outlines = nodes.filter { node in
-            guard !node.bounds.isEmpty else { return false }
-            let shape = ComponentStyleDrawing.outlineShape(style: node.style, bounds: node.bounds)
-            let radii: [CGFloat]
-            if let shape, shape.kind == "rounded" {
-                radii = [shape.topLeft, shape.topRight, shape.bottomLeft, shape.bottomRight].map { CGFloat($0) }
-            } else { radii = [0, 0, 0, 0] }
-            return seen.insert([node.bounds.minX, node.bounds.minY, node.bounds.width, node.bounds.height] + radii).inserted
+            !node.bounds.isEmpty && seen.insert(ComponentWireframeOutline(node)).inserted
         }
         let path = Path { path in
             for node in outlines {
@@ -544,7 +556,8 @@ private struct ComponentWireframes: View, Equatable {
         let corners = Path { path in
             for node in outlines {
                 // Right-angle corner marks would obscure a measured rounded outline.
-                guard ComponentStyleDrawing.outlineShape(style: node.style, bounds: node.bounds)?.kind != "rounded" else { continue }
+                let kind = ComponentStyleDrawing.outlineShape(style: node.style, bounds: node.bounds)?.kind
+                guard kind != "rounded", kind != "cut" else { continue }
                 let rect = mapper.display(node.bounds)
                 let length = min(3, rect.width / 2, rect.height / 2)
                 for (x, dx) in [(rect.minX, length), (rect.maxX, -length)] {

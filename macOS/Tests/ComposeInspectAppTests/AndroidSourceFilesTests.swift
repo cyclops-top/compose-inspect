@@ -10,7 +10,11 @@ final class AndroidSourceFilesTests: XCTestCase {
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: root) }
         let file = root.appendingPathComponent("Screen.kt")
-        let content = "/* package fake */\npackage dev.composeinspect.sample\n"
+        let content = """
+        /* outer /* middle /* inner */ */ package misleading.name */
+        @file:Suppress("/* a string, not a comment */")
+        package dev.composeinspect.sample
+        """
         try content.write(to: file, atomically: true, encoding: .utf8)
         let index = ProjectSourceIndex()
         index.open(root.path)
@@ -26,6 +30,15 @@ final class AndroidSourceFilesTests: XCTestCase {
         try await expect(["Screen.kt"])
         XCTAssertTrue(index.confirms(source))
         XCTAssertFalse(index.confirms(SourceAnchor(file: "Screen.kt", packageHash: -1)))
+        // Java block comments end at the first closing delimiter.
+        try "/* example: /* */ package dev.composeinspect.sample;".write(
+            to: root.appendingPathComponent("Screen.java"), atomically: true, encoding: .utf8)
+        let javaAnchor = SourceAnchor(file: "Screen.java", packageHash: source.packageHash)
+        let deadline = ContinuousClock.now + .seconds(8)
+        while index.matches(javaAnchor).isEmpty && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(index.matches(javaAnchor), ["Screen.java"])
         let module = root.appendingPathComponent("feature")
         try fm.createDirectory(at: module, withIntermediateDirectories: true)
         try content.write(to: module.appendingPathComponent("Screen.kt"), atomically: true, encoding: .utf8)
