@@ -17,7 +17,8 @@ final class CurrentSessionTests: XCTestCase {
         XCTAssertEqual(clamp(CGSize(width: -2000, height: 2000), zoom: 2), CGSize(width: -72, height: 224))
         let inward = CGSize(width: limit.width - 1, height: limit.height + 1)
         XCTAssertEqual(clamp(inward, zoom: 2), inward)
-        XCTAssertEqual(clamp(limit, zoom: 1), CGSize(width: 0, height: -24))
+        XCTAssertEqual(clamp(limit, zoom: 1), .zero)
+        XCTAssertEqual(clamp(outside, zoom: 0.99), .zero)
         XCTAssertEqual(clamp(limit, zoom: 0.5), .zero)
         XCTAssertEqual(PreviewView.clampedPan(limit, imageSize: image, canvasSize: CGSize(width: 500, height: 400), zoom: 2),
                        CGSize(width: 0, height: -224))

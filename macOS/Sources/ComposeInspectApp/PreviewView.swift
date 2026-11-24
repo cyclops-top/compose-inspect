@@ -51,17 +51,20 @@ struct PreviewView: View {
                                     .equatable().allowsHitTesting(false)
                             }
                             Canvas { context, size in
+                                func outline(for node: InspectorNode) -> Path {
+                                    let shape = ComponentStyleDrawing.outlineShape(style: node.style, bounds: node.bounds)
+                                    return ComponentStyleDrawing.path(in: mapper.display(node.bounds), shape: shape, scale: mapper.scale)
+                                }
                                 if let hovered, hovered.id != store.selectedNodeID {
-                                    context.stroke(Path(mapper.display(hovered.bounds)), with: .color(.orange),
+                                    context.stroke(outline(for: hovered), with: .color(.orange),
                                                    style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                                 }
                                 if store.canPickImage, let node = store.highlightedNode,
                                    store.isInVisibleWindow(node.id) {
                                     let rect = mapper.display(node.bounds)
-                                    let outline = ComponentStyleDrawing.path(in: rect,
-                                        shape: ComponentStyleDrawing.outlineShape(style: node.style, bounds: node.bounds), scale: mapper.scale)
-                                    context.fill(outline, with: .color(.accentColor.opacity(0.08)))
-                                    context.stroke(outline, with: .color(.accentColor), lineWidth: 1.5)
+                                    let selection = outline(for: node)
+                                    context.fill(selection, with: .color(.accentColor.opacity(0.08)))
+                                    context.stroke(selection, with: .color(.accentColor), lineWidth: 1.5)
                                     for point in [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
                                                   CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)] {
                                         let handle = CGRect(x: point.x - 2.5, y: point.y - 2.5, width: 5, height: 5)
@@ -326,7 +329,8 @@ struct PreviewView: View {
     }
 
     static func clampedPan(_ proposed: CGSize, imageSize: CGSize, canvasSize: CGSize, zoom: CGFloat) -> CGSize {
-        guard imageSize.width > 0, imageSize.height > 0, canvasSize.width > 0, canvasSize.height > 0 else { return .zero }
+        guard zoom > 1, imageSize.width > 0, imageSize.height > 0,
+              canvasSize.width > 0, canvasSize.height > 0 else { return .zero }
         let centered = CoordinateMapper(imageSize: imageSize, canvasSize: canvasSize, zoom: zoom)
         // About 1 cm on a typical Mac display, including the padding outside the clipped image area.
         let edgeGap: CGFloat = 40
