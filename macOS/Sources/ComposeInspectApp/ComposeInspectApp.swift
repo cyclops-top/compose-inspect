@@ -17,14 +17,14 @@ struct ComposeInspectApp: App {
                     VStack(alignment: .leading, spacing: 12) {
                         Label("抓取环境需要配置", systemImage: "exclamationmark.triangle.fill")
                             .font(.headline).foregroundStyle(.orange)
-                        Text("请先配置可用的 ADB。应用会优先通过 SDK 获取界面，需要 ui-inspector 时才使用 Java 和 JAR。")
+                        Text("请选择 Android SDK 中的 adb 可执行文件。")
                             .font(.callout)
                         ToolchainSettingsView(settings: toolchain)
                         HStack {
                             Spacer()
                             Button("稍后配置") { toolchain.showEnvironmentSetup = false }
                             Button("完成") { toolchain.showEnvironmentSetup = false }
-                                .disabled(!toolchain.startupEnvironmentProblems.isEmpty || !toolchain.checking.isEmpty)
+                                .disabled(toolchain.adbResult?.succeeded != true || toolchain.checkingADB)
                         }
                     }.padding(20)
                 }

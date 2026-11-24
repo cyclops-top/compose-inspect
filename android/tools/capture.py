@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture the SDK without Java/ui-inspector. Removes only its own ADB forward."""
+"""Capture the SDK over ADB. Removes only its own ADB forward."""
 import argparse
 import json
 import os

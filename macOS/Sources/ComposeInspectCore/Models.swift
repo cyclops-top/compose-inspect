@@ -5,7 +5,8 @@ public struct NodeParameter: Identifiable, Codable, Equatable, Sendable {
     public enum Group: String, Codable, CaseIterable, Sendable {
         case layout = "尺寸", font = "字体"
         case modifier = "修饰符", parameter = "组件参数", semantics = "语义", attribute = "View 属性"
-        case mergedSemantics = "合并语义", unmergedSemantics = "原始语义"
+        case unmergedSemantics = "原始语义"
+        case mergedSemantics = "合并语义" // Decodes previously exported Codable snapshots.
     }
     public let id: String
     public let name: String
@@ -13,12 +14,11 @@ public struct NodeParameter: Identifiable, Codable, Equatable, Sendable {
     public let group: Group
     public let isTruncated: Bool
     public let original: InspectorJSON?
-    public let continuationToken: String?
 
     public init(id: String, name: String, value: String, group: Group, isTruncated: Bool = false,
-                original: InspectorJSON? = nil, continuationToken: String? = nil) {
+                original: InspectorJSON? = nil) {
         self.id = id; self.name = name; self.value = value; self.group = group; self.isTruncated = isTruncated
-        self.original = original; self.continuationToken = continuationToken
+        self.original = original
     }
 
     /// Presentation grouping does not change parameter IDs, values or their raw namespace.
@@ -38,12 +38,12 @@ public struct NodeParameter: Identifiable, Codable, Equatable, Sendable {
     ]
 
     public var hasDisplayContent: Bool {
-        guard !isTruncated, continuationToken == nil else { return true }
+        guard !isTruncated else { return true }
         guard let original else { return !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         return Self.hasContent(original)
     }
     private static func hasContent(_ raw: InspectorJSON) -> Bool {
-        if raw["isTruncated"]?.boolean == true || raw["continuationToken"]?.string != nil { return true }
+        if raw["isTruncated"]?.boolean == true { return true }
         // Empty collections, zero and false are meaningful values, not missing parameters.
         if raw["isCollection"]?.boolean == true { return true }
         if let value = raw["value"] {
@@ -87,24 +87,21 @@ public struct InspectorNode: Identifiable, Codable, Equatable, Sendable {
     public let source: SourceAnchor?
     public let parameters: [NodeParameter]
     public let children: [InspectorNode]
-    public let idResource: String?
-    public let layoutResource: String?
     public let clickTargetID: String?
     public let style: ComponentStyle?
 
     public init(id: String, rawID: Int64, name: String, kind: String = "ComposeNode", label: String? = nil,
                 bounds: CGRect, source: SourceAnchor? = nil, parameters: [NodeParameter] = [], children: [InspectorNode] = [],
-                idResource: String? = nil, layoutResource: String? = nil, style: ComponentStyle? = nil, clickTargetID: String? = nil) {
+                style: ComponentStyle? = nil, clickTargetID: String? = nil) {
         self.id = id; self.rawID = rawID; self.name = name; self.kind = kind; self.label = label
         self.bounds = bounds; self.source = source; self.parameters = parameters; self.children = children
         self.style = style
         self.clickTargetID = clickTargetID
-        self.idResource = idResource; self.layoutResource = layoutResource
     }
     fileprivate func withChildren(_ children: [InspectorNode]) -> InspectorNode {
         InspectorNode(id: id, rawID: rawID, name: name, kind: kind, label: label,
                                   bounds: bounds, source: source, parameters: parameters, children: children,
-                                  idResource: idResource, layoutResource: layoutResource, style: style, clickTargetID: clickTargetID)
+                                  style: style, clickTargetID: clickTargetID)
     }
 
     /// These composition-only wrappers have no independently measured layout box.
@@ -144,19 +141,8 @@ public struct InspectorNode: Identifiable, Codable, Equatable, Sendable {
     public var shortName: String { name.components(separatedBy: ".").last ?? name }
     /// Use interaction metadata, rather than component names or arbitrary callback parameters.
     public var isClickable: Bool {
-        if kind == "ViewNode" {
-            if parameters.contains(where: {
-                $0.group == .attribute && $0.name.split(separator: ":").last?.lowercased() == "enabled"
-                    && ($0.original?["value"]?.boolean == false || $0.value.lowercased() == "false")
-            }) { return false }
-            return parameters.contains {
-                $0.group == .attribute && $0.name.split(separator: ":").last?.lowercased() == "clickable"
-                    && ($0.original?["value"]?.boolean == true || $0.value.lowercased() == "true")
-            }
-        }
         guard kind == "ComposeNode" else { return false }
-        let own = parameters.filter { $0.group == .unmergedSemantics }
-        let semantics = own.isEmpty ? parameters.filter { $0.group == .mergedSemantics || $0.group == .semantics } : own
+        let semantics = parameters.filter { $0.group == .unmergedSemantics }
         if semantics.contains(where: { $0.name == "Disabled" && $0.value != "false" && $0.value != "null" }) { return false }
         return semantics.contains { $0.name == "OnClick" && $0.value != "null" && $0.value != "false" }
     }
@@ -190,22 +176,19 @@ public struct InspectorSnapshot: Identifiable, Codable, Equatable, Sendable {
     public let isDemo: Bool
     public let document: InspectorDocument?
     public let captureMetadata: CaptureMetadata?
-    public var parameterReads: [ParameterRead]?
 
     public init(id: UUID = UUID(), capturedAt: Date = Date(), packageName: String, deviceName: String,
                 pixelSize: CGSize, roots: [InspectorNode], isDemo: Bool = false,
                 document: InspectorDocument? = nil, captureMetadata: CaptureMetadata? = nil) {
         self.id = id; self.capturedAt = capturedAt; self.packageName = packageName; self.deviceName = deviceName
         self.pixelSize = pixelSize; self.roots = roots; self.isDemo = isDemo
-        self.document = document; self.captureMetadata = captureMetadata; self.parameterReads = nil
+        self.document = document; self.captureMetadata = captureMetadata
     }
     /// Attach capture diagnostics without parsing the original document or rebuilding its tree.
     public func withCaptureContext(deviceName: String, metadata: CaptureMetadata) -> InspectorSnapshot {
-        var result = InspectorSnapshot(id: id, capturedAt: capturedAt, packageName: packageName,
+        InspectorSnapshot(id: id, capturedAt: capturedAt, packageName: packageName,
                                        deviceName: deviceName, pixelSize: pixelSize, roots: roots,
                                        isDemo: isDemo, document: document, captureMetadata: metadata)
-        result.parameterReads = parameterReads
-        return result
     }
 
     public var nodes: [InspectorNode] { roots.flatMap(\.flattened) }
@@ -348,17 +331,18 @@ public enum ComposeNodeFilter {
             let children = node.children.flatMap { projected.removeValue(forKey: $0.id) ?? [] }
             // Known composition wrappers have no independent layout. Keep any identity or
             // semantics attached to them, but don't retain bookkeeping parameters as UI rows.
-            let meaningfulIdentity = node.label?.isEmpty == false || node.idResource != nil || node.layoutResource != nil
+            let meaningfulIdentity = node.label?.isEmpty == false
                 || node.parameters.contains {
-                    [.semantics, .mergedSemantics, .unmergedSemantics, .attribute].contains($0.group)
+                    [.semantics, .unmergedSemantics, .attribute].contains($0.group)
                         && !["false", "null", ""].contains($0.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
                 }
                 || node.style?.layers.isEmpty == false
             let compositionWrapper = configuration.hideCompositionWrappers && compose && (
                 nonVisualCall(name, file: file)
                     || (node.isVirtualLayoutGroup && (name != "Item" || !meaningfulIdentity)))
-            let androidWrapper = configuration.viewRules.contains { $0.matches(node) }
-            if !isRoot && (textImplementation || layoutImplementation || compositionWrapper || androidWrapper
+            let composeHost = configuration.hideComposeHosts && node.kind == "ViewNode"
+                && (name.hasSuffix("AndroidComposeView") || name == "ComposeHost")
+            if !isRoot && (textImplementation || layoutImplementation || compositionWrapper || composeHost
                 || (onlyClickable && (!node.isClickable || node.clickTargetID.map { preferred[$0] != node.id } == true))) {
                 projected[node.id] = children
                 continue
@@ -475,7 +459,7 @@ public enum LocatorTextBuilder {
 
     public static func sourceSummary(for nodeID: String, index: InspectorSnapshotIndex) -> String {
         guard index.byID[nodeID] != nil else { return "未找到组件" }
-        return sourceLocation(in: index.path(to: nodeID))?.summary ?? "无源码位置：请按组件名、文字及资源线索搜索"
+        return sourceLocation(in: index.path(to: nodeID))?.summary ?? "无源码位置：请按组件名或文字搜索"
     }
 
     public static func text(for issue: ComponentIssue, in snapshot: InspectorSnapshot,
@@ -513,10 +497,8 @@ public enum LocatorTextBuilder {
             clues.append("工程内调用处：\(source.anchor.text)" + (source.inherited ? "（父组件 \(source.ownerName)）" : ""))
             clues.append("组件自身采集位置：" + (capturedSource?.text ?? "未提供"))
         } else if capturedSource?.line == nil {
-            clues.append(source?.summary ?? "无源码位置：请按组件名、文字及资源线索搜索")
+            clues.append(source?.summary ?? "无源码位置：请按组件名或文字搜索")
         }
-        if let resource = node.idResource { clues.append("资源 ID：" + resource) }
-        if let resource = node.layoutResource { clues.append("布局资源：" + resource) }
         let parameterSection = parameters.isEmpty ? [] : ["", "## 所选参数", codeBlock(parameters.joined(separator: "\n"))]
         return (locator + clues + parameterSection + (hasRequest ? ["", "## 修改要求", issue.description] : [])).joined(separator: "\n")
     }

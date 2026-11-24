@@ -1,6 +1,5 @@
 import AppKit
 import ComposeInspectCore
-import Darwin
 import Observation
 
 struct ToolProbeResult: Sendable {
@@ -13,13 +12,7 @@ final class ToolchainSettings {
     var adbOverride: String {
         didSet {
             guard adbOverride != oldValue else { return }
-            defaults.set(adbOverride, forKey: "toolchain.adbPath"); invalidate(.adb)
-        }
-    }
-    var javaOverride: String {
-        didSet {
-            guard javaOverride != oldValue else { return }
-            defaults.set(javaOverride, forKey: "toolchain.javaPath"); invalidate(.java)
+            defaults.set(adbOverride, forKey: "toolchain.adbPath"); invalidateADB()
         }
     }
     private(set) var environment: [String: String]
@@ -29,11 +22,10 @@ final class ToolchainSettings {
     private var hasLoadedEnvironment = false
     private var hasCheckedStartup = false
     var showEnvironmentSetup = false
-    nonisolated static let minimumJavaVersion = 25
     private let inheritedEnvironment: [String: String]
-    private(set) var results: [ToolKind: ToolProbeResult] = [:]
-    private(set) var checking: Set<ToolKind> = []
-    private var revisions: [ToolKind: UUID] = [:]
+    private(set) var adbResult: ToolProbeResult?
+    private(set) var checkingADB = false
+    private var probeRevision = UUID()
     private let defaults: UserDefaults
     private(set) var recentProjects: [String] {
         didSet { defaults.set(recentProjects, forKey: "source.recentProjects") }
@@ -42,16 +34,9 @@ final class ToolchainSettings {
     private(set) var androidProjectPath: String {
         didSet { defaults.set(androidProjectPath, forKey: "source.androidProjectPath") }
     }
-    var inspectorJarOverride: String {
-        didSet { defaults.set(inspectorJarOverride, forKey: "toolchain.inspectorJar") }
-    }
     var skipOverlayWindows: Bool {
         didSet { defaults.set(skipOverlayWindows, forKey: "capture.skipOverlays") }
     }
-    var includeResolutionStack: Bool {
-        didSet { defaults.set(includeResolutionStack, forKey: "capture.resolutionStack") }
-    }
-
     init(defaults: UserDefaults = .standard, environment: [String: String] = ProcessInfo.processInfo.environment) {
         self.defaults = defaults
         self.environment = environment
@@ -60,32 +45,17 @@ final class ToolchainSettings {
         recentProjects = defaults.stringArray(forKey: "source.recentProjects") ?? (current.isEmpty ? [] : [current])
         androidProjectPath = current
         adbOverride = defaults.string(forKey: "toolchain.adbPath") ?? ""
-        javaOverride = defaults.string(forKey: "toolchain.javaPath") ?? ""
-        inspectorJarOverride = defaults.string(forKey: "toolchain.inspectorJar") ?? ""
         skipOverlayWindows = defaults.bool(forKey: "capture.skipOverlays")
-        includeResolutionStack = defaults.bool(forKey: "capture.resolutionStack")
     }
 
-    func customPath(for tool: ToolKind) -> String { tool == .adb ? adbOverride : javaOverride }
-
-    func resolution(for tool: ToolKind) -> ExecutableResolution {
-        ExecutableResolver(environment: environment).resolve(tool, customPath: customPath(for: tool))
+    var adbResolution: ExecutableResolution {
+        ExecutableResolver(environment: environment).resolveADB(customPath: adbOverride)
     }
 
-    var inspectorJar: URL? {
-        let manual = inspectorJarOverride.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !manual.isEmpty { return URL(fileURLWithPath: (manual as NSString).expandingTildeInPath) }
-        return Bundle.main.url(forResource: "ui-inspector", withExtension: "jar")
-    }
-
-    func resolvedTools(requireJava: Bool = true) throws -> InspectorToolchain {
-        guard let adb = resolution(for: .adb).location else { throw CommandFailure.configuration(resolution(for: .adb).error ?? "请配置 ADB") }
-        let java = resolution(for: .java).location?.url
-        if requireJava && java == nil { throw CommandFailure.configuration(resolution(for: .java).error ?? "请配置 Java") }
-        let jar = inspectorJar ?? URL(fileURLWithPath: "/missing/ui-inspector.jar")
-        if requireJava && !FileManager.default.fileExists(atPath: jar.path) { throw CommandFailure.configuration("未找到 ui-inspector.jar，请在设置的“检查”页选择，或重新构建应用。") }
-        return InspectorToolchain(adb: adb.url, java: java ?? URL(fileURLWithPath: "/usr/bin/java"), jar: jar,
-                                  environment: environment, resolutionStack: includeResolutionStack)
+    func resolvedTools() throws -> InspectorToolchain {
+        let resolution = adbResolution
+        guard let adb = resolution.location else { throw CommandFailure.configuration(resolution.error ?? "请配置 ADB") }
+        return InspectorToolchain(adb: adb.url, environment: environment)
     }
 
     func chooseAndroidProject() {
@@ -120,29 +90,18 @@ final class ToolchainSettings {
         recentProjects = []
     }
 
-    func chooseInspectorJar() {
+    func chooseADB() {
         let panel = NSOpenPanel()
-        panel.title = "选择 ui-inspector.jar"; panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        if panel.runModal() == .OK, let url = panel.url { inspectorJarOverride = url.path }
-    }
-
-    func reset(_ tool: ToolKind) {
-        if tool == .adb { adbOverride = "" } else { javaOverride = "" }
-    }
-
-    func choose(_ tool: ToolKind) {
-        let panel = NSOpenPanel()
-        panel.title = tool == .adb ? "选择 adb 可执行文件" : "选择 java 可执行文件或 Java 安装目录"
-        panel.message = tool == .adb ? "通常位于 Android SDK 的 platform-tools 目录。" : "可选择 bin/java、JAVA_HOME 目录或 .jdk 安装包。"
+        panel.title = "选择 adb 可执行文件"
+        panel.message = "通常位于 Android SDK 的 platform-tools 目录。"
         panel.canChooseFiles = true
-        panel.canChooseDirectories = tool == .java
+        panel.canChooseDirectories = false
         panel.treatsFilePackagesAsDirectories = true
         panel.allowsMultipleSelection = false
         panel.showsHiddenFiles = true
-        if let location = resolution(for: tool).location { panel.directoryURL = location.url.deletingLastPathComponent() }
+        if let location = adbResolution.location { panel.directoryURL = location.url.deletingLastPathComponent() }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        if tool == .adb { adbOverride = url.path } else { javaOverride = url.path }
+        adbOverride = url.path
     }
 
     func loadEnvironmentIfNeeded() async {
@@ -167,114 +126,43 @@ final class ToolchainSettings {
             environmentMessage = "未能读取用户 shell 环境，保留当前环境：\(error.localizedDescription)"
         }
         hasLoadedEnvironment = true
-        for tool in ToolKind.allCases { invalidate(tool) }
+        invalidateADB()
     }
 
-    func validate(_ tool: ToolKind) async {
-        guard !checking.contains(tool) else { return }
-        guard let location = resolution(for: tool).location else {
-            results[tool] = ToolProbeResult(succeeded: false, message: resolution(for: tool).error ?? "未找到工具")
+    func validateADB() async {
+        guard !checkingADB else { return }
+        let resolution = adbResolution
+        guard let location = resolution.location else {
+            adbResult = ToolProbeResult(succeeded: false, message: resolution.error ?? "未找到 ADB")
             return
         }
-        let revision = UUID()
-        revisions[tool] = revision
-        checking.insert(tool)
-        results[tool] = nil
-        let inheritedEnvironment = environment
-        let result = await Task.detached(priority: .utility) {
-            Self.probe(tool, at: location, environment: inheritedEnvironment)
-        }.value
-        // Path edits invalidate in-flight results; a slow check cannot label a new path as valid.
-        guard revisions[tool] == revision else { return }
-        results[tool] = result
-        checking.remove(tool)
-    }
-
-    var environmentProblems: [String] {
-        var problems = ToolKind.allCases.compactMap { tool -> String? in
-            guard let result = results[tool], !result.succeeded else { return nil }
-            return "\(tool.displayName)：\(result.message)"
+        let revision = probeRevision
+        checkingADB = true
+        let result: ToolProbeResult
+        do {
+            let output = try await CommandRunner.run(location.url, arguments: ["version"], environment: environment, timeout: 15)
+            let version = String(decoding: (output.stdout + output.stderr).prefix(16_384), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            result = ToolProbeResult(succeeded: output.exitCode == 0 && !version.isEmpty,
+                                     message: version.isEmpty ? "ADB 未返回版本信息，请检查路径。" : version)
+        } catch {
+            result = ToolProbeResult(succeeded: false, message: error.localizedDescription)
         }
-        if inspectorJar.map({ FileManager.default.isReadableFile(atPath: $0.path) }) != true {
-            problems.append("未找到可读取的 ui-inspector.jar，请在“检查”页选择 JAR 或重新构建应用。")
-        }
-        return problems
-    }
-
-    var startupEnvironmentProblems: [String] {
-        guard let result = results[.adb], !result.succeeded else { return [] }
-        return ["ADB：\(result.message)"]
+        guard revision == probeRevision else { return }
+        adbResult = result
+        checkingADB = false
     }
 
     func checkStartupEnvironment() async {
         guard !hasCheckedStartup else { return }
         hasCheckedStartup = true
-        // SDK capture needs only ADB. Java/JAR remain checked in Settings and on fallback.
-        await validate(.adb)
-        showEnvironmentSetup = !startupEnvironmentProblems.isEmpty
+        await validateADB()
+        showEnvironmentSetup = adbResult?.succeeded == false
     }
 
-    func validateEnvironment() async {
-        await validate(.adb)
-        await validate(.java)
-    }
-
-    private func invalidate(_ tool: ToolKind) {
-        revisions[tool] = UUID()
-        results[tool] = nil
-        checking.remove(tool)
-    }
-
-    nonisolated private static func probe(_ tool: ToolKind, at location: ExecutableLocation,
-                                         environment: [String: String]) -> ToolProbeResult {
-        let output = FileManager.default.temporaryDirectory.appendingPathComponent("ComposeInspect-toolcheck-\(UUID()).txt")
-        defer { try? FileManager.default.removeItem(at: output) }
-        do {
-            guard FileManager.default.createFile(atPath: output.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
-            let handle = try FileHandle(forWritingTo: output)
-            defer { try? handle.close() }
-            let process = Process()
-            process.executableURL = location.url
-            process.arguments = tool == .adb ? ["version"] : ["-version"]
-            process.environment = environment
-            process.standardInput = FileHandle.nullDevice
-            // Version output is small. A file avoids deadlocks when Java writes its version to stderr.
-            process.standardOutput = handle
-            process.standardError = handle
-            let finished = DispatchSemaphore(value: 0)
-            process.terminationHandler = { _ in finished.signal() }
-            try process.run()
-            if finished.wait(timeout: .now() + 15) == .timedOut {
-                process.terminate()
-                if finished.wait(timeout: .now() + 0.3) == .timedOut, process.isRunning {
-                    kill(process.processIdentifier, SIGKILL)
-                }
-                process.waitUntilExit()
-                return ToolProbeResult(succeeded: false, message: "检测超时（15 秒）。请确认选择的是正确的可执行文件。")
-            }
-            process.waitUntilExit()
-            let reader = try FileHandle(forReadingFrom: output)
-            defer { try? reader.close() }
-            let bytes = try reader.read(upToCount: 16_384) ?? Data()
-            let text = String(decoding: bytes, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard process.terminationStatus == 0 else {
-                return ToolProbeResult(succeeded: false, message: text.isEmpty ? "检测失败，退出码 \(process.terminationStatus)。" : text)
-            }
-            guard !text.isEmpty else { return ToolProbeResult(succeeded: false, message: "没有返回版本信息，请确认工具路径。") }
-            if tool == .java {
-                let expression = try NSRegularExpression(pattern: #"version\s+"([0-9]+)(?:\.([0-9]+))?"#)
-                let range = NSRange(text.startIndex..., in: text)
-                guard let match = expression.firstMatch(in: text, range: range),
-                      let majorRange = Range(match.range(at: 1), in: text),
-                      let first = Int(text[majorRange]) else {
-                    return ToolProbeResult(succeeded: false, message: "无法识别 Java 版本，请选择 Java \(minimumJavaVersion) 或更新版本。\n\(text)")
-                }
-                let major = first == 1 ? Range(match.range(at: 2), in: text).flatMap { Int(text[$0]) } ?? first : first
-                if major < minimumJavaVersion {
-                    return ToolProbeResult(succeeded: false, message: "当前 Java \(major)，UI Inspector 抓取需要 Java \(minimumJavaVersion) 或更新版本。请选择兼容的 Java 安装目录或 bin/java。")
-                }
-            }
-            return ToolProbeResult(succeeded: true, message: text)
-        } catch { return ToolProbeResult(succeeded: false, message: error.localizedDescription) }
+    private func invalidateADB() {
+        probeRevision = UUID()
+        adbResult = nil
+        checkingADB = false
     }
 }

@@ -30,20 +30,4 @@ final class TraversalOptimizationTests: XCTestCase {
             XCTAssertEqual(visits, 4)
         }
     }
-
-    func testGeometryComparisonPreservesOrderBoundsLabelsAndNodeCount() {
-        func node(_ id: String, label: String? = nil, x: CGFloat = 0) -> InspectorNode {
-            InspectorNode(id: id, rawID: 1, name: "Text", label: label,
-                          bounds: CGRect(x: x, y: 0, width: 10, height: 10))
-        }
-        let source = snapshot([node("a"), node("b", label: "hello")])
-        XCTAssertTrue(InspectorClient.hasSameGeometry(source, source))
-        XCTAssertTrue(InspectorClient.hasSameGeometry(snapshot([node("a")]), snapshot([node("a", label: "")])))
-        for other in [snapshot([node("a")]), snapshot([node("a"), node("b", label: "changed")]),
-                      snapshot([node("a", x: 1), node("b", label: "hello")]),
-                      snapshot([node("b", label: "hello"), node("a")])] {
-            XCTAssertFalse(InspectorClient.hasSameGeometry(source, other))
-            XCTAssertFalse(InspectorClient.hasSameGeometry(other, source))
-        }
-    }
 }

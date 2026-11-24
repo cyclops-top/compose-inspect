@@ -41,7 +41,6 @@ final class SDKCaptureTests: XCTestCase {
         XCTAssertEqual(text.parameters.first { $0.name == "tint" }?.colorARGB, "FFFF0000")
         XCTAssertEqual(text.parameters.first { $0.name == "profile.age" }?.value, "37")
         XCTAssertEqual(text.parameters.first { $0.name == "callback" }?.isTruncated, true)
-        XCTAssertTrue(text.parameters.allSatisfy { $0.continuationToken == nil })
         let doc = try XCTUnwrap(snapshot.document)
         XCTAssertEqual(doc.root["sdkCapture"], raw)
         XCTAssertEqual(doc.root.value(at: text.id)?["className"]?.string, "BasicText")
@@ -60,10 +59,16 @@ final class SDKCaptureTests: XCTestCase {
         XCTAssertThrowsError(try SDKInspectorClient.validateResponse(Data(response().jsonString().utf8), package: "dev.sample", expectedPID: 456))
     }
 
+    private func sameGeometry(_ lhs: InspectorSnapshot, _ rhs: InspectorSnapshot) -> Bool {
+        lhs.nodes.count == rhs.nodes.count && zip(lhs.nodes, rhs.nodes).allSatisfy {
+            $0.id == $1.id && $0.name == $1.name && $0.kind == $1.kind && $0.label == $1.label && $0.bounds == $1.bounds
+        }
+    }
+
     func testTableOrderDoesNotChangePresentationGeometry() throws {
         let a = InspectorJSON.object(["tree": group("Item", y: 10)])
         let b = InspectorJSON.object(["tree": group("Item", y: 100)])
-        XCTAssertTrue(InspectorClient.hasSameGeometry(try decode(response(tables: [a, b])), try decode(response(tables: [b, a]))))
+        XCTAssertTrue(sameGeometry(try decode(response(tables: [a, b])), try decode(response(tables: [b, a]))))
     }
 
     func testIdenticalTableRootsWithDifferentDescendantsHaveStableOrder() throws {
@@ -75,61 +80,7 @@ final class SDKCaptureTests: XCTestCase {
         let first = table("First"), second = table("Second")
         let baseline = try decode(response(tables: [first, second]))
         let reordered = try decode(response(tables: [second, first]))
-        XCTAssertTrue(InspectorClient.hasSameGeometry(baseline, reordered))
-        XCTAssertFalse(InspectorClient.hasSameGeometry(baseline, try decode(response(tables: [first, table("Changed")]))))
-    }
-
-    private func captured() -> CapturedSnapshot {
-        let metadata = CaptureMetadata(serial: "device", packageName: "dev.sample", startedAt: Date(), finishedAt: Date(),
-                                       includeFacets: "attributes", stableLayout: false, stableImage: false,
-                                       diagnostics: ["inspector diagnostic"], baselineJSON: Data("original".utf8))
-        return CapturedSnapshot(snapshot: InspectorSnapshot(packageName: "dev.sample", deviceName: "test", pixelSize: .zero, roots: [], captureMetadata: metadata),
-                                imageData: Data([1, 2, 3]))
-    }
-
-    func testSDKSuccessNeverInvokesInspector() async throws {
-        let expected = captured()
-        let result = try await AutomaticCapture.capture(sdk: { expected }, inspector: {
-            XCTFail("SDK success must not require Java/JAR")
-            throw CommandFailure.failed("unexpected")
-        })
-        XCTAssertEqual(result.snapshot.id, expected.snapshot.id)
-    }
-
-    func testSDKFailureUsesIndependentInspectorResultAndRecordsReason() async throws {
-        let expected = captured()
-        let result = try await AutomaticCapture.capture(sdk: { throw CommandFailure.failed("incompatible protocol") }, inspector: { expected })
-        XCTAssertEqual(result.imageData, expected.imageData)
-        XCTAssertEqual(result.snapshot.id, expected.snapshot.id)
-        XCTAssertEqual(result.snapshot.captureMetadata?.backend, .uiInspector)
-        XCTAssertEqual(result.snapshot.captureMetadata?.baselineJSON, Data("original".utf8))
-        XCTAssertTrue(result.snapshot.captureMetadata?.diagnostics.first?.contains("incompatible protocol") == true)
-    }
-
-    func testCancellationDoesNotFallBack() async throws {
-        do {
-            _ = try await AutomaticCapture.capture(sdk: { throw CancellationError() }, inspector: {
-                XCTFail("Cancellation must not start inspector")
-                throw CommandFailure.failed("unexpected")
-            })
-            XCTFail("Expected cancellation")
-        } catch is CancellationError {}
-    }
-
-    func testBothFailuresKeepBothDiagnostics() async throws {
-        do {
-            _ = try await AutomaticCapture.capture(sdk: { throw CommandFailure.failed("SDK timeout") },
-                                                   inspector: { throw CommandFailure.failed("JAR missing") })
-            XCTFail("Expected failure")
-        } catch {
-            XCTAssertTrue(error.localizedDescription.contains("SDK timeout"))
-            XCTAssertTrue(error.localizedDescription.contains("JAR missing"))
-        }
-    }
-
-    func testOldMetadataWithoutBackendStillDecodes() throws {
-        let original = try XCTUnwrap(captured().snapshot.captureMetadata)
-        let bytes = try JSONEncoder().encode(original)
-        XCTAssertNil(try JSONDecoder().decode(CaptureMetadata.self, from: bytes).backend)
+        XCTAssertTrue(sameGeometry(baseline, reordered))
+        XCTAssertFalse(sameGeometry(baseline, try decode(response(tables: [first, table("Changed")]))))
     }
 }

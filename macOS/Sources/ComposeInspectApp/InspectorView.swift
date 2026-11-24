@@ -4,7 +4,14 @@ import SwiftUI
 struct InspectorView: View {
     @Bindable var store: WorkspaceStore
     @Environment(ToolchainSettings.self) private var tools
-    @State private var moreExpanded = false
+    private enum Tab: String, CaseIterable {
+        case basic = "基础"
+        case style = "样式"
+        case location = "定位"
+        case parameters = "参数"
+    }
+
+    @State private var selectedTab = Tab.basic
     @State private var expandedGroups: Set<NodeParameter.Group> = [.layout, .font, .modifier, .parameter, .attribute]
     var body: some View {
         VStack(spacing: 0) {
@@ -17,36 +24,50 @@ struct InspectorView: View {
                     .disabled(store.snapshot.document == nil)
             }.padding(.horizontal, 14).frame(height: 35).overlay(alignment: .bottom) { Divider() }
             if let node = store.selectedNode {
+                HStack {
+                    Text(node.shortName)
+                        .font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                        .lineLimit(1).help(node.shortName)
+                        .textSelection(.enabled)
+                    Spacer()
+                    let location = store.sourceLocation(for: node.id)
+                    SourceNavigationButtons(location: location, project: tools.androidProjectPath,
+                        index: store.usesProjectSources || location?.inProject == true ? store.projectSources : nil,
+                        copy: { store.copy($0) }, showNotice: { store.notice = $0 })
+                        .id(store.selectedKey).id(tools.androidProjectPath)
+                }
+                .padding(.horizontal, 12).padding(.top, 10)
+                Picker("组件属性分组", selection: $selectedTab) {
+                    ForEach(Tab.allCases, id: \.self) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented).labelsHidden()
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                Divider()
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text(node.shortName)
-                                .font(.system(.subheadline, design: .monospaced).weight(.semibold))
-                                .textSelection(.enabled)
-                            Spacer()
-                            let location = store.sourceLocation(for: node.id)
-                            SourceNavigationButtons(location: location, project: tools.androidProjectPath,
-                                index: store.usesProjectSources || location?.inProject == true ? store.projectSources : nil,
-                                copy: { store.copy($0) }, showNotice: { store.notice = $0 })
-                                .id(store.selectedKey).id(tools.androidProjectPath)
-                        }
-                        PrimaryAttributes(node: node, moreExpanded: $moreExpanded)
-                        Divider()
-                        DisclosureGroup(isExpanded: $moreExpanded) {
-                            if moreExpanded {
-                                VStack(alignment: .leading, spacing: 10) { details(for: node) }
-                                    .padding(.top, 6)
+                        switch selectedTab {
+                        case .basic:
+                            PrimaryAttributes(node: node) { selectedTab = .style }
+                            layoutBounds(for: node)
+                            if let style = node.style {
+                                BoxPreview(style: style)
                             }
-                        } label: {
-                            Text("更多属性")
-                                .font(.subheadline.weight(.medium))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                                .onTapGesture { moreExpanded.toggle() }
+                        case .style:
+                            if let text = TextComponentPreview(node: node), let content = text.content {
+                                TextComponentPreviewView(content: content, preview: text)
+                            }
+                            ComponentStylePreview(node: node, ancestors: Array(store.snapshotIndex.path(to: node.id).dropLast()))
+                        case .location:
+                            locationDetails(for: node)
+                        case .parameters:
+                            parameterGroups(for: node)
                         }
                     }.padding(12)
                 }
-                if moreExpanded || !store.selectedParameters.isEmpty {
+                .id(selectedTab)
+                if selectedTab == .parameters || !store.selectedParameters.isEmpty {
                     HStack(spacing: 7) {
                         Image(systemName: "checklist")
                         Text("已选 \(store.selectedParameters.count) 项 · 当前组件")
@@ -61,10 +82,7 @@ struct InspectorView: View {
     }
 
     @ViewBuilder
-    private func details(for node: InspectorNode) -> some View {
-        let visibleParameters = node.selectableParameters.filter {
-            $0.hasDisplayContent || store.selectedParameters.contains($0.id)
-        }
+    private func locationDetails(for node: InspectorNode) -> some View {
         Text("\(node.kind) · #\(node.rawID)\(node.label.map { " · " + $0 } ?? "")")
             .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
         VStack(alignment: .leading, spacing: 5) {
@@ -76,6 +94,9 @@ struct InspectorView: View {
                 Spacer(minLength: 0)
             }.padding(8).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
         }
+    }
+
+    private func layoutBounds(for node: InspectorNode) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             SectionCaption(text: node.isVirtualLayoutGroup ? "组合范围 · 屏幕像素" : "布局 · 屏幕像素")
             HStack {
@@ -84,17 +105,12 @@ struct InspectorView: View {
                 Text("\(Int(node.bounds.width)) × \(Int(node.bounds.height))")
             }.font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
         }
-        if let text = TextComponentPreview(node: node), let content = text.content {
-            TextComponentPreviewView(content: content, preview: text)
-        }
-        ComponentStylePreview(node: node, ancestors: Array(store.snapshotIndex.path(to: node.id).dropLast()))
-        Divider()
-        if node.idResource != nil || node.layoutResource != nil {
-            VStack(alignment: .leading, spacing: 4) {
-                SectionCaption(text: "资源")
-                if let resource = node.idResource { Text(resource).textSelection(.enabled) }
-                if let resource = node.layoutResource { Text(resource).textSelection(.enabled) }
-            }.font(.system(size: 10, design: .monospaced))
+    }
+
+    @ViewBuilder
+    private func parameterGroups(for node: InspectorNode) -> some View {
+        let visibleParameters = node.selectableParameters.filter {
+            $0.hasDisplayContent || store.selectedParameters.contains($0.id)
         }
         VStack(alignment: .leading, spacing: 3) {
             SectionCaption(text: "选择要提供给 AI 的参数")
@@ -115,7 +131,7 @@ struct InspectorView: View {
                     }.padding(.top, 3)
                 } label: {
                     HStack {
-                        Text(group.rawValue).font(.system(size: 11, weight: .medium))
+                        Text(group == .attribute ? "附加信息" : group.rawValue).font(.system(size: 11, weight: .medium))
                         Text("\(parameters.count)").font(.system(size: 10)).foregroundStyle(.tertiary)
                     }
                 }
@@ -124,7 +140,6 @@ struct InspectorView: View {
     }
 
     private func parameterRow(_ parameter: NodeParameter) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
         HStack(alignment: .top, spacing: 6) {
             Toggle(isOn: Binding(get: { store.selectedParameters.contains(parameter.id) }, set: {
                 store.toggleParameter(parameter.id, enabled: $0)
@@ -135,23 +150,40 @@ struct InspectorView: View {
             Text(parameter.value + (parameter.isTruncated ? " …" : ""))
                 .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                 .lineLimit(2).truncationMode(.middle).frame(maxWidth: 115, alignment: .trailing)
-                .help(parameter.value + (parameter.isTruncated ? "（截断值，可按需继续读取）" : ""))
+                .help(parameter.value + (parameter.isTruncated ? "（SDK 已截断）" : ""))
             if parameter.original != nil {
                 Button { store.showRawJSON(parameter: parameter) } label: { Image(systemName: "curlybraces") }
-                    .buttonStyle(.plain).help("完整参数、来源链、截断状态和 continuation token")
+                    .buttonStyle(.plain).help("查看参数原始 JSON")
             }
-        }
-        if parameter.continuationToken != nil {
-            HStack {
-                Text("上游已截断").foregroundStyle(.secondary)
-                Spacer()
-                Button(store.readingParameters.contains(parameter.id) ? "读取中…" : "继续读取") {
-                    Task { await store.readParameter(parameter, settings: tools) }
-                }.disabled(!store.canRead(parameter) || store.readingParameters.contains(parameter.id))
-                    .help("仅当前实时快照可续读；新响应单独保存，不覆盖原始快照。")
-            }.font(.system(size: 10))
-        }
         }.padding(.vertical, 6).overlay(alignment: .bottom) { Divider().opacity(0.4) }
+    }
+}
+
+private struct BoxPreview: View {
+    let style: ComponentStyle
+
+    private func number(_ value: Double) -> String {
+        value.formatted(.number.precision(.fractionLength(0...1)))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionCaption(text: "框预览")
+            StyleLayerCanvas(style: style).frame(height: 170)
+                .overlay { Rectangle().stroke(.secondary.opacity(0.25), lineWidth: 1) }
+                .accessibilityLabel("当前组件的独立背景与内边距预览")
+                .help("棋盘格表示透明。预览仅绘制当前组件的背景、裁剪和内边距。")
+            Text("外框 \(number(style.selectionBounds.width / style.density)) × \(number(style.selectionBounds.height / style.density)) dp")
+            if style.selectionBounds != style.outerBounds {
+                Text("布局占位 \(number(style.outerBounds.width / style.density)) × \(number(style.outerBounds.height / style.density)) dp")
+                    .foregroundStyle(.secondary)
+            }
+            Text("内容 \(number(style.contentBounds.width / style.density)) × \(number(style.contentBounds.height / style.density)) dp")
+                .foregroundStyle(.secondary)
+            if style.layers.contains(where: { $0.padding != nil }) {
+                PaddingBoxDiagram(insets: style.totalPadding, title: "Padding 合计 · dp")
+            }
+        }.font(.system(size: 10, design: .monospaced))
     }
 }
 
@@ -199,25 +231,14 @@ private struct ComponentStylePreview: View {
                     .foregroundStyle(.secondary)
             }
             if let style = node.style {
-                let paddingCount = style.layers.reduce(0) { $0 + ($1.padding == nil ? 0 : 1) }
-                StyleLayerCanvas(style: style).frame(height: 170)
-                    .overlay { Rectangle().stroke(.secondary.opacity(0.25), lineWidth: 1) }
-                    .accessibilityLabel("当前组件的独立背景与内边距预览")
-                Text("外框 \(number(style.selectionBounds.width / style.density)) × \(number(style.selectionBounds.height / style.density)) dp")
-                if style.selectionBounds != style.outerBounds {
-                    Text("布局占位 \(number(style.outerBounds.width / style.density)) × \(number(style.outerBounds.height / style.density)) dp")
-                        .foregroundStyle(.secondary)
-                }
-                Text("内容 \(number(style.contentBounds.width / style.density)) × \(number(style.contentBounds.height / style.density)) dp")
-                    .foregroundStyle(.secondary)
-                if paddingCount > 0 {
-                    PaddingBoxDiagram(insets: style.totalPadding, title: "Padding 合计 · dp")
+                if !includeInternalStyles {
+                    BoxPreview(style: style)
                 }
                 if style.layers.isEmpty {
                     Text("当前布局没有采集到 padding、背景或裁剪层。")
                         .foregroundStyle(.secondary)
                 }
-                ForEach(style.layers.filter { $0.kind != "padding" || paddingCount > 1 }) { layer in
+                ForEach(style.layers) { layer in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .top, spacing: 6) {
                             Text("\(layer.id + 1)").foregroundStyle(.tertiary).frame(width: 16)
@@ -247,8 +268,6 @@ private struct ComponentStylePreview: View {
                     }.padding(7).frame(maxWidth: .infinity, alignment: .leading)
                         .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 5))
                 }
-                Text("由外到内 · 仅当前布局自身的样式，棋盘格表示透明；不包含父背景及子组件内容。")
-                    .foregroundStyle(.secondary)
             } else if node.isVirtualLayoutGroup {
                 Text("组合包装节点：选框包含子组件外框；此节点没有独立背景或 padding。")
                     .foregroundStyle(.secondary)
@@ -450,7 +469,7 @@ private struct ParameterColorSwatch: View {
 
 private struct PrimaryAttributes: View {
     let node: InspectorNode
-    @Binding var moreExpanded: Bool
+    let showStyle: () -> Void
 
     private var isSurface: Bool {
         node.shortName.hasSuffix("Button") || node.shortName.hasSuffix("Card")
@@ -485,13 +504,6 @@ private struct PrimaryAttributes: View {
         field("尺寸", number(bounds.width / density) + " × " + number(bounds.height / density) + unit)
         if let style, style.layers.contains(where: { $0.padding != nil }) {
             field("内边距", padding(style.totalPadding, unit: " dp"))
-        } else if node.kind == "ViewNode" {
-            let sides = ["paddingLeft", "paddingTop", "paddingRight", "paddingBottom"].compactMap { name in
-                node.parameters.first { $0.group == .attribute && $0.name == name }?.original?["value"]?.double
-            }
-            if sides.count == 4, sides.allSatisfy({ $0.isFinite && $0 >= 0 }) {
-                field("内边距", padding(.init(left: sides[0], top: sides[1], right: sides[2], bottom: sides[3]), unit: " px"))
-            }
         }
     }
 
@@ -499,13 +511,10 @@ private struct PrimaryAttributes: View {
         let backgrounds = node.style?.layers.filter { $0.kind == "background" } ?? []
         if backgrounds.count > 1 {
             attributeTile("背景") {
-                Button("\(backgrounds.count) 层背景") { moreExpanded = true }.buttonStyle(.link)
+                Button("\(backgrounds.count) 层背景") { showStyle() }.buttonStyle(.link)
             }
         } else if let layer = backgrounds.first, let argb = layer.argb, styleColor(argb) != nil {
             colorField("背景色", argb, alpha: layer.alpha)
-        } else if backgrounds.isEmpty, node.kind == "ViewNode",
-                  let color = node.parameters.first(where: { $0.group == .attribute && $0.name == "background" })?.colorARGB {
-            colorField("背景色", color)
         }
         if isSurface, node.style == nil, node.kind == "ComposeNode",
            let color = node.parameters.first(where: { $0.group == .parameter && ["containerColor", "backgroundColor"].contains($0.name) && $0.colorARGB != nil })?.colorARGB {

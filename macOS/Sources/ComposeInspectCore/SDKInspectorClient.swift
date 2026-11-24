@@ -49,7 +49,22 @@ public struct SDKInspectorClient: Sendable {
     private func capture(port: UInt16, serial: String, package: String, deviceName: String, skipOverlayWindows: Bool,
                          progress: @escaping @Sendable (String) async -> Void) async throws -> CapturedSnapshot {
         let started = Date()
-        let helloData = try await SDKTransport.request(port: port, command: "hello", timeout: 2, maxBytes: 65536)
+        let helloData: Data
+        do {
+            helloData = try await SDKTransport.request(port: port, command: "hello", timeout: 2, maxBytes: 65536)
+        } catch let handshakeError {
+            try Task.checkCancellation()
+            do {
+                _ = try await adb.adb(["-s", serial, "shell", "run-as", package, "true"], timeout: 2)
+            } catch CommandFailure.failed(let message) where message.split(whereSeparator: \.isNewline)
+                .contains("run-as: package not debuggable: \(package)") {
+                throw CommandFailure.failed("设备上的 \(package) 是不可调试版本。请安装并打开通过 debugImplementation 接入采集 SDK 的调试包，再重新抓取。")
+            } catch {
+                // An unavailable run-as command cannot establish whether the package is debuggable.
+            }
+            try Task.checkCancellation()
+            throw CommandFailure.failed("无法连接 \(package) 的采集 SDK。请确认已通过 debugImplementation 接入 SDK，并已安装、打开该调试版本。\n\(handshakeError.localizedDescription)")
+        }
         let hello = try Self.validateResponse(helloData, package: package)
         guard hello.root["capabilities"]?.array?.contains(.string("composition-tables")) == true else {
             throw CommandFailure.failed("SDK 未声明组件树采集能力。")
@@ -94,8 +109,7 @@ public struct SDKInspectorClient: Sendable {
                                styles, tree, parameters))
         }
         let metadata = CaptureMetadata(serial: serial, packageName: package, startedAt: started, finishedAt: Date(),
-                                       includeFacets: "sdk:composition-tables,parameters,call-source-locations",
-                                       diagnostics: logs, baselineJSON: data, backend: .sdk)
+                                       diagnostics: logs, baselineJSON: data)
         try Task.checkCancellation()
         return CapturedSnapshot(snapshot: snapshot.withCaptureContext(deviceName: deviceName, metadata: metadata),
                                 imageData: screen.stdout)

@@ -8,10 +8,9 @@ public struct TextComponentPreview: Equatable, Sendable {
     public let fontUnit: String?
 
     public init?(node: InspectorNode) {
-        let native = node.kind == "ViewNode" && node.shortName.hasSuffix("TextView")
-        guard native || (node.kind == "ComposeNode" && ["Text", "BasicText"].contains(node.shortName)) else { return nil }
+        guard node.kind == "ComposeNode", ["Text", "BasicText"].contains(node.shortName) else { return nil }
         func field(_ name: String, in candidate: InspectorNode) -> NodeParameter? {
-            candidate.parameters.first { $0.group == (native ? .attribute : .parameter) && $0.name == name && !$0.isTruncated }
+            candidate.parameters.first { $0.group == .parameter && $0.name == name && !$0.isTruncated }
         }
         func text(_ candidate: InspectorNode) -> String? {
             for name in ["text.text", "text"] {
@@ -20,13 +19,7 @@ public struct TextComponentPreview: Equatable, Sendable {
                 if parameter.original?["elements"] == nil, parameter.original?["isCollection"]?.boolean != true,
                    let text = parameter.original?["value"]?.string { return text }
             }
-            // Older snapshots can carry the text solely as a semantics parameter.
-            let semantics = candidate.parameters.first {
-                [.semantics, .unmergedSemantics, .mergedSemantics].contains($0.group)
-                    && $0.name.lowercased() == "text" && !$0.isTruncated
-            }
-            if let semantics, semantics.original == nil { return semantics.value }
-            return semantics?.original?["isCollection"]?.boolean == true ? nil : semantics?.original?["value"]?.string
+            return nil
         }
         let content = text(node)
         self.content = content
@@ -44,23 +37,23 @@ public struct TextComponentPreview: Equatable, Sendable {
         let basic = node.shortName == "Text" && content != nil ? implementation(node) : nil
         let candidates = [node, basic].compactMap { $0 }
         colorARGB = candidates.lazy.compactMap { candidate in
-            field(native ? "textColor" : "color", in: candidate)?.colorARGB ?? field("style.color", in: candidate)?.colorARGB
+            field("color", in: candidate)?.colorARGB ?? field("style.color", in: candidate)?.colorARGB
         }.first
         fontWeight = candidates.lazy.compactMap { candidate in
-            for name in ["fontWeight", "fontWeight.weight", "style.fontWeight", "style.fontWeight.weight", "textFontWeight"] {
+            for name in ["fontWeight", "fontWeight.weight", "style.fontWeight", "style.fontWeight.weight"] {
                 if let parameter = field(name, in: candidate), let weight = Self.weight(parameter.value) { return weight }
             }
             return nil
         }.first
         var size: Double?, unit: String?
         for candidate in candidates {
-            for name in (native ? ["textSize"] : ["fontSize", "style.fontSize"]) {
+            for name in ["fontSize", "style.fontSize"] {
                 guard let parameter = field(name, in: candidate) else { continue }
                 let value = parameter.original?["value"]
                 let rendered = (value?.string ?? parameter.value).lowercased()
-                let suffix = native ? "px" : value?["unit"]?.string?.lowercased() ?? ["sp", "em", "px"].first(where: rendered.hasSuffix)
+                let suffix = value?["unit"]?.string?.lowercased() ?? ["sp", "em", "px"].first(where: rendered.hasSuffix)
                 let scalar = suffix.flatMap { unit in rendered.hasSuffix(unit) ? Double(rendered.dropLast(unit.count).trimmingCharacters(in: .whitespaces)) : nil }
-                let measured = native ? value?.double ?? scalar : value?["value"]?.double ?? scalar
+                let measured = value?["value"]?.double ?? scalar
                 guard let measured, measured.isFinite, measured > 0, let suffix, ["sp", "em", "px"].contains(suffix) else { continue }
                 size = measured; unit = suffix; break
             }

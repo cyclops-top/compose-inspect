@@ -6,17 +6,3 @@ macOS/DerivedData/
 **/xcuserdata/
 **/.codegraph/
 **/.idea/
-
-# Generated inspector artifacts and local toolchain dependencies.
-ui-inspector/.build/
-ui-inspector/lib/
-ui-inspector/vendor/*
-!ui-inspector/vendor/build-original.sh
-!ui-inspector/vendor/ui-inspector
-!ui-inspector/vendor/android/
-ui-inspector/vendor/android/*
-!ui-inspector/vendor/android/tools/
-ui-inspector/vendor/android/tools/*
-!ui-inspector/vendor/android/tools/base/
-ui-inspector/vendor/android/tools/base/*
-!ui-inspector/vendor/android/tools/base/ui-inspector/

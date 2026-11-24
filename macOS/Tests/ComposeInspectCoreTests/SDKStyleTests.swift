@@ -113,61 +113,6 @@ final class SDKStyleTests: XCTestCase {
         XCTAssertEqual(Set(nodes.compactMap { $0.style?.layers.first?.argb }), ["FFFF0000", "FF0000FF"])
     }
 
-    func testBothAdaptersProduceTheSameTreeParametersAndStyles() throws {
-        var sdkTable = try table(color: "80445566").object!
-        var sdkNode = sdkTable["tree"]!.object!
-        sdkNode["parameters"] = .array([
-            .object(["name": .string("text"), "value": .object(["type": .string("java.lang.String"), "value": .string("Hello")])]),
-            .object(["name": .string("spacing"), "inlineClass": .string("androidx.compose.ui.unit.Dp"),
-                     "value": .object(["type": .string("java.lang.Float"), "value": .number("12")])])
-        ])
-        sdkNode["source"] = .object(["file": .string("Screen.kt"), "line": .number("38")])
-        sdkTable["tree"] = .object(sdkNode)
-        let sdk = try decode([.object(sdkTable)])
-        let content: InspectorJSON = .object(["x": .number("40"), "y": .number("70"),
-                                              "width": .number("100"), "height": .number("40")])
-        let leaf: InspectorJSON = .object([
-            "type": .string("ComposeNode"), "id": .number("1"), "className": .string("BasicText"),
-            "bounds": content, "children": .array([]),
-            "sourceLocation": .object(["fileName": .string("Screen.kt"), "lineNumber": .number("38")]),
-            "parameters": .array([
-                .object(["name": .string("text"), "value": .string("Hello")]),
-                .object(["name": .string("spacing"), "value": .object(["value": .number("12"), "unit": .string("DP")])])
-            ])
-        ])
-        let host: InspectorJSON = .object([
-            "type": .string("ViewNode"), "id": .number("2"), "className": .string("AndroidComposeView"),
-            "bounds": content, "children": .array([leaf]), "attributes": .array([
-                .object(["name": .string(UIInspectorSnapshotAdapter.styleAttribute),
-                         "value": .string(sdkTable["styleCatalog"]!.jsonString())])
-            ])
-        ])
-        let raw: InspectorJSON = .object(["windows": .array([.object(["root": .object([
-            "type": .string("ViewNode"), "id": .number("3"), "className": .string("Window"),
-            "bounds": content, "children": .array([host])
-        ])])])])
-        let bytes = Data(raw.jsonString().utf8)
-        let inspector = try SnapshotImporter.decode(bytes, imageSize: CGSize(width: 400, height: 600), packageName: "dev.sample")
-        XCTAssertTrue(InspectorClient.hasSameGeometry(sdk, inspector))
-        XCTAssertEqual(sdk.nodes.count, inspector.nodes.count)
-        for (a, b) in zip(sdk.nodes, inspector.nodes) {
-            XCTAssertEqual(a.name, b.name)
-            XCTAssertEqual(a.kind, b.kind)
-            XCTAssertEqual(a.label, b.label)
-            XCTAssertEqual(a.source, b.source)
-            XCTAssertEqual(a.bounds, b.bounds)
-            XCTAssertEqual(a.style, b.style)
-            XCTAssertEqual(a.parameters.map(\.name), b.parameters.map(\.name))
-            XCTAssertEqual(a.parameters.map(\.value), b.parameters.map(\.value))
-            XCTAssertEqual(a.parameters.map(\.group), b.parameters.map(\.group))
-            XCTAssertEqual(a.parameters.map(\.isTruncated), b.parameters.map(\.isTruncated))
-            XCTAssertEqual(sdk.document?.root.value(at: a.id)?["className"]?.string, a.name)
-            XCTAssertEqual(inspector.document?.root.value(at: b.id)?["className"]?.string, b.name)
-        }
-        XCTAssertEqual(inspector.document?.originalJSON, bytes)
-        XCTAssertNotNil(sdk.document?.root["sdkCapture"])
-    }
-
     func testLocalDensityAndStyleDiagnosticsSurviveImport() throws {
         var raw = try table(color: "FFFF0000").object!
         var catalog = raw["styleCatalog"]!.object!

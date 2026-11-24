@@ -54,41 +54,38 @@ final class CurrentSessionTests: XCTestCase {
         let parent = InspectorNode(id: "owner", rawID: 1, name: "Action", bounds: bounds,
                                    source: SourceAnchor(file: "Screen.kt", line: 10, packageHash: 577838147), children: [child])
         let image = try captured().imageData
-        for backend in [CaptureBackend.sdk, .uiInspector] {
-            let metadata = CaptureMetadata(serial: "s", packageName: "app", startedAt: Date(), finishedAt: Date(),
-                                           includeFacets: "", stableLayout: true, stableImage: true,
-                                           diagnostics: [], baselineJSON: Data(), backend: backend)
-            let snapshot = InspectorSnapshot(packageName: "app", deviceName: "test", pixelSize: bounds.size,
-                                             roots: [parent], captureMetadata: metadata)
-            try await store.applyCapture(CapturedSnapshot(snapshot: snapshot, imageData: image))
-            let mapper = CoordinateMapper(imageSize: bounds.size, canvasSize: bounds.size)
-            store.select(child.id)
-            XCTAssertEqual(store.selectedNodeID, child.id)
-            let location = try XCTUnwrap(store.sourceLocation(for: child.id))
-            XCTAssertTrue(location.inherited)
-            XCTAssertEqual(location.anchor.text, "feature/src/Screen.kt:10")
-            XCTAssertTrue(store.sourceSummary.contains(location.anchor.text))
-            store.edit("调整子组件", for: try XCTUnwrap(store.selectedKey), revision: store.issueEditRevision)
-            XCTAssertTrue(store.currentText.contains("位于 feature/src/Screen.kt:10 的 Action 内"))
-            XCTAssertTrue(store.currentText.contains("工程内调用处：feature/src/Screen.kt:10"))
-            XCTAssertTrue(store.currentText.contains("组件自身采集位置：Screen.kt:1"))
-            XCTAssertEqual(store.batchText, "# 问题 1\n\n" + store.currentText)
-            store.selectImage(at: CGPoint(x: 50, y: 50), mapper: mapper)
-            XCTAssertEqual(Set(store.hitCandidates), [child.id, parent.id])
-            store.select(wrapper.id)
-            XCTAssertEqual(store.selectedNodeID, wrapper.id)
+        let metadata = CaptureMetadata(serial: "s", packageName: "app", startedAt: Date(), finishedAt: Date(),
+                                       diagnostics: [], baselineJSON: Data())
+        let snapshot = InspectorSnapshot(packageName: "app", deviceName: "test", pixelSize: bounds.size,
+                                         roots: [parent], captureMetadata: metadata)
+        try await store.applyCapture(CapturedSnapshot(snapshot: snapshot, imageData: image))
+        let mapper = CoordinateMapper(imageSize: bounds.size, canvasSize: bounds.size)
+        store.select(child.id)
+        XCTAssertEqual(store.selectedNodeID, child.id)
+        let location = try XCTUnwrap(store.sourceLocation(for: child.id))
+        XCTAssertTrue(location.inherited)
+        XCTAssertEqual(location.anchor.text, "feature/src/Screen.kt:10")
+        XCTAssertTrue(store.sourceSummary.contains(location.anchor.text))
+        store.edit("调整子组件", for: try XCTUnwrap(store.selectedKey), revision: store.issueEditRevision)
+        XCTAssertTrue(store.currentText.contains("位于 feature/src/Screen.kt:10 的 Action 内"))
+        XCTAssertTrue(store.currentText.contains("工程内调用处：feature/src/Screen.kt:10"))
+        XCTAssertTrue(store.currentText.contains("组件自身采集位置：Screen.kt:1"))
+        XCTAssertEqual(store.batchText, "# 问题 1\n\n" + store.currentText)
+        store.selectImage(at: CGPoint(x: 50, y: 50), mapper: mapper)
+        XCTAssertEqual(Set(store.hitCandidates), [child.id, parent.id])
+        store.select(wrapper.id)
+        XCTAssertEqual(store.selectedNodeID, wrapper.id)
 
-            store.onlySourceNodes = true
-            XCTAssertNil(store.selectedNodeID)
-            XCTAssertNil(store.presentationIndex.byID[wrapper.id])
-            XCTAssertEqual(store.presentationIndex.parentIDs[leaf.id], backend == .sdk ? parent.id : child.id)
-            store.selectImage(at: CGPoint(x: 50, y: 50), mapper: mapper)
-            XCTAssertEqual(Set(store.hitCandidates), backend == .sdk ? [parent.id] : [child.id, parent.id])
-            store.searchesAllComponents = true
-            XCTAssertNotNil(store.presentationIndex.byID[wrapper.id])
-            store.searchesAllComponents = false
-            store.onlySourceNodes = false
-        }
+        store.onlySourceNodes = true
+        XCTAssertNil(store.selectedNodeID)
+        XCTAssertNil(store.presentationIndex.byID[wrapper.id])
+        XCTAssertEqual(store.presentationIndex.parentIDs[leaf.id], parent.id)
+        store.selectImage(at: CGPoint(x: 50, y: 50), mapper: mapper)
+        XCTAssertEqual(Set(store.hitCandidates), [parent.id])
+        store.searchesAllComponents = true
+        XCTAssertNotNil(store.presentationIndex.byID[wrapper.id])
+        store.searchesAllComponents = false
+        store.onlySourceNodes = false
     }
 
     @MainActor func testEscapeExitsColorPickerBeforeClearingSelection() async throws {

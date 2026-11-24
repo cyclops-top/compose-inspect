@@ -199,7 +199,6 @@ public struct InspectorDocument: Codable, Equatable, Sendable {
         originalJSON = Data(root.jsonString().utf8)
     }
     public var windows: [InspectorJSON] { root["windows"]?.array ?? [] }
-    public var displays: [InspectorJSON] { root["displays"]?.array ?? [] }
     public func window(for pointer: String) -> InspectorJSON? {
         let parts = pointer.split(separator: "/")
         guard parts.count >= 2, parts[0] == "windows", let index = Int(parts[1]), windows.indices.contains(index) else { return nil }

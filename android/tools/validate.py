@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Build/install the probe and compare SDK-only captures with an SDK-free inspector baseline.
-
-Only dev.composeinspect.sample is installed/restarted. Requires an explicitly selected device.
-JAVA_HOME is the Gradle JDK; INSPECTOR_JAVA_HOME may select Java 25+ for ui-inspector.
-"""
+"""Validate the SDK on the sample app. Installs and restarts only dev.composeinspect.sample."""
 import argparse
 import hashlib
 import json
@@ -15,14 +11,13 @@ import time
 from zipfile import ZipFile
 
 from capture import capture
-from compare import compare, sdk_nodes, validate_sdk
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "dev.composeinspect.sample"
 
 
-def run(command, log=None, env=None, timeout=240):
-    result = subprocess.run([str(x) for x in command], capture_output=True, text=True, env=env, timeout=timeout)
+def run(command, log=None, timeout=240):
+    result = subprocess.run([str(x) for x in command], capture_output=True, text=True, timeout=timeout)
     if log:
         log.write_text(result.stdout + "\n" + result.stderr)
     if result.returncode:
@@ -58,21 +53,76 @@ def business_hash():
     return digest.hexdigest()
 
 
+FIXTURES = {
+    "ProbeScreen", "ParameterCard", "DefaultCard", "InlineWrapper",
+    "NonRestartableCard", "NoLayoutWrapper", "LazyRowProbe", "DialogContent", "PopupContent",
+}
+
+
+def sdk_nodes(document):
+    for window in document["windows"]:
+        for table in window["tables"]:
+            pending = [table["tree"]]
+            while pending:
+                node = pending.pop()
+                if not node:
+                    continue
+                if node.get("name"):
+                    yield node
+                pending.extend(reversed(node.get("children", [])))
+
+
+def validate_sdk(directory, source):
+    """Checks actual payloads against independently known fixture values and source offsets."""
+    for scenario in ("main", "dialog", "popup"):
+        document = json.loads((directory / f"sdk-{scenario}.json").read_text())
+        assert document["complete"] and not document["diagnostics"], document["diagnostics"]
+        nodes = list(sdk_nodes(document))
+        required = {"dialog": {"DialogContent"}, "popup": {"PopupContent"}}.get(
+            scenario, FIXTURES - {"DialogContent", "PopupContent"})
+        captured = {n["name"] for n in nodes} & FIXTURES
+        assert len(document["windows"]) == 1 and captured == required, (scenario, captured, required)
+        for node in nodes:
+            if node["name"] not in FIXTURES:
+                continue
+            location = node["source"]
+            assert location["file"] == "MainActivity.kt"
+            assert node["name"] in source.splitlines()[location["line"] - 1]
+            # Fixture source is ASCII, so Python offsets and UTF-16 code units coincide.
+            assert source[location["offset"]:].startswith(node["name"]), location
+        if scenario != "main":
+            continue
+        card = next(n for n in nodes if n["name"] == "ParameterCard")
+        params = {p["name"]: p for p in card["parameters"]}
+        for name, value in {"title": "explicit-title", "count": 7, "enabled": True, "spacing": 12}.items():
+            assert params[name]["value"]["value"] == value, (name, params[name])
+        profile = {p["name"]: p["value"] for p in params["profile"]["value"]["fields"]}
+        assert profile["name"]["value"] == "Ada" and profile["age"]["value"] == 37
+        assert [p["value"] for p in profile["tags"]["items"]] == ["compose", "debug"]
+        assert params["spacing"]["inlineClass"] == "androidx.compose.ui.unit.Dp"
+        assert params["tint"]["inlineClass"] == "androidx.compose.ui.graphics.Color"
+        defaults = next(n for n in nodes if n["name"] == "DefaultCard")["parameters"]
+        assert {p["name"]: p["value"].get("value") for p in defaults} == {"title": "default-title", "count": 23, "nullable": None}
+        assert all(p["fromDefault"] for p in defaults)
+        rows = [n for n in nodes if n["name"] == "LazyRowProbe"]
+        assert 0 < len(rows) < 100, "Only composed lazy items should be present"
+        for name in ("InlineWrapper", "NonRestartableCard"):
+            assert next(n for n in nodes if n["name"] == name)["parameters"] == [], name
+
+
+def counter_value(document):
+    card = next(node for node in sdk_nodes(document) if node["name"] == "ParameterCard")
+    return next(p for p in card["parameters"] if p["name"] == "count")["value"]["value"]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--adb", default=os.environ.get("ADB", "adb"))
     parser.add_argument("--serial", required=True)
     parser.add_argument("--versions", nargs="+", default=["1.12.1", "1.10.6"])
-    parser.add_argument("--sdk-only", action="store_true", help="Refresh SDK/release evidence without invoking ui-inspector")
     args = parser.parse_args()
     adb = [args.adb, "-s", args.serial]
     assert run(adb + ["get-state"]).strip() == "device"
-    inspector = ROOT.parent / "ui-inspector/bin/ui-inspector"
-    inspector_env = os.environ.copy()
-    # Don't accidentally run the inspector with Gradle's JDK 17/21.
-    inspector_env.pop("JAVA_HOME", None)
-    if os.environ.get("INSPECTOR_JAVA_HOME"):
-        inspector_env["JAVA_HOME"] = os.environ["INSPECTOR_JAVA_HOME"]
     initial_hash = business_hash()
     for version in args.versions:
         output = ROOT / "artifacts" / version
@@ -82,7 +132,7 @@ def main():
                     "deviceApi": run(adb + ["shell", "getprop", "ro.build.version.sdk"]).strip(),
                     "deviceModel": run(adb + ["shell", "getprop", "ro.product.model"]).strip()}
         print(f"[{version}] Build SDK debug and SDK-free release", flush=True)
-        run(gradle + [":sample:assembleDebug", ":sample:assembleRelease", ":sample:composeDependencyReport"], output / "sdk-build.log")
+        run(gradle + [":sample:assembleDebug", ":sample:assembleRelease"], output / "sdk-build.log")
         shutil.copyfile(ROOT / "sample/build/outputs/apk/debug/sample-debug.apk", output / "sdk.apk")
         shutil.copyfile(ROOT / "sample/build/outputs/apk/release/sample-release-unsigned.apk", output / "release.apk")
         metadata["sdkApk"] = apk_check(output / "sdk.apk", True)
@@ -105,14 +155,22 @@ def main():
         before = capture(args.adb, args.serial, PACKAGE)
         for window in before["windows"]:
             nodes = sdk_nodes({"windows": [window]})
-            target = next((node for node, _ in nodes if node["name"] == "BasicText" and
+            target = next((node for node in nodes if node["name"] == "BasicText" and
                            any(p["name"] == "text" and p["value"].get("value") == "Increment: 7" for p in node["parameters"])), None)
             if target:
                 left, top, right, bottom = target["boundsInWindow"]
                 x, y = window["screenOffset"]
                 run(adb + ["shell", "input", "tap", str(x + (left + right) // 2), str(y + (top + bottom) // 2)])
-                time.sleep(.5)
-                save(output / "sdk-recomposed.json", capture(args.adb, args.serial, PACKAGE))
+                deadline = time.monotonic() + 8
+                while True:
+                    result = capture(args.adb, args.serial, PACKAGE)
+                    count = counter_value(result)
+                    if count == 8:
+                        save(output / "sdk-recomposed.json", result)
+                        break
+                    if count != 7 or time.monotonic() >= deadline:
+                        raise AssertionError(f"Expected count 8 after one tap, received {count}")
+                    time.sleep(.2)
                 break
         else:
             raise AssertionError("Increment control missing")
@@ -121,39 +179,7 @@ def main():
         validate_sdk(output, source.read_text())
         print(f"[{version}] SDK values, source offsets, windows and recomposition checks passed", flush=True)
 
-        if not args.sdk_only:
-            print(f"[{version}] Build/install identical business sources without SDK", flush=True)
-            run(gradle + ["-PwithInspectorSdk=false", ":sample:assembleDebug", ":sample:composeDependencyReport"], output / "baseline-build.log")
-            shutil.copyfile(ROOT / "sample/build/outputs/apk/debug/sample-debug.apk", output / "baseline.apk")
-            metadata["baselineApk"] = apk_check(output / "baseline.apk", False)
-            run(adb + ["install", "-r", output / "baseline.apk"])
-            for scenario in ("main", "dialog", "popup"):
-                launch(scenario)
-                result_path = output / f"inspector-{scenario}.json"
-                result_path.unlink(missing_ok=True)  # Failed runs must not reuse an old success.
-                run([inspector, "dump-ui", "--device", args.serial, "--package", PACKAGE,
-                     "--include", "attributes,semantics,system-composables", "--output", result_path],
-                    output / f"inspector-{scenario}.log", env=inspector_env)
-                print(f"[{version}] Inspector {scenario} captured", flush=True)
-            sdk_deps = {line for line in (output / "sdk-build.log").read_text().splitlines() if line.startswith("COMPOSE_DEPENDENCY debug")}
-            baseline_deps = {line for line in (output / "baseline-build.log").read_text().splitlines() if line.startswith("COMPOSE_DEPENDENCY debug")}
-            # Tooling-data is deliberately added. Every shared Compose artifact must retain its version.
-            def coordinates(lines):
-                return {tuple(line.split()[-1].split(":")[:2]): line.split()[-1].split(":")[-1] for line in lines}
-            sd, bd = coordinates(sdk_deps), coordinates(baseline_deps)
-            assert sd and bd
-            assert all(sd[key] == value for key, value in bd.items()), "SDK changed a host Compose dependency"
-            assert bd[("androidx.compose.ui", "ui-android")] == version
-            metadata["hostComposeVersionsUnchanged"] = True
-            metadata["resolvedSdkComposeDependencies"] = sorted(sdk_deps)
-            metadata["resolvedBaselineComposeDependencies"] = sorted(baseline_deps)
-        else:
-            metadata["baselineRefreshed"] = False
-        assert business_hash() == initial_hash, "Business sources changed during comparison"
-        jar = ROOT.parent / "ui-inspector/lib/ui-inspector.jar"
-        metadata["inspectorJarSha256"] = hashlib.sha256(jar.read_bytes()).hexdigest() if jar.exists() else None
         save(output / "validation.json", metadata)
-        save(output / "comparison.json", compare(output))
         print(f"[{version}] Evidence: {output}", flush=True)
 
 

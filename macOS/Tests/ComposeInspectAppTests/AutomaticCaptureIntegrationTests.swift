@@ -15,31 +15,48 @@ final class AutomaticCaptureIntegrationTests: XCTestCase {
         let suite = "sdk-startup-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let settings = ToolchainSettings(defaults: defaults, environment: [:])
+        defaults.set("/missing/java", forKey: "toolchain.javaPath")
+        defaults.set("/missing/inspector.jar", forKey: "toolchain.inspectorJar")
+        let settings = ToolchainSettings(defaults: defaults, environment: ["PATH": directory.path])
         settings.adbOverride = adb.path
-        settings.javaOverride = "/missing/java"
-        settings.inspectorJarOverride = "/missing/ui-inspector.jar"
         await settings.checkStartupEnvironment()
         XCTAssertFalse(settings.showEnvironmentSetup)
-        XCTAssertTrue(settings.startupEnvironmentProblems.isEmpty)
-        XCTAssertNoThrow(try settings.resolvedTools(requireJava: false))
-        XCTAssertThrowsError(try settings.resolvedTools())
+        XCTAssertEqual(settings.adbResult?.succeeded, true)
+        XCTAssertEqual(try settings.resolvedTools().adb, adb)
     }
 
-    /// Runs the real foreground-target -> SDK/fallback -> shared workspace pipeline.
-    /// With expected=sdk, intentionally invalid Java/JAR prove they aren't prerequisites.
+    func testMissingSDKReportsIntegrationStep() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["COMPOSEINSPECT_AUTO_LIVE"] == "1" else { throw XCTSkip("Real device required") }
+        let adb = URL(fileURLWithPath: try XCTUnwrap(env["COMPOSEINSPECT_ADB"]))
+        let session = DeviceSession()
+        let serial = try XCTUnwrap(env["COMPOSEINSPECT_SERIAL"])
+        let suite = "missing-sdk-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = ToolchainSettings(defaults: defaults, environment: ["ADB": adb.path, "PATH": "/nonexistent"])
+        try await session.refresh(settings: settings)
+        try await session.selectDevice(serial, settings: settings)
+        session.packageName = "dev.composeinspect.missingfixture"
+        do {
+            _ = try await session.capture(settings: settings)
+            XCTFail("Expected a missing SDK error")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("debugImplementation"), error.localizedDescription)
+            XCTAssertFalse(error.localizedDescription.contains("是不可调试版本"), error.localizedDescription)
+            XCTAssertTrue(error.localizedDescription.contains(session.packageName))
+        }
+    }
+
     func testConfiguredForegroundCaptureUsesExpectedBackendAndSharedInteractions() async throws {
         let env = ProcessInfo.processInfo.environment
         guard env["COMPOSEINSPECT_AUTO_LIVE"] == "1" else { throw XCTSkip("Explicit real-device auto capture opt-in required") }
         _ = NSApplication.shared
-        let expected = try XCTUnwrap(CaptureBackend(rawValue: try XCTUnwrap(env["COMPOSEINSPECT_EXPECT_BACKEND"])))
         let suite = "sdk-live-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let settings = ToolchainSettings(defaults: defaults, environment: env)
+        let settings = ToolchainSettings(defaults: defaults, environment: ["PATH": "/nonexistent"])
         settings.adbOverride = try XCTUnwrap(env["COMPOSEINSPECT_ADB"])
-        settings.javaOverride = expected == .sdk ? "/missing/java" : try XCTUnwrap(env["COMPOSEINSPECT_JAVA"])
-        settings.inspectorJarOverride = expected == .sdk ? "/missing/jar" : try XCTUnwrap(env["COMPOSEINSPECT_JAR"])
         let standard = UserDefaults.standard
         let oldCompact = standard.object(forKey: "hideInternalNodes")
         let oldClickable = standard.object(forKey: "onlyClickableNodes")
@@ -56,7 +73,7 @@ final class AutomaticCaptureIntegrationTests: XCTestCase {
         await store.capture(settings: settings)
         XCTAssertNil(store.errorMessage, store.errorMessage ?? "")
         XCTAssertEqual(store.snapshot.packageName, env["COMPOSEINSPECT_PACKAGE"])
-        XCTAssertEqual(store.snapshot.captureMetadata?.backend, expected)
+        XCTAssertNotNil(store.snapshot.captureMetadata)
         let card = try XCTUnwrap(store.snapshot.nodes.first {
             env["COMPOSEINSPECT_GENERIC_APP"] == "1" ? !$0.parameters.isEmpty : $0.name == "ParameterCard"
         })

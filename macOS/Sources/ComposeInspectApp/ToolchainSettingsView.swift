@@ -5,13 +5,9 @@ struct ToolchainSettingsView: View {
     @Bindable var settings: ToolchainSettings
 
     var body: some View {
-        TabView {
-            ScrollView { toolsPage }.tabItem { Label("工具环境", systemImage: "wrench.and.screwdriver") }
-            capturePage.tabItem { Label("检查", systemImage: "viewfinder") }
-        }.frame(width: 620, height: 580)
-        .task(id: [settings.adbOverride, settings.javaOverride, settings.inspectorJarOverride]) {
-            await settings.validateEnvironment()
-        }
+        ScrollView { toolsPage }
+            .frame(width: 580, height: 395)
+            .task(id: settings.adbOverride) { await settings.validateADB() }
     }
 
     private var toolsPage: some View {
@@ -24,17 +20,9 @@ struct ToolchainSettingsView: View {
                         .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             }
-            if !settings.environmentProblems.isEmpty {
-                Text(settings.environmentProblems.joined(separator: "\n"))
-                    .font(.system(size: 11)).foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Text("UI Inspector 抓取需要 Java 25 或更新版本，以及可运行的 ADB。")
+            Text("通过 ADB 连接设备。目标应用需在 debug 构建中通过 debugImplementation 接入 Compose Inspector SDK。")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
-            Button("重新检测全部工具") { Task { await settings.validateEnvironment() } }
-                .disabled(!settings.checking.isEmpty)
-            toolSection(.adb, path: $settings.adbOverride, placeholder: "留空使用 ANDROID_HOME / PATH")
-            toolSection(.java, path: $settings.javaOverride, placeholder: "留空使用 JAVA_HOME / PATH")
+            adbSection
             HStack(alignment: .top, spacing: 7) {
                 Image(systemName: "info.circle").foregroundStyle(.secondary)
                 Text("启动时自动读取用户 shell 配置中的 PATH 和工具环境变量，从 Finder 启动也可自动检测。修改终端配置后可重新读取环境。")
@@ -44,7 +32,7 @@ struct ToolchainSettingsView: View {
                 Text("配置自动保存").font(.system(size: 11)).foregroundStyle(.tertiary)
                 Spacer()
                 if settings.loadingEnvironment { ProgressView().controlSize(.small) }
-                Button("重新读取环境") { Task { await settings.refreshEnvironment() } }
+                Button("重新读取环境") { Task { await settings.refreshEnvironment(); await settings.validateADB() } }
                     .controlSize(.small).disabled(settings.loadingEnvironment)
             }
             if !settings.environmentMessage.isEmpty {
@@ -55,47 +43,26 @@ struct ToolchainSettingsView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private var capturePage: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("UI Inspector").font(.headline)
-            Text("默认使用应用内置 JAR，通过设置中的 Java 运行。")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
-            HStack {
-                TextField("留空使用内置 ui-inspector.jar", text: $settings.inspectorJarOverride).textFieldStyle(.roundedBorder)
-                Button("选择…") { settings.chooseInspectorJar() }
-            }.font(.system(size: 11))
-            Text(settings.inspectorJar?.path ?? "未找到内置 JAR")
-                .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
-            Divider()
-            Toggle("抓取属性来源链（resolution-stack）", isOn: $settings.includeResolutionStack)
-            Text("首次开启会修改设备的调试属性设置，并可能重启目标 Activity；该设备设置会持续保留。默认关闭。关闭此开关仅停止请求来源链，不会自动还原设备设置。")
-                .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("组件参数、两种语义和系统组件默认抓取；来源链字段会完整解析。上游截断值按需继续读取，不递归遍历未知大小的集合。")
-                .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Spacer()
-        }.padding(22)
-    }
-
-    private func toolSection(_ tool: ToolKind, path: Binding<String>, placeholder: String) -> some View {
-        let resolution = settings.resolution(for: tool)
-        let checking = settings.checking.contains(tool)
+    private var adbSection: some View {
+        let resolution = settings.adbResolution
+        let checking = settings.checkingADB
         return VStack(alignment: .leading, spacing: 9) {
             HStack {
-                Text(tool.displayName).font(.system(size: 13, weight: .semibold))
+                Text("ADB").font(.system(size: 13, weight: .semibold))
                 Spacer()
-                Text(path.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "自动检测" : "手动配置")
+                Text(settings.adbOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "自动检测" : "手动配置")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
             HStack(spacing: 7) {
-                TextField(placeholder, text: path)
+                TextField("留空使用 ANDROID_HOME / PATH", text: $settings.adbOverride)
                     .textFieldStyle(.roundedBorder).font(.system(size: 11, design: .monospaced))
-                    .accessibilityLabel("\(tool.displayName)路径，留空使用环境变量")
-                Button("选择…") { settings.choose(tool) }
+                    .accessibilityLabel("ADB 路径，留空使用环境变量")
+                Button("选择…") { settings.chooseADB() }
                 Button {
-                    settings.reset(tool)
+                    settings.adbOverride = ""
                 } label: { Image(systemName: "arrow.counterclockwise") }
                     .help("恢复环境变量自动检测")
-                    .disabled(path.wrappedValue.isEmpty)
+                    .disabled(settings.adbOverride.isEmpty)
             }.controlSize(.small)
             if let location = resolution.location {
                 HStack(alignment: .top, spacing: 6) {
@@ -107,7 +74,7 @@ struct ToolchainSettingsView: View {
                     }
                     Spacer(minLength: 0)
                     Button {
-                        Task { await settings.validate(tool) }
+                        Task { await settings.validateADB() }
                     } label: {
                         if checking { ProgressView().controlSize(.mini).frame(width: 28) }
                         else { Text("检测") }
@@ -117,7 +84,7 @@ struct ToolchainSettingsView: View {
                 Label(resolution.error ?? "未找到工具", systemImage: "exclamationmark.circle")
                     .font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
-            if let result = settings.results[tool] {
+            if let result = settings.adbResult {
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: result.succeeded ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .foregroundStyle(result.succeeded ? Color.green : Color.orange)

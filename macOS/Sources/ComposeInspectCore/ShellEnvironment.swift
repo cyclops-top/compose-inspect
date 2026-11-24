@@ -3,7 +3,7 @@ import Foundation
 /// Import only tool discovery variables from the user's login/interactive shell.
 public enum ShellEnvironment {
     private static let keys: Set<String> = [
-        "PATH", "ADB", "ADB_PATH", "ANDROID_HOME", "ANDROID_SDK_ROOT", "JAVA_HOME", "JDK_HOME"
+        "PATH", "ADB", "ADB_PATH", "ANDROID_HOME", "ANDROID_SDK_ROOT"
     ]
 
     public static func load(inherited: [String: String], timeout: TimeInterval = 8) async throws -> [String: String] {

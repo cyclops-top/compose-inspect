@@ -5,9 +5,9 @@ final class ComponentLabelTests: XCTestCase {
     private func snapshot(_ parameters: [[String: Any]]) throws -> InspectorSnapshot {
         let node: [String: Any] = ["type": "ComposeNode", "id": 1, "className": "Button",
             "bounds": ["x": 0, "y": 0, "width": 100, "height": 40],
-            "sourceLocation": ["fileName": "Screen.kt", "lineNumber": 12], "mergedSemantics": parameters]
+            "sourceLocation": ["fileName": "Screen.kt", "lineNumber": 12], "parameters": parameters]
         let data = try JSONSerialization.data(withJSONObject: ["windows": [["root": node]]])
-        return try SnapshotImporter.decode(data, imageSize: CGSize(width: 100, height: 100), packageName: "test")
+        return try SnapshotImporter.decode(InspectorDocument(data: data), imageSize: CGSize(width: 100, height: 100), packageName: "test")
     }
     private func collection(_ elements: [[String: Any]], truncated: Bool = false) -> [String: Any] {
         ["name": "ContentDescription", "value": "List[\(elements.count)]", "isCollection": true,

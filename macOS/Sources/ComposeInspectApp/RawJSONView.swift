@@ -9,7 +9,6 @@ struct RawJSONPresentation: Identifiable {
     let document: InspectorDocument
     var nodePointer: String? = nil
     var metadata: CaptureMetadata? = nil
-    var reads: [ParameterRead] = []
 }
 
 struct RawJSONView: View {
@@ -21,7 +20,6 @@ struct RawJSONView: View {
         var values = ["完整 JSON"]
         if presentation.nodePointer != nil { values = ["节点", "窗口", "完整 JSON"] }
         if presentation.metadata != nil { values += ["采集信息", "原始采集"] }
-        if !presentation.reads.isEmpty { values.append("后续读取") }
         return values
     }
     private var data: Data {
@@ -32,11 +30,6 @@ struct RawJSONView: View {
             return Data((presentation.document.window(for: presentation.nodePointer ?? "")?.jsonString(pretty: true) ?? "null").utf8)
         case "采集信息": return (try? JSONEncoder().encode(presentation.metadata)) ?? Data()
         case "原始采集": return presentation.metadata?.baselineJSON ?? Data()
-        case "后续读取":
-            return Data(InspectorJSON.array(presentation.reads.map { .object([
-                "parameterID": .string($0.parameterID), "readAt": .string($0.readAt.ISO8601Format()),
-                "continuationToken": .string($0.continuationToken), "response": $0.document.root,
-            ]) }).jsonString(pretty: true).utf8)
         default: return presentation.document.originalJSON
         }
     }
@@ -52,8 +45,6 @@ struct RawJSONView: View {
                 .background(.background, in: RoundedRectangle(cornerRadius: 6))
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(AppStyle.divider))
             HStack {
-                Text("完整 JSON 保留源文件字节；后续读取属于新的采样。")
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
                 Spacer()
                 Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("导出…") { export() }
@@ -69,7 +60,7 @@ struct RawJSONView: View {
             } message: { Text(exportError ?? "") }
     }
     private func export() {
-        let panel = NSSavePanel(); panel.allowedContentTypes = [.json]; panel.nameFieldStringValue = "ui-inspector.json"
+        let panel = NSSavePanel(); panel.allowedContentTypes = [.json]; panel.nameFieldStringValue = "compscope.json"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do { try data.write(to: url, options: .atomic) } catch { exportError = error.localizedDescription }
     }

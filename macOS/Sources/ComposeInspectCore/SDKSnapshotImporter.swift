@@ -72,13 +72,7 @@ public enum SDKSnapshotImporter {
             "captureBackend": .string("sdk"), "windows": .array(normalized), "sdkCapture": document.root
         ])
         let document = InspectorDocument(root: canonical)
-        var input = SnapshotTreeInput(document: document)
-        try SnapshotTreeInput.visitNodes(in: document) { node, path in
-            if let catalog = node["styleCatalog"] {
-                input.styleCatalogs[path] = ComponentStyleCatalog(json: catalog)
-            }
-        }
-        return try SnapshotImporter.decode(input, imageSize: imageSize, packageName: packageName)
+        return try SnapshotImporter.decode(document, imageSize: imageSize, packageName: packageName)
     }
 
     private struct LayoutInteraction {
@@ -216,7 +210,6 @@ public enum SDKSnapshotImporter {
         if encoded["truncated"]?.boolean == true || encoded["opaque"]?.boolean == true {
             result["isTruncated"] = .bool(true)
         }
-        // No continuationToken: SDK v1 cannot continue reading an opaque/truncated value.
         return result
     }
 

@@ -58,7 +58,3 @@ Button「登录」
 height=48dp
 将登录按钮高度改为 56dp。
 ```
-
-## 参考
-
-[Android ui-inspector](https://android.googlesource.com/platform/tools/base/+/mirror-goog-studio-main/ui-inspector/) 的节点结构和可用信息作为设计参考。

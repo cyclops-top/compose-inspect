@@ -87,15 +87,11 @@ public struct ADBDevice: Identifiable, Sendable, Equatable {
 
 public struct InspectorToolchain: Sendable {
     public let adb: URL
-    public let java: URL
-    public let jar: URL
     public let environment: [String: String]
-    public let resolutionStack: Bool
-    public init(adb: URL, java: URL, jar: URL, environment: [String: String], resolutionStack: Bool = false) {
-        self.adb = adb; self.java = java; self.jar = jar; self.resolutionStack = resolutionStack
+    public init(adb: URL, environment: [String: String]) {
+        self.adb = adb
         var env = environment
-        env["PATH"] = adb.deletingLastPathComponent().path + ":" + java.deletingLastPathComponent().path + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
-        env["JAVA_HOME"] = java.deletingLastPathComponent().deletingLastPathComponent().path
+        env["PATH"] = adb.deletingLastPathComponent().path + ":" + (environment["PATH"] ?? "/usr/bin:/bin")
         if adb.deletingLastPathComponent().lastPathComponent == "platform-tools" {
             let sdk = adb.deletingLastPathComponent().deletingLastPathComponent().path
             env["ANDROID_HOME"] = sdk; env["ANDROID_SDK_ROOT"] = sdk
@@ -104,44 +100,22 @@ public struct InspectorToolchain: Sendable {
     }
 }
 
-public enum CaptureBackend: String, Codable, Sendable {
-    case sdk, uiInspector
-}
-
 public struct CaptureMetadata: Codable, Equatable, Sendable {
     public let serial: String
     public let packageName: String
     public let startedAt: Date
     public let finishedAt: Date
-    public let includeFacets: String
-    // Older archives may contain measurements from a second capture.
-    public let stableLayout: Bool?
-    public let stableImage: Bool?
     public let diagnostics: [String]
     public let baselineJSON: Data
-    /// Optional for archives created before automatic SDK capture was introduced.
-    public let backend: CaptureBackend?
 
     public init(serial: String, packageName: String, startedAt: Date, finishedAt: Date,
-                includeFacets: String, stableLayout: Bool? = nil, stableImage: Bool? = nil,
-                diagnostics: [String], baselineJSON: Data, backend: CaptureBackend? = nil) {
-        self.serial = serial; self.packageName = packageName
-        self.startedAt = startedAt; self.finishedAt = finishedAt; self.includeFacets = includeFacets
-        self.stableLayout = stableLayout; self.stableImage = stableImage
-        self.diagnostics = diagnostics; self.baselineJSON = baselineJSON; self.backend = backend
-    }
-}
-
-public struct ParameterRead: Codable, Equatable, Sendable, Identifiable {
-    public let id: UUID
-    public let nodeID: String
-    public let parameterID: String
-    public let continuationToken: String
-    public let readAt: Date
-    public let document: InspectorDocument
-    public init(nodeID: String, parameterID: String, token: String, document: InspectorDocument) {
-        id = UUID(); self.nodeID = nodeID; self.parameterID = parameterID; continuationToken = token
-        readAt = Date(); self.document = document
+                diagnostics: [String], baselineJSON: Data) {
+        self.serial = serial
+        self.packageName = packageName
+        self.startedAt = startedAt
+        self.finishedAt = finishedAt
+        self.diagnostics = diagnostics
+        self.baselineJSON = baselineJSON
     }
 }
 
@@ -176,66 +150,6 @@ public struct InspectorClient: Sendable {
         return String(text[range])
     }
 
-    public func capture(serial: String, package: String, deviceName: String, skipOverlayWindows: Bool = false,
-                        progress: @escaping @Sendable (String) async -> Void = { _ in }) async throws -> CapturedSnapshot {
-        guard Self.validPackage(package) else { throw CommandFailure.configuration("请输入合法的 Android 包名。") }
-        guard FileManager.default.fileExists(atPath: tools.jar.path) else { throw CommandFailure.configuration("ui-inspector.jar 不存在，请重新构建应用或在设置中选择 JAR。") }
-        let started = Date()
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ComposeInspect-capture-\(UUID())")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-        // Also starts/connects the ADB server using the exact executable selected in Settings.
-        guard try await devices().contains(where: { $0.serial == serial && $0.online }) else { throw CommandFailure.configuration("设备未授权、离线或已断开。") }
-        await progress("连接 inspector，读取组件树…")
-        let tree = try await dump(serial: serial, package: package, skipOverlayWindows: skipOverlayWindows, output: directory.appendingPathComponent("tree.json"))
-        await progress("获取截图…")
-        // shell v2 with no PTY keeps PNG bytes and remote stderr on separate streams.
-        // exec-out merges remote warnings into stdout on some Android versions.
-        let screen = try await adb(["-s", serial, "shell", "-T", "screencap", "-p"])
-        let size = try Self.imageSize(screen.stdout)
-        let snapshot = try SnapshotImporter.decode(tree.data, imageSize: size, packageName: package)
-        let metadata = CaptureMetadata(serial: serial, packageName: package, startedAt: started, finishedAt: Date(),
-                                       includeFacets: facets, diagnostics: [tree.log, String(decoding: screen.stderr, as: UTF8.self)],
-                                       baselineJSON: tree.data)
-        try Task.checkCancellation()
-        return CapturedSnapshot(snapshot: snapshot.withCaptureContext(deviceName: deviceName, metadata: metadata),
-                                imageData: screen.stdout)
-    }
-
-    /// Compare in tree order without flattening trees or allocating formatted geometry strings.
-    static func hasSameGeometry(_ lhs: InspectorSnapshot, _ rhs: InspectorSnapshot) -> Bool {
-        var left = Array(lhs.roots.reversed()), right = Array(rhs.roots.reversed())
-        while let a = left.popLast() {
-            guard let b = right.popLast(), a.id == b.id, a.kind == b.kind,
-                  a.name == b.name, a.bounds == b.bounds, (a.label ?? "") == (b.label ?? "") else { return false }
-            left.append(contentsOf: a.children.reversed())
-            right.append(contentsOf: b.children.reversed())
-        }
-        return right.isEmpty
-    }
-
-    public func parameter(serial: String, package: String, token: String) async throws -> InspectorDocument {
-        guard Self.validPackage(package) else { throw CommandFailure.configuration("无效包名") }
-        let result = try await invoke(["get-parameter", "--device", serial, "--package", package, "--continuation-token", token])
-        return try InspectorDocument(data: result.stdout)
-    }
-    private var facets: String { "attributes,semantics,system-composables" + (tools.resolutionStack ? ",resolution-stack" : "") }
-    private func dump(serial: String, package: String, skipOverlayWindows: Bool, output: URL) async throws -> (data: Data, log: String) {
-        let result = try await invoke(["dump-ui", "--device", serial, "--package", package, "--include", facets, "--output", output.path], skipOverlayWindows: skipOverlayWindows)
-        return (try Data(contentsOf: output), String(decoding: result.stderr, as: UTF8.self))
-    }
-    private func invoke(_ arguments: [String], skipOverlayWindows: Bool = false) async throws -> CommandOutput {
-        let result = try await CommandRunner.run(tools.java, arguments: (skipOverlayWindows ? ["-Dcomposeinspect.skipOverlays=true"] : []) + ["-jar", tools.jar.path] + arguments,
-                                                 environment: tools.environment, timeout: 180)
-        guard result.exitCode == 0 else {
-            let diagnostic = String(decoding: result.stderr, as: UTF8.self)
-            if diagnostic.contains("UnsupportedClassVersionError") {
-                throw CommandFailure.configuration("Java 版本不兼容：当前 ui-inspector.jar 含 Java 25 编译的类。请在 ⌘, 设置中选择 Java 25 或更新版本。\n\n" + diagnostic)
-            }
-            throw CommandFailure.failed(diagnostic)
-        }
-        return result
-    }
     public static func validPackage(_ package: String) -> Bool {
         package.range(of: #"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$"#, options: .regularExpression) != nil
     }

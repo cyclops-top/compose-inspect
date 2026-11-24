@@ -1,4 +1,0 @@
-.build/
-vendor/android/bazel-*
-lib/*.jar
-.DS_Store

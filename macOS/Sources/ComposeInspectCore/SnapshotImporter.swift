@@ -14,39 +14,25 @@ public enum SnapshotImportError: LocalizedError {
 }
 
 public enum SnapshotImporter {
-    public static func decode(_ data: Data, imageSize: CGSize, packageName: String,
-                              deviceName: String = "导入的快照", metadata: CaptureMetadata? = nil) throws -> InspectorSnapshot {
-        let document = try InspectorDocument(data: data)
-        return try decode(document, imageSize: imageSize, packageName: packageName, deviceName: deviceName, metadata: metadata)
-    }
-
-    static func decode(_ document: InspectorDocument, imageSize: CGSize, packageName: String,
-                       deviceName: String = "导入的快照", metadata: CaptureMetadata? = nil) throws -> InspectorSnapshot {
-        try decode(UIInspectorSnapshotAdapter.adapt(document), imageSize: imageSize,
-                   packageName: packageName, deviceName: deviceName, metadata: metadata)
-    }
-
-    /// The shared tree builder. Capture-specific fields are consumed by the adapters above it.
-    static func decode(_ input: SnapshotTreeInput, imageSize: CGSize, packageName: String,
-                       deviceName: String = "导入的快照", metadata: CaptureMetadata? = nil) throws -> InspectorSnapshot {
-        let document = input.document
+    static func decode(_ document: InspectorDocument, imageSize: CGSize, packageName: String) throws -> InspectorSnapshot {
         guard imageSize.width > 0, imageSize.height > 0 else { throw SnapshotImportError.invalidSize }
         guard let windows = document.root["windows"]?.array else { throw SnapshotImportError.schema("缺少 windows 数组") }
         guard !windows.isEmpty else { throw SnapshotImportError.noWindows }
         let roots = try windows.enumerated().map { index, window in
             guard let root = window["root"] else { throw SnapshotImportError.schema("windows[\(index)] 缺少 root") }
-            return try convert(root, pointer: "/windows/\(index)/root", input: input)
+            return try convert(root, pointer: "/windows/\(index)/root")
         }
-        return InspectorSnapshot(packageName: packageName, deviceName: deviceName, pixelSize: imageSize,
-                                 roots: roots, document: document, captureMetadata: metadata)
+        return InspectorSnapshot(packageName: packageName, deviceName: "导入的快照", pixelSize: imageSize,
+                                 roots: roots, document: document)
     }
 
-    private static func convert(_ raw: InspectorJSON, pointer: String, input: SnapshotTreeInput) throws -> InspectorNode {
+    private static func convert(_ raw: InspectorJSON, pointer: String) throws -> InspectorNode {
         // Conversion has a large stack frame in debug builds. Keep depth on the heap so real
         // Compose trees can be decoded safely on Swift concurrency worker threads.
         var pending: [(raw: InspectorJSON, pointer: String, catalog: ComponentStyleCatalog?, ready: Bool)] = [(raw, pointer, nil, false)]
         var converted: [String: InspectorNode] = [:]
         while let frame = pending.popLast() {
+            try Task.checkCancellation()
             let children: [InspectorJSON]
             if let value = frame.raw["children"] {
                 guard let array = value.array else { throw SnapshotImportError.schema("\(frame.pointer)/children 不是数组") }
@@ -55,9 +41,9 @@ public enum SnapshotImporter {
             if frame.ready {
                 let nodes = children.indices.map { converted.removeValue(forKey: "\(frame.pointer)/children/\($0)")! }
                 converted[frame.pointer] = try convertNode(frame.raw, pointer: frame.pointer, catalog: frame.catalog,
-                    hiddenParameterPaths: input.hiddenParameterPaths, convertedChildren: nodes)
+                    convertedChildren: nodes)
             } else {
-                let catalog = input.styleCatalogs[frame.pointer] ?? frame.catalog
+                let catalog = frame.raw["styleCatalog"].map(ComponentStyleCatalog.init(json:)) ?? frame.catalog
                 pending.append((frame.raw, frame.pointer, catalog, true))
                 for index in children.indices.reversed() {
                     pending.append((children[index], "\(frame.pointer)/children/\(index)", catalog, false))
@@ -68,7 +54,6 @@ public enum SnapshotImporter {
     }
 
     private static func convertNode(_ raw: InspectorJSON, pointer: String, catalog: ComponentStyleCatalog?,
-                                    hiddenParameterPaths: Set<String>,
                                     convertedChildren: [InspectorNode]) throws -> InspectorNode {
         guard let kind = raw["type"]?.string, let id = raw["id"]?.int64, let name = raw["className"]?.string,
               let bounds = raw["bounds"], let x = bounds["x"]?.double, let y = bounds["y"]?.double,
@@ -78,11 +63,10 @@ public enum SnapshotImporter {
         guard width >= 0, height >= 0, [x, y, width, height].allSatisfy({ $0.isFinite && abs($0) < 1e12 }) else { throw SnapshotImportError.invalidBounds }
         var parameters: [NodeParameter] = []
         for (namespace, group) in [("parameters", NodeParameter.Group.parameter), ("attributes", .attribute),
-                                    ("mergedSemantics", .mergedSemantics), ("unmergedSemantics", .unmergedSemantics)] {
+                                    ("unmergedSemantics", .unmergedSemantics)] {
             if let value = raw[namespace] {
                 guard let values = value.array else { throw SnapshotImportError.schema("\(pointer)/\(namespace) 不是数组") }
                 parameters += try flatten(values, group: group, pointer: pointer + "/" + namespace)
-                    .filter { !hiddenParameterPaths.contains($0.id) }
             }
         }
         let label = parameters.lazy.filter {
@@ -106,7 +90,7 @@ public enum SnapshotImporter {
                              bounds: selectionBounds, source: source,
                              parameters: parameters,
                              children: convertedChildren,
-                             idResource: raw["idResource"]?.string, layoutResource: raw["layoutResource"]?.string, style: style,
+                             style: style,
                              clickTargetID: raw["sdkLayoutIdentity"]?.int64.map { "sdk:\($0)" })
     }
 
@@ -120,7 +104,7 @@ public enum SnapshotImporter {
             let value = raw["value"].map(displayValue) ?? (raw["isCollection"]?.boolean == true ? "（集合）" : "（参数组）")
             result.append(NodeParameter(id: id, name: path, value: value, group: resolvedGroup,
                                         isTruncated: raw["isTruncated"]?.boolean ?? false,
-                                        original: raw, continuationToken: raw["continuationToken"]?.string))
+                                        original: raw))
             if let elements = raw["elements"] {
                 guard let array = elements.array else { throw SnapshotImportError.schema("\(id)/elements 不是数组") }
                 result += try flatten(array, group: resolvedGroup, pointer: id + "/elements", parent: path)
@@ -153,10 +137,6 @@ public enum SnapshotImporter {
     private static func displayValue(_ value: InspectorJSON) -> String {
         if let fields = value.object {
             if let scalar = fields["value"], let unit = fields["unit"]?.string { return scalar.display + unit.lowercased() }
-            if let file = fields["fileName"]?.string, let line = fields["startLineNumber"]?.int64 { return "\(file):\(line)" }
-            if let name = fields["name"]?.string, let type = fields["type"]?.string {
-                return "@\(fields["namespace"]?.string.map { $0 + ":" } ?? "")\(type)/\(name)"
-            }
         }
         return value.display
     }

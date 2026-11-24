@@ -6,9 +6,9 @@ final class ParameterPresentationTests: XCTestCase {
         try SnapshotImporter.flatten(XCTUnwrap(InspectorJSON.parse(Data(json.utf8)).array), group: .parameter, pointer: "/parameters")
     }
     func testEmptyModifierAndEmptyGroupsAreHiddenWithoutLosingRawParametersOrMeaningfulValues() throws {
-        let items = try parameters(##"[{"name":"modifier","value":""},{"name":"emptyGroup","elements":[]},{"name":"none","value":null},{"name":"count","value":0},{"name":"enabled","value":false},{"name":"items","isCollection":true,"elements":[]},{"name":"lazy","value":"","isTruncated":true},{"name":"next","continuationToken":"token"},{"name":"group","elements":[{"name":"child","value":12}]}]"##)
-        XCTAssertEqual(items.count, 10)
-        XCTAssertEqual(items.filter(\.hasDisplayContent).map(\.name), ["count", "enabled", "items", "lazy", "next", "group", "group.child"])
+        let items = try parameters(##"[{"name":"modifier","value":""},{"name":"emptyGroup","elements":[]},{"name":"none","value":null},{"name":"count","value":0},{"name":"enabled","value":false},{"name":"items","isCollection":true,"elements":[]},{"name":"lazy","value":"","isTruncated":true},{"name":"group","elements":[{"name":"child","value":12}]}]"##)
+        XCTAssertEqual(items.count, 9)
+        XCTAssertEqual(items.filter(\.hasDisplayContent).map(\.name), ["count", "enabled", "items", "lazy", "group", "group.child"])
         XCTAssertEqual(items.first?.original?["value"]?.string, "")
     }
     func testColorPreviewsPreserveARGBAndRejectNoncolors() throws {

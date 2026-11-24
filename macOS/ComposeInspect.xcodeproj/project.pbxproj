@@ -24,7 +24,6 @@
         C00000000000000000000024 = {isa = PBXBuildFile; fileRef = D00000000000000000000024; };
         C00000000000000000000023 = {isa = PBXBuildFile; fileRef = D00000000000000000000023; };
         C00000000000000000000022 = {isa = PBXBuildFile; fileRef = D00000000000000000000022; };
-        C00000000000000000000019 = {isa = PBXBuildFile; fileRef = D00000000000000000000019; };
         C00000000000000000000020 = {isa = PBXBuildFile; fileRef = D00000000000000000000020; };
 
         D00000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeInspectApp.swift; sourceTree = "<group>"; };
@@ -51,7 +50,6 @@
         D00000000000000000000024 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocatorMarkdownRenderer.swift; sourceTree = "<group>"; };
         D00000000000000000000023 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComponentStyleDrawing.swift; sourceTree = "<group>"; };
         D00000000000000000000022 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComponentMeasurement.swift; sourceTree = "<group>"; };
-        D00000000000000000000019 = {isa = PBXFileReference; lastKnownFileType = archive.jar; name = "ui-inspector.jar"; path = "../ui-inspector/lib/ui-inspector.jar"; sourceTree = SOURCE_ROOT; };
         D00000000000000000000020 = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Configuration/AppIcon.icns; sourceTree = "<group>"; };
 
         A00000000000000000000001 = {
@@ -71,7 +69,7 @@
         };
         A00000000000000000000002 = {
             isa = PBXGroup;
-            children = (A00000000000000000000003, D00000000000000000000013, D00000000000000000000014, D00000000000000000000011, D00000000000000000000012, D00000000000000000000019, D00000000000000000000020, A00000000000000000000004);
+            children = (A00000000000000000000003, D00000000000000000000013, D00000000000000000000014, D00000000000000000000011, D00000000000000000000012, D00000000000000000000020, A00000000000000000000004);
             sourceTree = "<group>";
         };
         A00000000000000000000003 = {
@@ -100,7 +98,7 @@
             runOnlyForDeploymentPostprocessing = 0;
         };
         A00000000000000000000007 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (C00000000000000000000010); runOnlyForDeploymentPostprocessing = 0; };
-        A00000000000000000000008 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (C00000000000000000000019, C00000000000000000000020); runOnlyForDeploymentPostprocessing = 0; };
+        A00000000000000000000008 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (C00000000000000000000020); runOnlyForDeploymentPostprocessing = 0; };
 
         B00000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (B00000000000000000000003, B00000000000000000000004); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
         B00000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (B00000000000000000000005, B00000000000000000000006); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };

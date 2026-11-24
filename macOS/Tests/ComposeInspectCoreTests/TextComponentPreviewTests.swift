@@ -29,18 +29,6 @@ final class TextComponentPreviewTests: XCTestCase {
         XCTAssertNil(preview.colorARGB)
     }
 
-    func testNativeTextViewKeepsMeasuredTextSizeInPixels() throws {
-        let raw = try InspectorJSON.parse(Data(##"[{"name":"text","value":"AndroidView marker"},{"name":"textColor","value":"#8A000000"},{"name":"textSize","value":28}]"##.utf8))
-        let attributes = try SnapshotImporter.flatten(XCTUnwrap(raw.array), group: .attribute, pointer: "/attributes")
-        let node = InspectorNode(id: "t", rawID: 1, name: "android.widget.TextView", kind: "ViewNode", bounds: .zero, parameters: attributes)
-        let preview = try XCTUnwrap(TextComponentPreview(node: node))
-        XCTAssertEqual(preview.content, "AndroidView marker")
-        XCTAssertEqual(preview.fontSize, 28)
-        XCTAssertEqual(preview.fontUnit, "px")
-        XCTAssertEqual(preview.colorARGB, "8A000000")
-        XCTAssertNil(preview.fontWeight)
-    }
-
     func testUnrelatedChildTextIsNotBorrowedAndNontextHasNoPreview() throws {
         let child = InspectorNode(id: "child", rawID: 2, name: "BasicText", bounds: .zero,
             parameters: try params(##"[{"name":"text","value":"其他文本"},{"name":"color","value":"#FFFFFFFF"}]"##))

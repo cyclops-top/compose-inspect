@@ -77,34 +77,20 @@ struct WorkspaceView: View {
                     .font(.system(size: 12))
                     .disabled(store.isCapturing)
                     .help("下次采集时排除系统类型悬浮窗；保留普通对话框和弹出菜单。截图仍包含屏幕上可见的悬浮窗。")
-                    if let metadata = store.snapshot.captureMetadata, let backend = metadata.backend {
+                    if let metadata = store.snapshot.captureMetadata {
                         Button { showingCaptureMethod.toggle() } label: {
-                            Label(backend == .sdk ? "SDK" : "ui-inspector · 已降级",
-                                  systemImage: backend == .sdk ? "bolt.fill" : "exclamationmark.triangle.fill")
-                                .foregroundStyle(backend == .sdk ? Color.green : Color.orange)
+                            Label("SDK", systemImage: "bolt.fill").foregroundStyle(.green)
                         }
                         .help("查看当前结果的采集方式")
                         .popover(isPresented: $showingCaptureMethod) {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text(backend == .sdk ? "本次通过 SDK 获取" : "本次已降级到 ui-inspector")
+                                Text("本次通过 SDK 获取")
                                     .font(.headline)
                                 Text(metadata.packageName).font(.caption).foregroundStyle(.secondary)
                                 Text("采集耗时：\(max(0, metadata.finishedAt.timeIntervalSince(metadata.startedAt)), specifier: "%.1f") 秒")
                                     .font(.caption)
-                                if backend == .uiInspector {
-                                    Text("SDK 未接入或当前不可用。可在应用的 debug 构建中接入 Compose Inspector，重新安装并启动后再次抓取；已接入时请检查下方原因。")
-                                    Text("debugImplementation(\"top.cyclops:compose-inspector:0.1.1-snapshot\")")
-                                        .font(.system(.caption, design: .monospaced))
-                                    Text("当前优化版发布在本地 Maven：配置 mavenLocal()，将以上依赖加入应用模块并刷新依赖。无需修改业务源码，仅用于 debug 构建；当前采集 Compose 节点。")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                    if let reason = metadata.diagnostics.first {
-                                        Text(reason).font(.caption).foregroundStyle(.secondary)
-                                    }
-                                } else {
-                                    Text("应用内 SDK 采集，未使用 ui-inspector。")
-                                    ForEach(metadata.diagnostics.filter { $0.hasPrefix("耗时：") || $0.hasPrefix("传输：") }, id: \.self) { detail in
-                                        Text(detail).font(.caption).foregroundStyle(.secondary)
-                                    }
+                                ForEach(metadata.diagnostics.filter { $0.hasPrefix("耗时：") || $0.hasPrefix("传输：") }, id: \.self) { detail in
+                                    Text(detail).font(.caption).foregroundStyle(.secondary)
                                 }
                             }
                             .textSelection(.enabled)

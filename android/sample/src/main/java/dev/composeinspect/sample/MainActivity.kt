@@ -1,7 +1,6 @@
 package dev.composeinspect.sample
 
 import android.os.Bundle
-import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
@@ -16,7 +15,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Popup
 
@@ -48,7 +46,6 @@ fun ProbeScreen(scenario: String) {
         NonRestartableCard("nonrestartable-marker", 42)
         NoLayoutWrapper("no-layout-marker") { BasicText("no-layout-child") }
         BasicText("Increment: $count", Modifier.clickable { count++ }.padding(12.dp))
-        AndroidView(factory = { TextView(it).apply { text = "AndroidView marker" } })
         Canvas(Modifier.size(24.dp)) { drawCircle(Color.Blue) }
         LazyColumn(Modifier.height(180.dp)) {
             items((0 until 100).toList(), key = { it }) { index -> LazyRowProbe(index, "row-$index") }

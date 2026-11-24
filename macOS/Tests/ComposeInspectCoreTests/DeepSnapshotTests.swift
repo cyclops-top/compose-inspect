@@ -13,7 +13,7 @@ final class DeepSnapshotTests: XCTestCase {
         }
         let data = Data("{\"windows\":[{\"root\":\(node)}]}".utf8)
         let snapshot = try await Task.detached {
-            try SnapshotImporter.decode(data, imageSize: CGSize(width: 10, height: 10), packageName: "test.app")
+            try SnapshotImporter.decode(InspectorDocument(data: data), imageSize: CGSize(width: 10, height: 10), packageName: "test.app")
         }.value
         XCTAssertEqual(snapshot.nodes.count, depth)
         XCTAssertEqual(snapshot.nodes.map(\.rawID), (0..<depth).map(Int64.init))

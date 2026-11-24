@@ -75,19 +75,18 @@ final class NodeFilterTests: XCTestCase {
 
     func testAndroidHostsPromoteChildrenAndPreserveWindowRoot() {
         let text = node("text", "Text")
-        let host = node("host", "androidx.compose.ui.platform.ComposeView", kind: "ViewNode", children: [text])
-        let frame = node("frame", "android.widget.FrameLayout", kind: "ViewNode", children: [host])
-        let source = snapshot(node("root", "android.widget.FrameLayout", kind: "ViewNode", children: [frame]))
+        let host = node("host", "androidx.compose.ui.platform.AndroidComposeView", kind: "ViewNode", children: [text])
+        let source = snapshot(node("root", "android.widget.FrameLayout", kind: "ViewNode", children: [host]))
         let compact = InspectorSnapshotIndex(source, hidingInternals: true)
         XCTAssertEqual(compact.nodes.map(\.id), ["root", "text"])
         XCTAssertEqual(compact.parentIDs["text"], "root")
-        XCTAssertEqual(source.nodes.map(\.id), ["root", "frame", "host", "text"])
+        XCTAssertEqual(source.nodes.map(\.id), ["root", "host", "text"])
     }
 
     func testClickableProjectionKeepsRootsAndNestedActionsWithoutPruning() {
         func action(_ id: String, children: [InspectorNode] = []) -> InspectorNode {
             InspectorNode(id: id, rawID: 1, name: "Button", bounds: rect,
-                parameters: [NodeParameter(id: id + "/click", name: "OnClick", value: "（参数组）", group: .unmergedSemantics)],
+                parameters: [NodeParameter(id: id + "/click", name: "OnClick", value: "true", group: .unmergedSemantics)],
                 children: children)
         }
         let nested = action("nested")
@@ -97,7 +96,7 @@ final class NodeFilterTests: XCTestCase {
             parameters: [NodeParameter(id: "clickable", name: "clickable", value: "true", group: .attribute)])
         let source = snapshot(node("root", "View", kind: "ViewNode", children: [button, view, node("plain", "Text")]))
         let result = InspectorSnapshotIndex(source, onlyClickable: true)
-        XCTAssertEqual(result.nodes.map(\.id), ["root", "button", "nested", "view"])
+        XCTAssertEqual(result.nodes.map(\.id), ["root", "button", "nested"])
         XCTAssertEqual(result.path(to: "nested").map(\.id), ["root", "button", "nested"])
         let hits = CoordinateMapper(imageSize: rect.size, canvasSize: rect.size)
             .candidates(at: CGPoint(x: 50, y: 50), in: result, imageSize: rect.size)
@@ -195,17 +194,12 @@ final class NodeFilterTests: XCTestCase {
         XCTAssertEqual(InspectorSnapshotIndex(source, hidingInternals: true, configuration: config).nodes, source.nodes)
     }
 
-    func testDisabledControlsAreNotClickableInEitherBackend() {
+    func testDisabledControlsAreNotClickable() {
         let compose = InspectorNode(id: "compose", rawID: 1, name: "Button", bounds: rect, parameters: [
             NodeParameter(id: "click", name: "OnClick", value: "true", group: .unmergedSemantics),
-            NodeParameter(id: "disabled", name: "Disabled", value: "Unit", group: .unmergedSemantics)
-        ])
-        let view = InspectorNode(id: "view", rawID: 2, name: "Button", kind: "ViewNode", bounds: rect, parameters: [
-            NodeParameter(id: "click", name: "clickable", value: "true", group: .attribute),
-            NodeParameter(id: "enabled", name: "enabled", value: "false", group: .attribute)
+            NodeParameter(id: "disabled", name: "Disabled", value: "true", group: .unmergedSemantics)
         ])
         XCTAssertFalse(compose.isClickable)
-        XCTAssertFalse(view.isClickable)
     }
 
 }

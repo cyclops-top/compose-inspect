@@ -1,0 +1,15 @@
+builds:
+  macos:
+    command:
+      - sh
+      - -ec
+      - |
+        BUILD_CONFIGURATION=release ./macOS/scripts/build-app.sh
+        app=macOS/dist/CompScope.app
+        codesign --verify --deep --strict "$app"
+        work=$(mktemp -d macOS/dist/.drop-XXXXXX)
+        trap 'rm -rf "$work"' EXIT
+        ditto -c -k --keepParent "$app" "$work/CompScope-macOS.zip"
+        mv "$work/CompScope-macOS.zip" macOS/dist/CompScope-macOS.zip
+    artifacts:
+      compscope-macos: macOS/dist/CompScope-macOS.zip

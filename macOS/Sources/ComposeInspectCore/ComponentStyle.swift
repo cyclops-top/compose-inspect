@@ -127,9 +127,7 @@ struct ComponentStyleCatalog {
         if let first = matches.first, matches.allSatisfy({ $0 == first }) { return first }
         // Equal content rectangles are common for a padded wrapper and its Surface. Only the
         // node's own shape can disambiguate them; merged semantics may describe a descendant.
-        let ownShapes = node?["unmergedSemantics"]?.array?.filter { $0["name"]?.string == "Shape" } ?? []
-        let arguments = node?["parameters"]?.array?.filter { $0["name"]?.string == "shape" } ?? []
-        guard let evidence = (ownShapes.isEmpty ? arguments : ownShapes).first else { return nil }
+        guard let evidence = node?["parameters"]?.array?.first(where: { $0["name"]?.string == "shape" }) else { return nil }
         let supported = matches.filter { style in
             style.layers.contains { layer in
                 ["clip", "background"].contains(layer.kind) && Self.matchesShape(evidence, layer: layer, density: style.density)

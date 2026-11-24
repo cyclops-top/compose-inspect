@@ -10,18 +10,18 @@
 | `compose-collector` | 启用 tooling 数据、遍历各窗口的 Composition 表、读取参数与调用位置、有限深度的值编码 |
 | `inspector-sdk` | Manifest 自动初始化、Activity 生命周期、ADB LocalSocket 通信与调试包检查 |
 | `sample` | 普通业务 Compose 示例；唯一 SDK 接入点在 Gradle `debugImplementation` |
-| `tools` | 桌面采集、两种后端的对照采集、值与源码位置断言、依赖及 release 包检查 |
+| `tools` | SDK 采集、参数与源码位置断言、debug/release 包检查 |
 
 依赖方向：`sample (debug) → inspector-sdk → compose-collector → protocol`。`inspector-sdk` 也直接使用 `protocol`。release 不依赖 SDK。
 
 ## 原理与边界
 
-SDK 的非导出 ContentProvider 随 AAR Manifest 合并，在 Activity 首次组合前启用 `isDebugInspectorInfoEnabled`。Compose 自身记录 `inspection_slot_table_set` 并调用参数信息收集逻辑。SDK 读取 `CompositionData.mapTree`，不替换 `setContent`，不设置预览模式，不要求业务包装 Composable，也不加载 ui-inspector/JVMTI Agent。
+SDK 的非导出 ContentProvider 随 AAR Manifest 合并，在 Activity 首次组合前启用 `isDebugInspectorInfoEnabled`。Compose 自身记录 `inspection_slot_table_set` 并调用参数信息收集逻辑。SDK 读取 `CompositionData.mapTree`，不替换 `setContent`，不设置预览模式，不要求业务包装 Composable。
 
 - Android 29+ 使用 `WindowInspector.getGlobalWindowViews()` 包含 Dialog/Popup；26–28 回退到 Activity decor，并明确返回窗口覆盖限制。
 - 在主线程读取 Composition 表；socket 工作在后台线程，单次请求有超时。源码位置是**调用点**，不是函数定义；只包含文件名、行号、UTF-16 offset/length 和包 hash，不含完整源文件路径。
 - `source.line` 保留 tooling 原始值。在已测两个版本中它是 1 起算，已用业务源码行和 offset 验证；不能仅根据 tooling 的旧注释再加 1。
-- 原始 Composition 表分别输出，**尚未跨表拼接 Lazy 子组合，也未与 Android View 树合并**。同名节点和调用点全覆盖不代表树结构完全等同 ui-inspector。
+- 原始 Composition 表分别输出，**尚未跨表拼接 Lazy 子组合，也未与 Android View 树合并**。
 - 参数编码最多 3 层、20 个元素、2048 字符；截断或不支持的类型会显式标记。标准 Shape、盒装 Color/Dp 已有专用编码；其他未支持的 Android/AndroidX 对象和回调保留类型，尚不支持参数续读。
 - `complete` 只表示这次发现的表没有读取错误，不表示任意应用的所有窗口、所有参数和所有代码路径都完整。
 - 只处理默认进程。SDK 仅在 debuggable 应用初始化；socket 校验 shell/root/同 UID 的 peer credentials，不开放 TCP 监听、不声明 INTERNET 权限。
@@ -43,11 +43,7 @@ SDK 的非导出 ContentProvider 随 AAR Manifest 合并，在 Activity 首次�
 debugImplementation(project(":inspector-sdk"))
 ```
 
-`sample/src/main/` 不含 SDK import、初始化代码、SDK 专用 Manifest 或检查用 Composable 包装。同一份源码去掉依赖，即为 ui-inspector 对照包：
-
-```sh
-./gradlew :sample:assembleDebug -PwithInspectorSdk=false
-```
+`sample/src/main/` 不含 SDK import、初始化代码、SDK 专用 Manifest 或检查用 Composable 包装。
 
 ## Compose 版本
 
@@ -59,9 +55,9 @@ debugImplementation(project(":inspector-sdk"))
 
 这个属性同时选择示例与采集模块的 Compose/tooling 依赖。已测矩阵见 [验证结果](validation/RESULTS.md)。**不代表已经验证一个预编译 SDK 可以兼容所有 Compose 版本**，也不是强制业务升级到 1.12.1。
 
-当前 project 依赖的默认值仍是 1.12.1，直接接入较旧业务项目而不对齐版本可能被 Gradle 升级。验证脚本比较实际解析的 SDK/无 SDK 依赖，确认测试组合中未升级宿主的 Compose 组件。发布前应确定支持范围和依赖策略：最低支持版本编译、同版本 tooling 对齐，并验证同一 SDK 二进制在各宿主版本运行。不能简单用 `compileOnly` 删除 tooling 依赖，运行时仍需要它。
+当前 project 依赖的默认值仍是 1.12.1，直接接入较旧业务项目而不对齐版本可能被 Gradle 升级。发布前应确定支持范围和依赖策略：最低支持版本编译、同版本 tooling 对齐，并验证同一 SDK 二进制在各宿主版本运行。不能简单用 `compileOnly` 删除 tooling 依赖，运行时仍需要它。
 
-## 单独采集（不需要 Java 或 ui-inspector）
+## 通过 ADB 采集
 
 先安装 SDK debug APK、打开示例应用，再从 `android/` 执行：
 
@@ -70,33 +66,19 @@ python3 tools/capture.py --serial DEVICE_SERIAL --command hello --output artifac
 python3 tools/capture.py --serial DEVICE_SERIAL --output artifacts/capture.json
 ```
 
-支持 `--adb /path/to/adb` 和 `--package your.application.id`。工具建立随机端口的 ADB forward，结束时只清理自己的 forward。传输为一行 JSON 请求和一行 JSON 响应，当前命令只有 `hello` 与 `capture`。
+支持 `--adb /path/to/adb` 和 `--package your.application.id`。工具建立随机端口的 ADB forward，结束时只清理自己的 forward。此脚本使用单行 JSON 请求和响应，支持的命令为 `hello` 与 `capture`。
 
-## 可复现对照验证
+## SDK 真机验证
 
-需要连接已授权的设备，另需当前项目可运行的 `ui-inspector/lib/ui-inspector.jar` 及 Java 25+。验证脚本仅安装、重启 `dev.composeinspect.sample`；不会修改其他业务应用。
+连接已授权设备后，在 `android/` 中运行：
 
 ```sh
 python3 tools/validate.py --serial DEVICE_SERIAL
-# 或指定版本：
+# 验证单一 Compose 版本
 python3 tools/validate.py --serial DEVICE_SERIAL --versions 1.12.1
 ```
 
-`JAVA_HOME` 用于 Gradle；inspector 默认由项目启动器寻找 Java 25+，也可用 `INSPECTOR_JAVA_HOME` 单独指定。脚本执行：
-
-1. 构建 SDK debug 和无 SDK release，检查 DEX/Manifest。
-2. SDK 模式分别冷启动主页面、Dialog、Popup；此阶段不运行 ui-inspector。
-3. 断言业务参数、默认值、对象字段、调用源码行及 offset，并点击计数器验证重组后读到新值。
-4. 用相同业务源码构建不带 SDK 的 debug 包，分别冷启动并运行 ui-inspector（attributes、semantics、system-composables）。
-5. 比较共享 Compose 依赖的实际解析版本；保存 APK/hash、业务源码 hash、构建日志、原始 JSON 和 `comparison.json`。
-
-产物在 `artifacts/<Compose版本>/`，已 gitignore。`--sdk-only` 只刷新 SDK/release 证据；现存 baseline JSON 不会重新生成，不能用它声称完成新一轮对照。
-
-```sh
-python3 tools/compare.py artifacts/1.12.1 --validate
-```
-
-比较使用节点名称、源文件、tooling 行号的 multiset 匹配；参数名另行匹配。**节点数不能直接比较**：SDK 保留原始运行时包装组，inspector 做过滤和拼接。参数名匹配也不等于参数值的完整显示能力一致。
+脚本构建 debug 和 release 包并检查 SDK 的 DEX 与 Manifest；仅安装、重启示例调试包。它在主页面、Dialog 和 Popup 检查参数值、默认值、源码行与 offset，并点击计数器验证重组后的值。每个版本的 APK、原始 SDK JSON、构建日志和 `validation.json` 写入 `artifacts/<版本>/`。
 
 ## Maven 发布
 
@@ -126,7 +108,7 @@ debugImplementation("top.cyclops:compose-inspector:0.1.1-snapshot")
 ./gradlew publishToMavenCentral
 ```
 
-上传后在 Central Portal 检查并发布；如需同时自动发布，运行 `./gradlew publishAndReleaseToMavenCentral`。Maven Central 制品及 sources JAR 将公开，GitHub 仓库可以继续私有。Android SDK 源码采用本目录 `LICENSE` 中的 Apache-2.0；不改变 `ui-inspector/vendor` 的许可证。
+上传后在 Central Portal 检查并发布；如需同时自动发布，运行 `./gradlew publishAndReleaseToMavenCentral`。Maven Central 制品及 sources JAR 将公开，GitHub 仓库可以继续私有。Android SDK 源码采用本目录 `LICENSE` 中的 Apache-2.0。
 
 
 ## 性能与压缩协议（本地 0.1.1-snapshot）

@@ -20,17 +20,17 @@ final class ComponentStyleTests: XCTestCase {
             duplicate["outerBounds"] = ["x": 20, "y": 20, "width": 60, "height": 40]
             records.append(duplicate)
         }
-        let style = try JSONSerialization.data(withJSONObject: ["version": 1, "density": 2, "records": records])
+        let style: [String: Any] = ["version": 1, "density": 2, "records": records]
         let node: [String: Any] = ["id": -1, "type": "ComposeNode", "className": "Card",
             "bounds": ["x": 30, "y": 30, "width": 40, "height": 20]]
         let root: [String: Any] = ["id": 1, "type": "ViewNode", "className": "AndroidComposeView",
             "bounds": ["x": 0, "y": 0, "width": 200, "height": 200], "children": [node],
-            "attributes": [["name": UIInspectorSnapshotAdapter.styleAttribute, "value": String(decoding: style, as: UTF8.self)]]]
+            "styleCatalog": style]
         return try JSONSerialization.data(withJSONObject: ["windows": [["root": root]]])
     }
     func testPaddingLayersBackgroundOrderUnknownShapeAndOuterHitAreaSurviveImportAndFiltering() throws {
         let data = try fixture()
-        let snapshot = try SnapshotImporter.decode(data, imageSize: CGSize(width: 200, height: 200), packageName: "example")
+        let snapshot = try SnapshotImporter.decode(InspectorDocument(data: data), imageSize: CGSize(width: 200, height: 200), packageName: "example")
         let node = try XCTUnwrap(snapshot.nodes.first { $0.name == "Card" })
         let style = try XCTUnwrap(node.style)
         XCTAssertEqual(node.bounds, CGRect(x: 0, y: 0, width: 100, height: 80))
@@ -46,12 +46,11 @@ final class ComponentStyleTests: XCTestCase {
         let mapper = CoordinateMapper(imageSize: snapshot.pixelSize, canvasSize: snapshot.pixelSize)
         XCTAssertTrue(mapper.candidates(at: CGPoint(x: 5, y: 5), in: index, imageSize: snapshot.pixelSize).contains { $0.id == node.id })
         XCTAssertEqual(snapshot.document?.originalJSON, data)
-        XCTAssertFalse(snapshot.roots[0].parameters.contains { $0.name == UIInspectorSnapshotAdapter.styleAttribute })
         let decoded = try JSONDecoder().decode(InspectorSnapshot.self, from: JSONEncoder().encode(snapshot))
         XCTAssertEqual(decoded.nodes.first { $0.id == node.id }?.style, style)
     }
     func testAmbiguousLayoutDoesNotBorrowAnOuterFrame() throws {
-        let snapshot = try SnapshotImporter.decode(fixture(ambiguous: true), imageSize: CGSize(width: 200, height: 200), packageName: "example")
+        let snapshot = try SnapshotImporter.decode(InspectorDocument(data: fixture(ambiguous: true)), imageSize: CGSize(width: 200, height: 200), packageName: "example")
         let node = try XCTUnwrap(snapshot.nodes.first { $0.name == "Card" })
         XCTAssertNil(node.style)
         XCTAssertEqual(node.bounds, CGRect(x: 30, y: 30, width: 40, height: 20))
@@ -76,7 +75,7 @@ final class ComponentStyleTests: XCTestCase {
         windows[0]["root"] = root
         json["windows"] = windows
         let data = try JSONSerialization.data(withJSONObject: json)
-        let snapshot = try SnapshotImporter.decode(data, imageSize: CGSize(width: 200, height: 200), packageName: "example")
+        let snapshot = try SnapshotImporter.decode(InspectorDocument(data: data), imageSize: CGSize(width: 200, height: 200), packageName: "example")
         for name in ["LazyLayoutPinnableItem", "Item", "SaveableStateProvider"] {
             let node = try XCTUnwrap(snapshot.nodes.first { $0.name == name && $0.isVirtualLayoutGroup })
             XCTAssertEqual(node.bounds, CGRect(x: 0, y: 0, width: 100, height: 80))
@@ -88,7 +87,7 @@ final class ComponentStyleTests: XCTestCase {
     }
 
     func testMeasuredDimensionsAreSelectableAndOnlyChosenSizesEnterAITargetText() throws {
-        let snapshot = try SnapshotImporter.decode(fixture(), imageSize: CGSize(width: 200, height: 200), packageName: "example")
+        let snapshot = try SnapshotImporter.decode(InspectorDocument(data: fixture()), imageSize: CGSize(width: 200, height: 200), packageName: "example")
         let node = try XCTUnwrap(snapshot.nodes.first { $0.name == "Card" })
         let width = try XCTUnwrap(node.layoutParameters.first { $0.name == "外框宽度" })
         XCTAssertEqual(width.value, "50dp")
@@ -117,7 +116,7 @@ final class ComponentStyleTests: XCTestCase {
              "padding": ["left": 12, "top": 0, "right": 12, "bottom": 0]],
             ["name": "PaddingElement", "kind": "padding", "bounds": outer,
              "padding": ["left": 0, "top": 12, "right": 0, "bottom": 12]]]]
-        let styleJSON = try JSONSerialization.data(withJSONObject: ["version": 1, "density": 2, "records": [record]])
+        let styleJSON: [String: Any] = ["version": 1, "density": 2, "records": [record]]
         // An overflowing descendant must not inflate its real parent or this Row.
         let child: [String: Any] = ["id": -3, "type": "ComposeNode", "className": "Text",
             "bounds": ["x": 320, "y": 64, "width": 20, "height": 20]]
@@ -126,9 +125,9 @@ final class ComponentStyleTests: XCTestCase {
         let parent: [String: Any] = ["id": -1, "type": "ComposeNode", "className": "Box", "bounds": outer, "children": [row]]
         let root: [String: Any] = ["id": 1, "type": "ViewNode", "className": "AndroidComposeView",
             "bounds": ["x": 0, "y": 0, "width": 400, "height": 300], "children": [parent],
-            "attributes": [["name": UIInspectorSnapshotAdapter.styleAttribute, "value": String(decoding: styleJSON, as: UTF8.self)]]]
+            "styleCatalog": styleJSON]
         let data = try JSONSerialization.data(withJSONObject: ["windows": [["root": root]]])
-        let snapshot = try SnapshotImporter.decode(data, imageSize: CGSize(width: 400, height: 300), packageName: "example")
+        let snapshot = try SnapshotImporter.decode(InspectorDocument(data: data), imageSize: CGSize(width: 400, height: 300), packageName: "example")
         let node = try XCTUnwrap(snapshot.nodes.first { $0.name == "Row" })
         let style = try XCTUnwrap(node.style)
         let expected = CGRect(x: 40, y: 40, width: 248, height: 96)

@@ -75,7 +75,7 @@ final class WorkspaceTests: XCTestCase {
 
     func testImporterUsesCurrentSchemaAndPreservesInt64IDAndParameterUnits() throws {
         let data = Data(#"""
-        {"displays":[{"id":0}],"windows":[{"root":{
+        {"windows":[{"root":{
           "type":"ViewNode","id":1,"className":"ComposeView","bounds":{"x":0,"y":0,"width":1080,"height":2220},
           "children":[{"type":"ComposeNode","id":9223372036854775806,"className":"Text",
           "bounds":{"x":12,"y":48,"width":100,"height":40},
@@ -83,7 +83,7 @@ final class WorkspaceTests: XCTestCase {
           "parameters":[{"name":"fontSize","value":{"value":16,"unit":"SP"}}],
           "unmergedSemantics":[{"name":"text","value":"你好"}]}]}}]}
         """#.utf8)
-        let snapshot = try SnapshotImporter.decode(data, imageSize: CGSize(width: 1080, height: 2220), packageName: "example")
+        let snapshot = try SnapshotImporter.decode(InspectorDocument(data: data), imageSize: CGSize(width: 1080, height: 2220), packageName: "example")
         let node = snapshot.nodes[1]
         XCTAssertEqual(node.rawID, 9223372036854775806)
         XCTAssertEqual(node.source?.text, "Main.kt:42")
@@ -92,9 +92,9 @@ final class WorkspaceTests: XCTestCase {
         XCTAssertTrue(node.children.isEmpty)
     }
 
-    func testImporterRejectsUnsupportedRootSchemaAndMultipleDisplays() {
-        XCTAssertThrowsError(try SnapshotImporter.decode(Data(#"{"roots":[]}"#.utf8), imageSize: CGSize(width: 100, height: 100), packageName: "example"))
-        XCTAssertThrowsError(try SnapshotImporter.decode(Data(#"{"displays":[{"id":0},{"id":1}],"windows":[]}"#.utf8), imageSize: CGSize(width: 100, height: 100), packageName: "example"))
+    func testImporterRejectsUnsupportedRootSchemaAndEmptyWindows() {
+        XCTAssertThrowsError(try SnapshotImporter.decode(InspectorDocument(data: Data(#"{"roots":[]}"#.utf8)), imageSize: CGSize(width: 100, height: 100), packageName: "example"))
+        XCTAssertThrowsError(try SnapshotImporter.decode(InspectorDocument(data: Data(#"{"windows":[]}"#.utf8)), imageSize: CGSize(width: 100, height: 100), packageName: "example"))
     }
 
     func testArchiveRoundTripKeepsIssueBindings() throws {

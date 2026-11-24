@@ -29,7 +29,7 @@ final class DeviceSession {
         discovering = true
         let revision = UUID(); discoveryRevision = revision
         defer { if discoveryRevision == revision { discovering = false } }
-        let client = InspectorClient(tools: try settings.resolvedTools(requireJava: false))
+        let client = InspectorClient(tools: try settings.resolvedTools())
         let found = try await client.devices()
         guard discoveryRevision == revision else { return }
         devices = found
@@ -44,7 +44,7 @@ final class DeviceSession {
         try await refreshPackages(settings: settings)
     }
     func refreshPackages(settings: ToolchainSettings, selectForeground: Bool = false) async throws {
-        let client = InspectorClient(tools: try settings.resolvedTools(requireJava: false))
+        let client = InspectorClient(tools: try settings.resolvedTools())
         try await refreshPackages(selectForeground: selectForeground) { serial in
             let packages = try await client.packages(serial: serial)
             let foreground: String?
@@ -82,7 +82,7 @@ final class DeviceSession {
         }
         resolvingCaptureTarget = true
         defer { resolvingCaptureTarget = false }
-        let client = InspectorClient(tools: try settings.resolvedTools(requireJava: false))
+        let client = InspectorClient(tools: try settings.resolvedTools())
         let foreground = try await client.foregroundPackage(serial: serial)
         try Task.checkCancellation()
         guard selectedSerial == serial, automaticallySelectForeground else { throw CancellationError() }
@@ -95,7 +95,7 @@ final class DeviceSession {
     func capture(settings: ToolchainSettings) async throws -> CapturedSnapshot {
         guard !capturing, let device = selectedDevice, device.online else { throw CommandFailure.configuration("请先选择在线设备。") }
         let package = packageName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let sdk = SDKInspectorClient(tools: try settings.resolvedTools(requireJava: false))
+        let sdk = SDKInspectorClient(tools: try settings.resolvedTools())
         captureStartedAt = Date()
         capturing = true
         defer { capturing = false; captureTask = nil; progress = "" }
@@ -104,15 +104,8 @@ final class DeviceSession {
             let progress: @Sendable (String) async -> Void = { [weak session = self] value in
                 await session?.setProgress(value)
             }
-            return try await AutomaticCapture.capture(sdk: {
-                try await sdk.capture(serial: device.serial, package: package, deviceName: device.model,
-                                      skipOverlayWindows: skipOverlayWindows, progress: progress)
-            }, inspector: {
-                // SDK-only users don't need Java/JAR. Resolve these only after SDK fallback.
-                let tools = try await MainActor.run { try settings.resolvedTools() }
-                return try await InspectorClient(tools: tools).capture(serial: device.serial, package: package,
-                    deviceName: device.model, skipOverlayWindows: skipOverlayWindows, progress: progress)
-            }, progress: progress)
+            return try await sdk.capture(serial: device.serial, package: package, deviceName: device.model,
+                                         skipOverlayWindows: skipOverlayWindows, progress: progress)
         }
         captureTask = task
         let result = try await task.value

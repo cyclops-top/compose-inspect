@@ -1,6 +1,6 @@
 # 当前组件的分层样式预览
 
-右侧「当前组件 · 分层样式」显示当前组件对应布局的外框、内容尺寸，以及从外到内的 padding、background、clip。透明部分使用棋盘格，不绘制父背景及子组件内容，方便与真实截图的叠加结果对照。
+右侧「基础」中的框预览显示当前组件对应布局的外框、内容尺寸和内边距合计。棋盘格表示透明，可与截图对照。「样式」按从外到内的顺序列出组件自身的 padding、background 和 clip。
 
 - 每层 padding 单独保留（上、右、下、左，dp）；合计是各层声明值之和，不跨子组件累计，也不代替实际测量尺寸。
 - 背景保留顺序、ARGB 色值及独立 alpha；背景形状与 clip 分开显示。
@@ -10,9 +10,9 @@
 
 ## 采集及关联
 
-Android View inspector 在主线程遍历 AndroidComposeView 的 LayoutNode，通过 Compose tooling 的 `getModifierInfo()` 获取有序 Modifier 及每层 LayoutCoordinates。读取内容坐标和 outerCoordinator 坐标，把角点映射到屏幕，分别保存 `contentBounds` 和 `outerBounds`。不根据 padding 值反推外框。
+Android SDK 在主线程遍历 AndroidComposeView 的 LayoutNode，通过 Compose tooling 的 `getModifierInfo()` 获取有序 Modifier 及每层 LayoutCoordinates。读取内容坐标和 outerCoordinator 坐标，把角点映射到屏幕，分别保存 `contentBounds` 和 `outerBounds`。不根据 padding 值反推外框。
 
-扩展通过 AndroidComposeView 的字符串属性 `composeinspect.styleLayers.v1` 传输，结构为：
+SDK 在窗口的 `styleCatalogs` 数组中返回样式目录，每个 Composition 表通过 `styleCatalogIndex` 引用宿主的目录。目录结构为：
 
 ```json
 {
@@ -29,7 +29,7 @@ Android View inspector 在主线程遍历 AndroidComposeView 的 LayoutNode，�
 
 每层有 `name`、`kind`、实际屏幕 `bounds`，并携带相应的 `padding`、`argb`、`alpha`、`shape` 或 `unsupported`。`shape.radiiPx` 使用物理像素；padding 使用 dp。原始扩展始终留在完整 JSON 中，不作为巨大的普通参数行显示。
 
-macOS 仅在同一个 AndroidComposeView 内按完整内容矩形关联记录；存在多个不同候选时不猜测。业务包装 Composable（例如 GlassCard）与其发出的 Column 可以对应同一个 LayoutNode，因此显示同一套布局样式。没有单一对应布局的组合、版本不兼容及采集失败时，保留原边界并显示样式未取得；诊断保留在原始扩展中。
+macOS 仅在同一个 AndroidComposeView 内优先按布局标识关联记录，缺少标识时再按内容矩形和 shape 参数匹配；存在多个不同候选时不猜测。业务包装 Composable（例如 GlassCard）与其发出的 Column 可以对应同一个 LayoutNode，因此显示同一套布局样式。没有单一对应布局的组合、版本不兼容及采集失败时，保留原边界并显示样式未取得；诊断保留在原始扩展中。
 
 成功关联后，应用的 InspectorNode.bounds 使用 outerBounds，截图高亮、线框及点击候选统一使用该外框；上游原始 JSON 的 bounds 不覆盖，内容坐标及完整原文继续保留。
 
@@ -48,15 +48,15 @@ macOS 仅在同一个 AndroidComposeView 内按完整内容矩形关联记录；
 
 ## 精简树与参数展示
 
-处理顺序为完整 JSON → 完整解析（含布局优化）→ 结构筛选 → 展示结果。新快照加载时生成完整、精简及仅可点击索引并缓存，点击、展开、输入描述和切换开关不重建索引。搜索框下直接显示“精简”和“仅可点击”勾选项；仅可点击开启时自动勾选并锁定精简，关闭后精简保持开启且可手动取消。精简会提升已知列表组合包装及 Android FrameLayout、ComposeView、AndroidComposeView 等宿主容器的子节点，窗口根节点始终保留。其他业务源码节点、普通布局和未知节点不因参数为空而删除。仅可点击保留各窗口根节点及具有 OnClick 语义或 clickable=true View 属性的节点，不按组件名或普通 onClick 回调参数猜测点击能力；被跳过节点的后代继续筛选并提升。截图候选、线框和组件树统一使用结果索引，原始路径继续用于 AI 定位及完整 JSON。问题记录稳定绑定解析优化后的节点及原始 ID；点击被筛掉节点的问题仅显示其定位框，不退出筛选、不清空搜索、不跳转组件树。搜索按后序一次计算匹配集合，保留命中节点的可见祖先。
+处理顺序为完整 JSON → 完整解析（含布局优化）→ 结构筛选 → 展示结果。新快照加载时生成完整、精简及仅可点击索引并缓存，点击、展开、输入描述和切换开关不重建索引。搜索框下直接显示“精简”和“仅可点击”勾选项；仅可点击开启时自动勾选并锁定精简，关闭后精简保持开启且可手动取消。精简会提升已知列表组合包装及 Compose 宿主的子节点，窗口根节点始终保留。其他业务源码节点、普通布局和未知节点不因参数为空而删除。仅可点击保留各窗口根节点及具有 OnClick 语义的节点，不按组件名或普通 onClick 回调参数猜测点击能力；被跳过节点的后代继续筛选并提升。截图候选、线框和组件树统一使用结果索引，原始路径继续用于 AI 定位及完整 JSON。问题记录稳定绑定解析优化后的节点及原始 ID；点击被筛掉节点的问题仅显示其定位框，不退出筛选、不清空搜索、不跳转组件树。搜索按后序一次计算匹配集合，保留命中节点的可见祖先。
 
 padding 用盒模型示意图表示四边数值与内容区（示意间距不按比例）。只有一层时仅显示一份；多层时展示合计和各层。四个圆角使用对应位置的圆弧图标和数值，保留无障碍名称。
 
-参数中的「尺寸」组可勾选外框宽高及已采集到的内容区宽高。可用 density 时使用 dp，否则明确使用 px。仅勾选的尺寸写入 AI 文本；尺寸为应用计算参数，不覆盖原始 Inspector 参数。
+参数中的「尺寸」组可勾选外框宽高及已采集到的内容区宽高。可用 density 时使用 dp，否则明确使用 px。仅勾选的尺寸写入 AI 文本；尺寸为应用计算参数，不覆盖原始 SDK 参数。
 
 ## 参数过滤与颜色
 
-参数面板自动隐藏空字符串、null 及无内容的参数组；组内存在可用子项时仍保留该组。0、false、空集合、截断参数及可继续读取的参数继续显示。已勾选的参数保留显示，避免过滤后无法取消选择；原始参数和 JSON 不删除。
+参数面板自动隐藏空字符串、null 及无内容的参数组；组内存在可用子项时仍保留该组。0、false、空集合、截断参数继续显示。已勾选的参数保留显示，避免过滤后无法取消选择；原始参数和 JSON 不删除。
 
 标准 #RRGGBB / #AARRGGBB 色值旁显示色块，保留原色值和独立勾选。色块下方有棋盘格，透明色和半透明色也可辨认。不把普通整数或 Unspecified 当成颜色。
 
@@ -65,17 +65,7 @@ padding 用盒模型示意图表示四边数值与内容区（示意间距不按
 
 组件树“精简”旁的齿轮打开规则配置，修改立即应用到当前快照并自动保存至 UserDefaults 的 `tree.filterConfiguration.v1`。规则改变时重建精简、仅可点击索引，组件树和线框通过展示版本同步刷新；普通选择、展开、问题编辑不重建索引。
 
-默认勾选的 View 类名：
-
-- Android 布局：`android.widget.FrameLayout`、`LinearLayout`、`RelativeLayout`、`GridLayout`、`TableLayout`、`TableRow`。
-- AndroidX 布局：`androidx.constraintlayout.widget.ConstraintLayout`、`androidx.coordinatorlayout.widget.CoordinatorLayout`。
-- 占位组件：`android.view.ViewStub`、`androidx.appcompat.widget.ViewStubCompat`。
-- Compose 宿主：`androidx.compose.ui.platform.ComposeView`、`AndroidComposeView`、`AbstractComposeView`。
-
-`android.widget.ScrollView`、`android.widget.HorizontalScrollView`、`androidx.core.widget.NestedScrollView` 预置但默认不勾选。Text 的 BasicText、已知 Layout / ReusableComposeNode、无独立内容的组合包装各有独立开关，默认开启并保留现有源码及语义判断。
-
-可以逐项勾选、移除，或添加自定义 View 类名；添加时自动勾选，重复添加启用原有条目。完整类名精确匹配，不匹配业务同名类或子类；简单类名匹配各包下的同名 View。采集只提供简单类名时，也兼容完整规则的类名部分。规则仅作用于 ViewNode，不误删同名 Compose 节点。恢复默认会重置所有规则及勾选状态，移除自定义项，不改变精简/仅可点击开关、原始树或问题记录。
-
+默认隐藏 Text 内部的 BasicText、已知 Layout 实现、无独立内容的组合包装和 Compose 宿主。升级时沿用原有 AndroidComposeView 隐藏设置，窗口根节点始终保留。
 
 ### 自定义布局向外扩展的选择范围
 

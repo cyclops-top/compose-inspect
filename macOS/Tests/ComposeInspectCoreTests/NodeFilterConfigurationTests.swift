@@ -10,49 +10,25 @@ final class NodeFilterConfigurationTests: XCTestCase {
         return InspectorSnapshot(packageName: "test.app", deviceName: "test", pixelSize: bounds.size, roots: [root])
     }
 
-    func testEveryDefaultRuleCanBeEnabledAndDisabledWithoutDroppingChildrenOrRoot() {
-        for rule in NodeFilterConfiguration.defaults.viewRules {
-            let source = snapshot(rule.className)
-            var configuration = NodeFilterConfiguration.defaults
-            let index = configuration.viewRules.firstIndex { $0.id == rule.id }!
-            configuration.viewRules[index].enabled = true
-            let compact = InspectorSnapshotIndex(source, hidingInternals: true, configuration: configuration)
-            XCTAssertEqual(compact.nodes.map(\.id), ["root", "content"], rule.className)
-            XCTAssertEqual(compact.parentIDs["content"], "root")
-            configuration.viewRules[index].enabled = false
-            XCTAssertEqual(InspectorSnapshotIndex(source, hidingInternals: true, configuration: configuration).nodes.map(\.id),
-                           ["root", "wrapper", "content"], rule.className)
-            XCTAssertEqual(source.nodes.map(\.id), ["root", "wrapper", "content"])
+    func testHostPreferenceDecodesSavedRulesAndRoundTrips() throws {
+        let base: [String: Any] = ["hideTextImplementation": false, "hideLayoutImplementation": true,
+                                   "hideCompositionWrappers": false]
+        let source = snapshot("androidx.compose.ui.platform.AndroidComposeView")
+        for name in ["AndroidComposeView", "androidx.compose.ui.platform.AndroidComposeView", "example.OtherView"] {
+            for enabled in [false, true] {
+                var saved = base
+                saved["viewRules"] = [["className": name, "enabled": enabled]]
+                let data = try JSONSerialization.data(withJSONObject: saved)
+                let settings = try JSONDecoder().decode(NodeFilterConfiguration.self, from: data)
+                let hidden = enabled && name != "example.OtherView"
+                XCTAssertEqual(settings.hideComposeHosts, hidden)
+                XCTAssertFalse(settings.hideTextImplementation)
+                XCTAssertFalse(settings.hideCompositionWrappers)
+                let index = InspectorSnapshotIndex(source, hidingInternals: true, configuration: settings)
+                XCTAssertEqual(index.nodes.map(\.id), hidden ? ["root", "content"] : ["root", "wrapper", "content"])
+                XCTAssertEqual(try JSONDecoder().decode(NodeFilterConfiguration.self, from: JSONEncoder().encode(settings)), settings)
+            }
         }
-    }
-
-    func testCustomRulesValidateDeduplicateAndRoundTrip() throws {
-        var configuration = NodeFilterConfiguration.defaults
-        XCTAssertTrue(configuration.addViewRule("  example.CustomLayout  "))
-        XCTAssertTrue(configuration.addViewRule("CustomLayout$Inner"))
-        let count = configuration.viewRules.count
-        configuration.viewRules[configuration.viewRules.count - 1].enabled = false
-        XCTAssertTrue(configuration.addViewRule("CustomLayout$Inner"))
-        XCTAssertEqual(configuration.viewRules.count, count)
-        XCTAssertTrue(configuration.viewRules.last!.enabled)
-        for invalid in ["", " ", "example..Layout", ".Layout", "View*", "123Layout", "a b", "Layout."] {
-            XCTAssertFalse(configuration.addViewRule(invalid), invalid)
-        }
-        XCTAssertEqual(configuration.viewRules.count, count)
-        XCTAssertEqual(try JSONDecoder().decode(NodeFilterConfiguration.self, from: JSONEncoder().encode(configuration)), configuration)
-        XCTAssertEqual(InspectorSnapshotIndex(snapshot("example.CustomLayout"), hidingInternals: true, configuration: configuration).nodes.map(\.id),
-                       ["root", "content"])
-        XCTAssertEqual(InspectorSnapshotIndex(snapshot("example.CustomLayout"), configuration: configuration).nodes.count, 3)
-    }
-
-    func testQualifiedRuleDoesNotHideBusinessNamesAndOnlyTargetsAndroidViews() {
-        let configuration = NodeFilterConfiguration.defaults
-        XCTAssertEqual(InspectorSnapshotIndex(snapshot("example.FrameLayout"), hidingInternals: true).nodes.count, 3)
-        XCTAssertEqual(InspectorSnapshotIndex(snapshot("FrameLayout"), hidingInternals: true).nodes.count, 2)
-        XCTAssertEqual(InspectorSnapshotIndex(snapshot("android.widget.FrameLayout", kind: "ComposeNode"), hidingInternals: true).nodes.count, 3)
-        var custom = configuration
-        XCTAssertTrue(custom.addViewRule("FrameLayout"))
-        XCTAssertEqual(InspectorSnapshotIndex(snapshot("example.FrameLayout"), hidingInternals: true, configuration: custom).nodes.count, 2)
     }
 
     func testComposeRulesCanAllBeDisabledAndClickableRestrictionStillApplies() {
@@ -63,7 +39,7 @@ final class NodeFilterConfigurationTests: XCTestCase {
         let source = InspectorSnapshot(packageName: "test.app", deviceName: "test", pixelSize: bounds.size, roots: [text])
         XCTAssertEqual(InspectorSnapshotIndex(source, hidingInternals: true).nodes.map(\.id), ["text", "content"])
         let configuration = NodeFilterConfiguration(hideTextImplementation: false, hideLayoutImplementation: false,
-                                                    hideCompositionWrappers: false, viewRules: [])
+                                                    hideCompositionWrappers: false, hideComposeHosts: false)
         XCTAssertEqual(InspectorSnapshotIndex(source, hidingInternals: true, configuration: configuration).nodes.map(\.id), source.nodes.map(\.id))
         XCTAssertEqual(InspectorSnapshotIndex(source, onlyClickable: true, configuration: configuration).nodes.map(\.id), ["text"])
     }

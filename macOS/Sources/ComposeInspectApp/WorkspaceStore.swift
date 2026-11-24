@@ -166,15 +166,6 @@ final class WorkspaceStore {
     private var transientParameters: [ComponentKey: Set<String>] = [:]
     let deviceSession = DeviceSession()
     var rawPresentation: RawJSONPresentation?
-    private struct ParameterRequestKey: Hashable {
-        let component: ComponentKey
-        let parameterID: String
-    }
-    private var parameterRequests: [ParameterRequestKey: UUID] = [:]
-    var readingParameters: Set<String> {
-        guard let key = selectedKey else { return [] }
-        return Set(parameterRequests.keys.filter { $0.component == key }.map(\.parameterID))
-    }
     private(set) var issueEditRevision: UInt = 0
 
     init(filterDefaults: UserDefaults = .standard) {
@@ -194,8 +185,7 @@ final class WorkspaceStore {
         presentationIndex = UserDefaults.standard.bool(forKey: "onlyClickableNodes") ? clickable
             : ((UserDefaults.standard.object(forKey: "hideInternalNodes") as? Bool ?? true) ? compact : full)
         projectSources.onCatalogChange = { [weak self] in
-            guard let self, self.onlySourceNodes, !self.searchesAllComponents,
-                  self.snapshot.captureMetadata?.backend == .sdk else { return }
+            guard let self, self.onlySourceNodes, !self.searchesAllComponents else { return }
             self.updatePresentationIndex()
         }
     }
@@ -218,7 +208,7 @@ final class WorkspaceStore {
             ?? Set((selectedNode?.selectableParameters ?? []).filter { $0.name == "item.key" }.map(\.id))
     }
     var canPickImage: Bool {
-        image != nil && (snapshot.document?.displays.count ?? 0) <= 1
+        image != nil
     }
     var visibleRoot: InspectorNode? { presentationIndex.roots.first { $0.id == windowRootID } ?? presentationIndex.roots.first }
     var visibleNodes: [InspectorNode] { visibleRoot.flatMap { presentationIndex.nodesByRoot[$0.id] } ?? [] }
@@ -232,11 +222,11 @@ final class WorkspaceStore {
     }
     let projectSources = ProjectSourceIndex()
     var usesProjectSources: Bool {
-        snapshot.captureMetadata?.backend == .sdk && !projectSources.project.isEmpty
+        !projectSources.project.isEmpty
     }
     private func projectFile(for source: SourceAnchor) -> String? {
         guard !projectSources.project.isEmpty else { return nil }
-        return projectSources.uniqueFile(for: source, requirePackageHash: snapshot.captureMetadata?.backend == .sdk)
+        return projectSources.uniqueFile(for: source)
     }
     private func locatorText(for issue: ComponentIssue) -> String? {
         LocatorTextBuilder.text(for: issue, in: snapshot, index: snapshotIndex, projectFile: projectFile)
@@ -245,7 +235,7 @@ final class WorkspaceStore {
         LocatorTextBuilder.sourceLocation(in: snapshotIndex.path(to: id), projectFile: projectFile)
     }
     func sourceSummary(for id: String) -> String {
-        sourceLocation(for: id)?.summary ?? "无源码位置：请按组件名、文字及资源线索搜索"
+        sourceLocation(for: id)?.summary ?? "无源码位置：请按组件名或文字搜索"
     }
     var sourceSummary: String { selectedNodeID.map(sourceSummary(for:)) ?? "未选择组件" }
     var selectedParentID: String? { path.dropLast().last?.id }
@@ -426,7 +416,6 @@ final class WorkspaceStore {
         isCapturing = true
         defer { isCapturing = false }
         captureRequestID = UUID()
-        parameterRequests = [:]
         let requestID = captureRequestID
         discardCaptureIssues()
         await deviceSession.waitForCaptureCancellation()
@@ -482,7 +471,6 @@ final class WorkspaceStore {
         discardCaptureIssues()
         cancelFilterIndexes()
         rawPresentation = nil
-        parameterRequests = [:]
         snapshot = captured.snapshot
         image = newImage
         search = ""
@@ -498,53 +486,7 @@ final class WorkspaceStore {
             rawPresentation = RawJSONPresentation(title: parameter.name, document: document)
         } else if let document = snapshot.document {
             rawPresentation = RawJSONPresentation(title: "完整检查数据", document: document, nodePointer: selectedNodeID,
-                                                  metadata: snapshot.captureMetadata, reads: snapshot.parameterReads ?? [])
+                                                  metadata: snapshot.captureMetadata)
         } else { notice = "请先获取界面。" }
     }
-
-    func canRead(_ parameter: NodeParameter) -> Bool {
-        guard parameter.continuationToken != nil, !isCapturing, let metadata = snapshot.captureMetadata else { return false }
-        return metadata.backend != .sdk && !deviceSession.capturing && metadata.serial == deviceSession.selectedSerial && metadata.packageName == deviceSession.packageName
-    }
-
-    func readParameter(_ parameter: NodeParameter, settings: ToolchainSettings) async {
-        guard let metadata = snapshot.captureMetadata, let token = parameter.continuationToken else { return }
-        await readParameter(parameter) {
-            let client = InspectorClient(tools: try settings.resolvedTools())
-            return try await client.parameter(serial: metadata.serial, package: metadata.packageName, token: token)
-        }
-    }
-
-    func readParameter(_ parameter: NodeParameter,
-                       operation: @MainActor () async throws -> InspectorDocument) async {
-        guard canRead(parameter), let token = parameter.continuationToken, let key = selectedKey,
-              let metadata = snapshot.captureMetadata else { return }
-        let requestKey = ParameterRequestKey(component: key, parameterID: parameter.id)
-        guard parameterRequests[requestKey] == nil else { return }
-        let requestID = UUID()
-        parameterRequests[requestKey] = requestID
-        defer {
-            if parameterRequests[requestKey] == requestID { parameterRequests.removeValue(forKey: requestKey) }
-        }
-        func isCurrent() -> Bool {
-            parameterRequests[requestKey] == requestID && snapshot.id == key.snapshotID
-                && deviceSession.selectedSerial == metadata.serial && deviceSession.packageName == metadata.packageName
-        }
-        do {
-            let document = try await operation()
-            try Task.checkCancellation()
-            guard isCurrent() else { return }
-            var updated = snapshot
-            let read = ParameterRead(nodeID: key.nodeID, parameterID: parameter.id, token: token, document: document)
-            updated.parameterReads = (updated.parameterReads ?? []) + [read]
-            snapshot = updated
-            if selectedKey == key { rawPresentation = RawJSONPresentation(title: "后续参数读取 · \(parameter.name)", document: document) }
-            notice = "参数已继续读取；结果单独保存，原快照未被覆盖。"
-        } catch is CancellationError {
-            // Cancellation retires this request without replacing the current UI's status.
-        } catch {
-            if isCurrent() { errorMessage = error.localizedDescription }
-        }
-    }
-
 }

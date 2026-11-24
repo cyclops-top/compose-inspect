@@ -2,7 +2,7 @@ import XCTest
 @testable import ComposeInspectCore
 
 final class ShapeAssociationTests: XCTestCase {
-    private func snapshot(shape: String = "RoundedCornerShape", group: String = "unmergedSemantics",
+    private func snapshot(shape: String = "RoundedCornerShape", group: String = "parameters",
                           radius: Double = 42, conflicting: Bool = false, unit: String = "DP", value: Double = 16, stringValue: Bool = false) throws -> InspectorSnapshot {
         let bounds = ["x": 42, "y": 554, "width": 996, "height": 323]
         let outer = ["x": 0, "y": 554, "width": 1080, "height": 323]
@@ -19,8 +19,8 @@ final class ShapeAssociationTests: XCTestCase {
             var other = layer; other["argb"] = "FFFF0000"
             styled["layers"] = [other]; records.append(styled)
         }
-        let catalog = try JSONSerialization.data(withJSONObject: ["version": 1, "density": 2.625, "records": records])
-        var evidence: [String: Any] = ["name": "Shape", "value": shape]
+        let catalog: [String: Any] = ["version": 1, "density": 2.625, "records": records]
+        var evidence: [String: Any] = ["name": "shape", "value": shape]
         if shape != "CircleShape" {
             let keys = shape.hasPrefix("Absolute") ? ["topLeft", "topRight", "bottomLeft", "bottomRight"] : ["topStart", "topEnd", "bottomStart", "bottomEnd"]
             evidence["elements"] = keys.map {
@@ -30,9 +30,9 @@ final class ShapeAssociationTests: XCTestCase {
         let surface: [String: Any] = ["id": 2, "type": "ComposeNode", "className": "Surface", "bounds": bounds,
             "sourceLocation": ["fileName": "ResidentCard.kt", "lineNumber": 44], group: [evidence]]
         let root: [String: Any] = ["id": 1, "type": "ViewNode", "className": "AndroidComposeView", "bounds": outer,
-            "attributes": [["name": UIInspectorSnapshotAdapter.styleAttribute, "value": String(decoding: catalog, as: UTF8.self)]], "children": [surface]]
+            "styleCatalog": catalog, "children": [surface]]
         let data = try JSONSerialization.data(withJSONObject: ["windows": [["root": root]]])
-        return try SnapshotImporter.decode(data, imageSize: CGSize(width: 1080, height: 2400), packageName: "test.app")
+        return try SnapshotImporter.decode(InspectorDocument(data: data), imageSize: CGSize(width: 1080, height: 2400), packageName: "test.app")
     }
 
     func testOwnShapeDisambiguatesSurfaceFromSameBoundsPaddingWrapper() throws {
