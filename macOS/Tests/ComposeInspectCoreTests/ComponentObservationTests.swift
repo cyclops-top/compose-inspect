@@ -6,7 +6,11 @@ final class ComponentObservationTests: XCTestCase {
         let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let file = repo.appendingPathComponent("android/validation/observation/\(name).json.gz")
-        let bytes = try SDKCompressedResponse.decode(Data(contentsOf: file), maxBytes: 2_000_000)
+        let recorded = try SDKCompressedResponse.decode(Data(contentsOf: file), maxBytes: 2_000_000)
+        // Replay the recorded UI under the current handshake version. Protocol 1 is unchanged.
+        var payload = try XCTUnwrap(InspectorJSON.parse(recorded).object)
+        payload["sdkVersion"] = .string(SDKInspectorClient.supportedSDKVersion)
+        let bytes = InspectorDocument(root: .object(payload)).originalJSON
         let package = "dev.composeinspect.sample"
         let snapshot = try SDKSnapshotImporter.decode(bytes, imageSize: CGSize(width: 1080, height: 2400), packageName: package)
         return snapshot.withCaptureContext(deviceName: "sample", metadata: CaptureMetadata(
@@ -143,10 +147,10 @@ final class ComponentObservationTests: XCTestCase {
 
     func testHandshakeRequiresExactVersion() throws {
         var hello: [String: InspectorJSON] = ["protocolVersion": .number("1"), "pid": .number("9"), "packageName": .string("dev.sample")]
-        for version in [nil, "0.1.1", "0.1.3"] as [String?] {
+        for version in [nil, "0.1.2", "0.1.4"] as [String?] {
             hello["sdkVersion"] = version.map(InspectorJSON.string)
             XCTAssertThrowsError(try SDKInspectorClient.validateResponse(Data(InspectorJSON.object(hello).jsonString().utf8), package: "dev.sample")) {
-                XCTAssertTrue($0.localizedDescription.contains("0.1.2"))
+                XCTAssertTrue($0.localizedDescription.contains("0.1.3"))
             }
         }
     }

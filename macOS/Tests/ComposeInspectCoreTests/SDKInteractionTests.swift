@@ -21,7 +21,7 @@ final class SDKInteractionTests: XCTestCase {
 
     private func decode(_ children: [InspectorJSON]) throws -> InspectorSnapshot {
         let raw: InspectorJSON = .object([
-            "protocolVersion": .number("1"), "sdkVersion": .string("0.1.2"), "packageName": .string("dev.sample"), "pid": .number("1"),
+            "protocolVersion": .number("1"), "sdkVersion": .string("0.1.3"), "packageName": .string("dev.sample"), "pid": .number("1"),
             "complete": .bool(true), "diagnostics": .array([]), "windows": .array([.object([
                 "screenOffset": .array([.number("30"), .number("50")]),
                 "tables": .array([.object(["tree": group(nil, children: children)])])

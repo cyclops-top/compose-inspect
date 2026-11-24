@@ -83,12 +83,12 @@ python3 tools/validate.py --serial DEVICE_SERIAL --versions 1.12.1
 ## Maven 发布
 
 与 spear 使用相同的 `com.vanniktech.maven.publish:0.37.0` 插件，签名后发布到 Maven Central。
-版本由 `gradle.properties` 的 `sdkVersion` 统一控制，当前版本为 `0.1.2`。
+版本由 `gradle.properties` 的 `sdkVersion` 统一控制，当前版本为 `0.1.3`。
 
 在业务应用的调试依赖中添加：
 
 ```kotlin
-debugImplementation("top.cyclops:compose-inspector:0.1.2")
+debugImplementation("top.cyclops:compose-inspector:0.1.3")
 ```
 
 同时发布 `compose-inspector-collector` 和 `compose-inspector-protocol`，均属于 `top.cyclops`；主制品会传递依赖它们。发布的是库的 release 变体，使用方仍须使用 `debugImplementation`，不要加入生产包。
@@ -115,7 +115,7 @@ debugImplementation("top.cyclops:compose-inspector:0.1.2")
 
 升级采集 SDK 后，重新构建并安装业务应用的调试包。
 
-- `hello` 声明 `gzip-json-v1` 时，新 macOS 客户端发送 `capture-gzip`。响应为 4 字节大端压缩长度 + 单个 gzip member，解压后仍为完整、以换行结尾的原始 JSON。桌面端要求运行时 SDK 0.1.2、协议 1 和压缩采集能力。
+- `hello` 声明 `gzip-json-v1` 时，新 macOS 客户端发送 `capture-gzip`。响应为 4 字节大端压缩长度 + 单个 gzip member，解压后仍为完整、以换行结尾的原始 JSON。桌面端要求运行时 SDK 0.1.3、协议 1 和压缩采集能力。
 - Compose/View 状态只在主线程读取；对象字段元数据仅在单次采集中缓存，实际值始终重新读取。编码、快速压缩和 socket 写入在 SDK 工作线程执行。
 - macOS 复用已解析文档，避免规范化数据再次解析；截图 I/O 与原始 JSON 解析并行。压缩输入与解压输出均有大小限制，CRC、截断、额外数据会报错。
 - `tools/capture.py` 默认写紧凑 JSON，`--pretty` 才生成缩进输出。深层树的缩进文件可能远大于实际传输数据，不应用作传输性能基线。

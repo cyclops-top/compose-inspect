@@ -1,7 +1,7 @@
 import Foundation
 
 public struct SDKInspectorClient: Sendable {
-    public static let supportedSDKVersion = "0.1.2"
+    public static let supportedSDKVersion = "0.1.3"
     private let adb: InspectorClient
     public init(tools: InspectorToolchain) { adb = InspectorClient(tools: tools) }
 
