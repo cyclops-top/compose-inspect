@@ -1,0 +1,531 @@
+{
+  "compose": "1.12.1",
+  "sdk": "0.1.2",
+  "model": "sdk_gphone16k_arm64",
+  "api": "37",
+  "package": "dev.composeinspect.sample.research",
+  "summary": {
+    "cold_fresh": {
+      "n": 5,
+      "median": 206.94,
+      "p95": 213.89
+    },
+    "cold_reuse": {
+      "n": 5,
+      "median": 213.0,
+      "p95": 216.29
+    },
+    "warm_fresh": {
+      "n": 20,
+      "median": 75.34,
+      "p95": 93.1
+    },
+    "warm_reuse": {
+      "n": 20,
+      "median": 48.81,
+      "p95": 72.88
+    }
+  },
+  "samples": [
+    {
+      "mode": "fresh",
+      "phase": "cold",
+      "ms": 189.04,
+      "collectMs": 83.309666,
+      "wireBytes": 71764,
+      "pid": 6704,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "cold",
+      "ms": 185.16,
+      "collectMs": 82.962167,
+      "wireBytes": 71761,
+      "pid": 6796,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "cold",
+      "ms": 214.66,
+      "collectMs": 104.499875,
+      "wireBytes": 71761,
+      "pid": 6887,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "cold",
+      "ms": 198.7,
+      "collectMs": 89.246333,
+      "wireBytes": 71763,
+      "pid": 6947,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "cold",
+      "ms": 208.89,
+      "collectMs": 115.314917,
+      "wireBytes": 71759,
+      "pid": 7011,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "cold",
+      "ms": 216.29,
+      "collectMs": 100.876208,
+      "wireBytes": 71763,
+      "pid": 7078,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "cold",
+      "ms": 191.98,
+      "collectMs": 90.866208,
+      "wireBytes": 71766,
+      "pid": 7141,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "cold",
+      "ms": 213.89,
+      "collectMs": 105.051666,
+      "wireBytes": 71762,
+      "pid": 7205,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "cold",
+      "ms": 206.94,
+      "collectMs": 92.021792,
+      "wireBytes": 71764,
+      "pid": 7258,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "cold",
+      "ms": 213.0,
+      "collectMs": 106.877458,
+      "wireBytes": 71763,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 112.32,
+      "collectMs": 50.518167,
+      "wireBytes": 71763,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 72.88,
+      "collectMs": 42.994041,
+      "wireBytes": 71763,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 75.19,
+      "collectMs": 46.249917,
+      "wireBytes": 71761,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 93.1,
+      "collectMs": 36.590417,
+      "wireBytes": 71763,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 87.71,
+      "collectMs": 35.906958,
+      "wireBytes": 71763,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 57.03,
+      "collectMs": 33.526958,
+      "wireBytes": 71762,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 56.51,
+      "collectMs": 33.097875,
+      "wireBytes": 71758,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 81.7,
+      "collectMs": 29.37375,
+      "wireBytes": 71759,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 81.14,
+      "collectMs": 30.959375,
+      "wireBytes": 71762,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 49.13,
+      "collectMs": 27.804458,
+      "wireBytes": 71760,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 49.63,
+      "collectMs": 26.267084,
+      "wireBytes": 71762,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 76.8,
+      "collectMs": 26.348541,
+      "wireBytes": 71763,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 76.91,
+      "collectMs": 27.452959,
+      "wireBytes": 71760,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 50.7,
+      "collectMs": 27.939791,
+      "wireBytes": 71761,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 51.55,
+      "collectMs": 29.145625,
+      "wireBytes": 71758,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 81.01,
+      "collectMs": 28.538917,
+      "wireBytes": 71762,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 79.52,
+      "collectMs": 27.756917,
+      "wireBytes": 71761,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 48.5,
+      "collectMs": 26.316792,
+      "wireBytes": 71762,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 49.65,
+      "collectMs": 27.042667,
+      "wireBytes": 71760,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 72.76,
+      "collectMs": 23.100959,
+      "wireBytes": 71765,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 72.26,
+      "collectMs": 22.941875,
+      "wireBytes": 71764,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 45.13,
+      "collectMs": 23.768833,
+      "wireBytes": 71762,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 46.79,
+      "collectMs": 23.666875,
+      "wireBytes": 71759,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 73.89,
+      "collectMs": 22.678417,
+      "wireBytes": 71762,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 70.84,
+      "collectMs": 20.854541,
+      "wireBytes": 71760,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 58.49,
+      "collectMs": 25.266334,
+      "wireBytes": 71761,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 44.93,
+      "collectMs": 23.344,
+      "wireBytes": 71761,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 72.28,
+      "collectMs": 21.286708,
+      "wireBytes": 71766,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 69.22,
+      "collectMs": 21.405708,
+      "wireBytes": 71763,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 44.79,
+      "collectMs": 23.158042,
+      "wireBytes": 71759,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 42.1,
+      "collectMs": 20.942459,
+      "wireBytes": 71761,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 70.52,
+      "collectMs": 22.485,
+      "wireBytes": 71762,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 71.15,
+      "collectMs": 23.093084,
+      "wireBytes": 71760,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 41.68,
+      "collectMs": 21.4125,
+      "wireBytes": 71760,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 43.64,
+      "collectMs": 20.235166,
+      "wireBytes": 71763,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 78.25,
+      "collectMs": 22.362,
+      "wireBytes": 71756,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 69.53,
+      "collectMs": 21.28125,
+      "wireBytes": 71763,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 40.89,
+      "collectMs": 19.297333,
+      "wireBytes": 71762,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "reuse",
+      "phase": "warm",
+      "ms": 44.41,
+      "collectMs": 22.546542,
+      "wireBytes": 71763,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    },
+    {
+      "mode": "fresh",
+      "phase": "warm",
+      "ms": 68.53,
+      "collectMs": 21.3605,
+      "wireBytes": 71761,
+      "pid": 7353,
+      "groups": 2949,
+      "windowsSHA256": "9fab163fd445633cde4fa8f41ca7481b64a557d1ec626997f6498b17d089a21b"
+    }
+  ]
+}

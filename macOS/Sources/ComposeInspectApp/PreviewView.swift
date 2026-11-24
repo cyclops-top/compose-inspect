@@ -3,6 +3,12 @@ import AppKit
 import SwiftUI
 
 struct PreviewView: View {
+    private struct PageSource: Hashable {
+        let snapshot: UUID
+        let root: String
+        let image: ObjectIdentifier
+    }
+    @State private var showing3D = false
     @Bindable var store: WorkspaceStore
     @GestureState private var pinch: MagnifyGesture.Value?
     private static let zoomRange: ClosedRange<CGFloat> = 0.5...4
@@ -23,166 +29,38 @@ struct PreviewView: View {
     @State private var inputMonitor: Any?
     var body: some View {
         VStack(spacing: 0) {
-            GeometryReader { geometry in
-                let viewport = pinchedViewport(pinch, in: geometry.size)
-                let mapper = CoordinateMapper(imageSize: store.snapshot.pixelSize, canvasSize: geometry.size, zoom: viewport.zoom, pan: viewport.pan)
-                let hovered = !pickingColor && !panning && store.canPickImage ? hoverPoint.flatMap {
-                    mapper.candidates(at: $0, in: store.presentationIndex, imageSize: store.snapshot.pixelSize,
-                                      rootID: store.visibleRoot?.id).first
-                } : nil
-                let measurement = measurement(to: hovered)
-                ZStack(alignment: .topLeading) {
-                    AppStyle.canvas
-                    if let image = store.image {
-                        Image(nsImage: image).resizable().interpolation(pickingColor ? .none : .high)
-                            .frame(width: store.snapshot.pixelSize.width * mapper.scale,
-                                   height: store.snapshot.pixelSize.height * mapper.scale)
-                            .clipShape(RoundedRectangle(cornerRadius: pickingColor ? 0 : 9))
-                            .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
-                            .position(x: geometry.size.width / 2 + viewport.pan.width, y: geometry.size.height / 2 + viewport.pan.height)
-                            .accessibilityLabel("\(store.snapshot.packageName) 的界面截图")
-                        if !pickingColor {
-                            if store.canPickImage && store.showWireframes {
-                                ComponentWireframes(snapshotID: store.snapshot.id, rootID: store.visibleRoot?.id,
-                                                    hidingInternals: store.hideInternalNodes, onlyClickable: store.onlyClickableNodes,
-                                                    presentationRevision: store.presentationRevision,
-                                                    nodes: store.visibleNodes, imageSize: store.snapshot.pixelSize,
-                                                    canvasSize: geometry.size, zoom: viewport.zoom, pan: viewport.pan)
-                                    .equatable().allowsHitTesting(false)
-                            }
-                            Canvas { context, size in
-                                func outline(for node: InspectorNode) -> Path {
-                                    let shape = ComponentStyleDrawing.outlineShape(style: node.style, bounds: node.bounds)
-                                    return ComponentStyleDrawing.path(in: mapper.display(node.bounds), shape: shape, scale: mapper.scale)
-                                }
-                                if let hovered, hovered.id != store.selectedNodeID {
-                                    context.stroke(outline(for: hovered), with: .color(.orange),
-                                                   style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-                                }
-                                if store.canPickImage, let node = store.highlightedNode,
-                                   store.isInVisibleWindow(node.id) {
-                                    let rect = mapper.display(node.bounds)
-                                    let selection = outline(for: node)
-                                    context.fill(selection, with: .color(.accentColor.opacity(0.08)))
-                                    context.stroke(selection, with: .color(.accentColor), lineWidth: 1.5)
-                                    for point in [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
-                                                  CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)] {
-                                        let handle = CGRect(x: point.x - 2.5, y: point.y - 2.5, width: 5, height: 5)
-                                        context.fill(Path(handle), with: .color(.white))
-                                        context.stroke(Path(handle), with: .color(.accentColor), lineWidth: 1)
-                                    }
-                                }
-                                measurement?.draw(in: context, size: size, mapper: mapper)
-                            }.allowsHitTesting(false)
-                        }
-                    } else {
-                        EmptyState(icon: "camera", title: "尚未获取界面", subtitle: "选择设备，待页面稳定后点击右上角相机。")
-                    }
-                }
-                .contentShape(Rectangle())
-                .onChange(of: geometry.size, initial: true) { _, size in
-                    canvasSize = size
-                    store.imagePan = clampedPan(store.imagePan, zoom: store.zoom, in: size)
-                }
-                .onChange(of: store.zoom) { _, zoom in
-                    store.imagePan = clampedPan(store.imagePan, zoom: zoom, in: geometry.size)
-                }
-                .onContinuousHover { phase in
-                    switch phase {
-                    case .active(let point):
-                        hoverPoint = point
-                        updateLoupe(at: point, mapper: mapper)
-                        if panning || pickingColor { updateCursor() }
-                        commandHeld = NSApp.isActive && NSEvent.modifierFlags.contains(.command)
-                    case .ended:
-                        hoverPoint = nil
-                        if panning || pickingColor { NSCursor.arrow.set() }
-                    }
-                }
-                .onChange(of: viewport.pan) { _, _ in
-                    if pickingColor, let hoverPoint {
-                        updateLoupe(at: hoverPoint, mapper: mapper)
-                        updateCursor()
-                    }
-                }
-                .onChange(of: store.snapshot.id) { _, _ in hoverPoint = nil }
-                .onChange(of: store.presentationRevision) { _, _ in hoverPoint = nil }
-                .gesture(SpatialTapGesture().onEnded { event in
-                    guard !spaceHeld, lastDragTranslation == nil else { return }
-                    if pickingColor {
-                        if let hex = sample(at: event.location, mapper: mapper),
-                           store.copy(hex, successNotice: "已复制 " + hex) {
-                            copiedColor = hex
-                            copyCount += 1
-                        }
-                    } else {
-                        store.selectImage(at: event.location, mapper: mapper)
-                    }
-                })
-                .simultaneousGesture(MagnifyGesture()
-                    .updating($pinch) { value, state, _ in state = value }
-                    .onEnded { value in
-                        let viewport = pinchedViewport(value, in: geometry.size)
-                        store.zoom = viewport.zoom
-                        store.imagePan = viewport.pan
-                    })
-                .simultaneousGesture(DragGesture(minimumDistance: 3)
-                    .onChanged { value in
-                        guard panning, store.image != nil else { return }
-                        let previous = lastDragTranslation ?? .zero
-                        lastDragTranslation = value.translation
-                        panBy(dx: value.translation.width - previous.width, dy: value.translation.height - previous.height,
-                              in: geometry.size)
-                        updateCursor()
-                    }
-                    .onEnded { _ in
-                        lastDragTranslation = nil
-                        updateCursor()
-                    })
-                .clipped()
-            }
-            .padding(.horizontal, Self.canvasInset.width).padding(.vertical, Self.canvasInset.height)
-            .background(AppStyle.canvas)
-            .allowsHitTesting(!store.isCapturing)
-            .overlay(alignment: .bottom) {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) {
-                        overlapPicker
-                        Spacer(minLength: 0)
-                        floatingTools.fixedSize()
-                    }
-                    VStack(alignment: .leading, spacing: 6) {
-                        overlapPicker
-                        HStack(spacing: 0) {
-                            Spacer(minLength: 0)
-                            floatingTools
-                        }
-                    }
-                }
-                .padding(12)
-            }
-            .overlay(alignment: .topLeading) {
+            HStack {
+                Picker("预览模式", selection: $showing3D) {
+                    Text("2D").tag(false)
+                    Text("3D").tag(true)
+                }.pickerStyle(.segmented).labelsHidden().fixedSize()
+                    .help("切换截图与整页立体预览")
+                    .disabled(store.isCapturing || (!showing3D && (store.image == nil || store.snapshot.roots.isEmpty)))
+                Spacer()
                 if !pickingColor && store.snapshot.roots.count > 1 {
                     Menu {
                         ForEach(Array(store.snapshot.roots.enumerated()), id: \.element.id) { index, root in
                             Button("窗口 \(index + 1) · \(root.shortName)") { store.windowRootID = root.id; store.hitCandidates = [] }
                         }
-                    } label: { Label("选择窗口", systemImage: "macwindow.on.rectangle") }
-                    .fixedSize().font(.system(size: 11)).padding(10)
+                    } label: { Label("选择窗口", systemImage: "macwindow.on.rectangle").labelStyle(.iconOnly) }
+                    .help("选择预览窗口")
+                    .fixedSize().font(.system(size: 11))
                 }
-            }
-            .overlay(alignment: .top) {
-                if pickingColor, let copiedColor {
-                    Label("已复制 " + copiedColor, systemImage: "checkmark")
-                        .font(.caption.monospaced()).padding(7)
-                        .background(.regularMaterial, in: Capsule()).padding(8)
-                        .allowsHitTesting(false)
+            }.padding(.horizontal, 10).padding(.vertical, 6)
+            Divider()
+            Group {
+                if showing3D {
+                    if let root = store.snapshot.roots.first(where: { $0.id == (store.visibleRoot?.id ?? store.windowRootID) }) ?? store.snapshot.roots.first,
+                       let image = store.image {
+                        InlinePagePreview(node: root, image: image, store: store)
+                            .id(PageSource(snapshot: store.snapshot.id, root: root.id, image: ObjectIdentifier(image)))
+                    } else {
+                        EmptyState(icon: "view.3d", title: "尚无 3D 预览", subtitle: "获取界面后可查看当前窗口的组件层级。")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } else {
+                    screenshotCanvas
                 }
-            }
-            .task(id: copyCount) {
-                guard copiedColor != nil else { return }
-                do { try await Task.sleep(for: .seconds(1)) } catch { return }
-                copiedColor = nil
             }
             .disabled(store.isCapturing)
             .overlay {
@@ -214,6 +92,12 @@ struct PreviewView: View {
                 }
             }
         }
+        .onChange(of: showing3D) { _, active in
+            if active {
+                clearMeasurementHover()
+                store.pickingColor = false
+            }
+        }
         .onChange(of: magnification) { _, value in
             if pickingColor, let bitmap, let cursorPixel {
                 loupeCursor = bitmap.cursor(for: cursorPixel, magnification: value)
@@ -236,6 +120,7 @@ struct PreviewView: View {
             guard inputMonitor == nil else { return }
             inputMonitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown, .keyUp, .scrollWheel, .smartMagnify]) { event in
                 let consumed = MainActor.assumeIsolated {
+                    guard !showing3D else { return false }
                     if event.type == .smartMagnify {
                         guard event.window?.isKeyWindow == true, let hoverPoint,
                               store.image != nil, !store.isCapturing, lastDragTranslation == nil, pinch == nil else { return false }
@@ -284,6 +169,160 @@ struct PreviewView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
             clearMeasurementHover()
+        }
+    }
+
+    private var screenshotCanvas: some View {
+        GeometryReader { geometry in
+            let viewport = pinchedViewport(pinch, in: geometry.size)
+            let mapper = CoordinateMapper(imageSize: store.snapshot.pixelSize, canvasSize: geometry.size, zoom: viewport.zoom, pan: viewport.pan)
+            let hovered = !pickingColor && !panning && store.canPickImage ? hoverPoint.flatMap {
+                mapper.candidates(at: $0, in: store.presentationIndex, imageSize: store.snapshot.pixelSize,
+                                  rootID: store.visibleRoot?.id).first
+            } : nil
+            let measurement = measurement(to: hovered)
+            ZStack(alignment: .topLeading) {
+                AppStyle.canvas
+                if let image = store.image {
+                    Image(nsImage: image).resizable().interpolation(pickingColor ? .none : .high)
+                        .frame(width: store.snapshot.pixelSize.width * mapper.scale,
+                               height: store.snapshot.pixelSize.height * mapper.scale)
+                        .clipShape(RoundedRectangle(cornerRadius: pickingColor ? 0 : 9))
+                        .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+                        .position(x: geometry.size.width / 2 + viewport.pan.width, y: geometry.size.height / 2 + viewport.pan.height)
+                        .accessibilityLabel("\(store.snapshot.packageName) 的界面截图")
+                    if !pickingColor {
+                        if store.canPickImage && store.showWireframes {
+                            ComponentWireframes(snapshotID: store.snapshot.id, rootID: store.visibleRoot?.id,
+                                                hidingInternals: store.hideInternalNodes, onlyClickable: store.onlyClickableNodes,
+                                                presentationRevision: store.presentationRevision,
+                                                nodes: store.visibleNodes, imageSize: store.snapshot.pixelSize,
+                                                canvasSize: geometry.size, zoom: viewport.zoom, pan: viewport.pan)
+                                .equatable().allowsHitTesting(false)
+                        }
+                        Canvas { context, size in
+                            func outline(for node: InspectorNode) -> Path {
+                                let shape = ComponentStyleDrawing.outlineShape(style: node.style, bounds: node.bounds)
+                                return ComponentStyleDrawing.path(in: mapper.display(node.bounds), shape: shape, scale: mapper.scale)
+                            }
+                            if let hovered, hovered.id != store.selectedNodeID {
+                                context.stroke(outline(for: hovered), with: .color(.orange),
+                                               style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                            }
+                            if store.canPickImage, let node = store.highlightedNode,
+                               store.isInVisibleWindow(node.id) {
+                                let rect = mapper.display(node.bounds)
+                                let selection = outline(for: node)
+                                context.fill(selection, with: .color(.accentColor.opacity(0.08)))
+                                context.stroke(selection, with: .color(.accentColor), lineWidth: 1.5)
+                                for point in [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
+                                              CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)] {
+                                    let handle = CGRect(x: point.x - 2.5, y: point.y - 2.5, width: 5, height: 5)
+                                    context.fill(Path(handle), with: .color(.white))
+                                    context.stroke(Path(handle), with: .color(.accentColor), lineWidth: 1)
+                                }
+                            }
+                            measurement?.draw(in: context, size: size, mapper: mapper)
+                        }.allowsHitTesting(false)
+                    }
+                } else {
+                    EmptyState(icon: "camera", title: "尚未获取界面", subtitle: "选择设备，待页面稳定后点击右上角相机。")
+                }
+            }
+            .contentShape(Rectangle())
+            .onChange(of: geometry.size, initial: true) { _, size in
+                canvasSize = size
+                store.imagePan = clampedPan(store.imagePan, zoom: store.zoom, in: size)
+            }
+            .onChange(of: store.zoom) { _, zoom in
+                store.imagePan = clampedPan(store.imagePan, zoom: zoom, in: geometry.size)
+            }
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let point):
+                    hoverPoint = point
+                    updateLoupe(at: point, mapper: mapper)
+                    if panning || pickingColor { updateCursor() }
+                    commandHeld = NSApp.isActive && NSEvent.modifierFlags.contains(.command)
+                case .ended:
+                    hoverPoint = nil
+                    if panning || pickingColor { NSCursor.arrow.set() }
+                }
+            }
+            .onChange(of: viewport.pan) { _, _ in
+                if pickingColor, let hoverPoint {
+                    updateLoupe(at: hoverPoint, mapper: mapper)
+                    updateCursor()
+                }
+            }
+            .onChange(of: store.snapshot.id) { _, _ in hoverPoint = nil }
+            .onChange(of: store.presentationRevision) { _, _ in hoverPoint = nil }
+            .gesture(SpatialTapGesture().onEnded { event in
+                guard !spaceHeld, lastDragTranslation == nil else { return }
+                if pickingColor {
+                    if let hex = sample(at: event.location, mapper: mapper),
+                       store.copy(hex, successNotice: "已复制 " + hex) {
+                        copiedColor = hex
+                        copyCount += 1
+                    }
+                } else {
+                    store.selectImage(at: event.location, mapper: mapper)
+                }
+            })
+            .simultaneousGesture(MagnifyGesture()
+                .updating($pinch) { value, state, _ in state = value }
+                .onEnded { value in
+                    let viewport = pinchedViewport(value, in: geometry.size)
+                    store.zoom = viewport.zoom
+                    store.imagePan = viewport.pan
+                })
+            .simultaneousGesture(DragGesture(minimumDistance: 3)
+                .onChanged { value in
+                    guard panning, store.image != nil else { return }
+                    let previous = lastDragTranslation ?? .zero
+                    lastDragTranslation = value.translation
+                    panBy(dx: value.translation.width - previous.width, dy: value.translation.height - previous.height,
+                          in: geometry.size)
+                    updateCursor()
+                }
+                .onEnded { _ in
+                    lastDragTranslation = nil
+                    updateCursor()
+                })
+            .clipped()
+        }
+        .padding(.horizontal, Self.canvasInset.width).padding(.vertical, Self.canvasInset.height)
+        .background(AppStyle.canvas)
+        .allowsHitTesting(!store.isCapturing)
+        .overlay(alignment: .bottom) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    overlapPicker
+                    Spacer(minLength: 0)
+                    floatingTools.fixedSize()
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    overlapPicker
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        floatingTools
+                    }
+                }
+            }
+            .padding(12)
+        }
+        .overlay(alignment: .top) {
+            if pickingColor, let copiedColor {
+                Label("已复制 " + copiedColor, systemImage: "checkmark")
+                    .font(.caption.monospaced()).padding(7)
+                    .background(.regularMaterial, in: Capsule()).padding(8)
+                    .allowsHitTesting(false)
+            }
+        }
+        .task(id: copyCount) {
+            guard copiedColor != nil else { return }
+            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            copiedColor = nil
         }
     }
 

@@ -1,6 +1,7 @@
 import Foundation
 
 public struct SDKInspectorClient: Sendable {
+    public static let supportedSDKVersion = "0.1.2"
     private let adb: InspectorClient
     public init(tools: InspectorToolchain) { adb = InspectorClient(tools: tools) }
 
@@ -39,7 +40,10 @@ public struct SDKInspectorClient: Sendable {
     static func validateResponse(_ data: Data, package: String, expectedPID: Int64? = nil) throws -> InspectorDocument {
         let document = try InspectorDocument(data: data)
         if let error = document.root["error"]?.string { throw CommandFailure.failed("SDK：\(error)") }
-        guard document.root["protocolVersion"]?.int64 == 1 else { throw CommandFailure.failed("SDK 协议版本不兼容。") }
+        let reported = document.root["sdkVersion"]?.string
+        guard reported == supportedSDKVersion, document.root["protocolVersion"]?.int64 == 1 else {
+            throw CommandFailure.failed("当前 CompScope 仅支持采集 SDK \(supportedSDKVersion)（协议 1）。目标应用报告 SDK \(reported ?? "未知")，协议 \(document.root["protocolVersion"]?.display ?? "未知")。请使用对应 SDK 重新构建调试包。")
+        }
         guard document.root["packageName"]?.string == package else { throw CommandFailure.failed("SDK 响应包名与目标不一致。") }
         guard let pid = document.root["pid"]?.int64, pid > 0 else { throw CommandFailure.failed("SDK 响应缺少有效进程标识。") }
         if let expectedPID, pid != expectedPID { throw CommandFailure.failed("采集期间应用进程已变化。") }
@@ -73,11 +77,13 @@ public struct SDKInspectorClient: Sendable {
             throw CommandFailure.failed("SDK 不支持跳过悬浮窗，请更新 SDK。")
         }
         let pid = hello.root["pid"]!.int64!
-        let compressed = hello.root["capabilities"]?.array?.contains(.string("gzip-json-v1")) == true
+        guard hello.root["capabilities"]?.array?.contains(.string("gzip-json-v1")) == true else {
+            throw CommandFailure.failed("SDK 缺少压缩采集能力，请使用开发版本 \(Self.supportedSDKVersion)。")
+        }
         await progress("通过 SDK 读取组件树…")
         let readStarted = Date()
-        let data = try await SDKTransport.request(port: port, command: compressed ? "capture-gzip" : "capture",
-                                                  timeout: 20, compressed: compressed, skipOverlayWindows: skipOverlayWindows)
+        let data = try await SDKTransport.request(port: port, command: "capture-gzip",
+                                                  timeout: 20, compressed: true, skipOverlayWindows: skipOverlayWindows)
         let readFinished = Date()
         await progress("获取截图并解析 SDK 响应…")
         // The UI tree is already captured. Screenshot I/O and JSON parsing can overlap safely.
@@ -90,7 +96,7 @@ public struct SDKInspectorClient: Sendable {
         let snapshot = try SDKSnapshotImporter.decode(document, imageSize: size, packageName: package)
         let importFinished = Date()
         var logs = ["采集后端：SDK \(hello.root["sdkVersion"]?.string ?? "未知版本")。",
-                    compressed ? "传输：gzip-json-v1 压缩响应。" : "传输：兼容 JSON 响应。",
+                    "传输：gzip-json-v1 压缩响应。",
                     String(format: "耗时：读取 %.2f 秒；截图与解析 %.2f 秒；建树 %.2f 秒。",
                            readFinished.timeIntervalSince(readStarted), importStarted.timeIntervalSince(readFinished),
                            importFinished.timeIntervalSince(importStarted)),

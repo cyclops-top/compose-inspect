@@ -9,6 +9,7 @@ android {
         applicationId = "dev.composeinspect.sample"
         minSdk = 26
         targetSdk = 36
+        testInstrumentationRunner = "dev.composeinspect.sample.SemanticsReadBenchmark"
         versionCode = 1
         versionName = "0.1"
     }
@@ -21,6 +22,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.foundation:foundation:$composeVersion")
     debugImplementation(project(":inspector-sdk"))
+    androidTestImplementation(project(":compose-collector"))
+    androidTestImplementation(project(":protocol"))
 }
 
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }

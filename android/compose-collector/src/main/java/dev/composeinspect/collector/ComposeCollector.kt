@@ -37,7 +37,6 @@ object ComposeCollector {
         }
         val seen = Collections.newSetFromMap(IdentityHashMap<CompositionData, Boolean>())
         val valueEncoder = ValueEncoder()
-        val interactions = LayoutInteractions()
         // Lazy item tables share source metadata, but never cache captured application values.
         val contextCache = ContextCache()
         var styleNanos = 0L
@@ -75,6 +74,7 @@ object ComposeCollector {
                     styleCatalogs.add(it)
                     styleCatalogs.lastIndex
                 }
+                val interactions = LayoutInteractions(if (data.isNullOrEmpty()) null else view as? androidx.compose.ui.node.RootForTest)
                 data?.filterIsInstance<CompositionData>()?.forEach { table ->
                     if (seen.add(table)) {
                         try {
@@ -120,7 +120,7 @@ object ComposeCollector {
                                 val encodingStarted = System.nanoTime()
                                 val capturedParameters = params.map {
                                     val valueStarted = System.nanoTime()
-                                    val encodedValue = valueEncoder.encodeCaptured(it.value)
+                                    val encodedValue = LazyViewport.capture(name, it.name, it.value) ?: valueEncoder.encodeCaptured(it.value)
                                     valueNanos += System.nanoTime() - valueStarted
                                     ParameterDto(it.name, encodedValue, it.inlineClass, it.fromDefault,
                                         it.static, it.compared, it.stable)

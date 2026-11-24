@@ -10,7 +10,7 @@ val composeVersion = providers.gradleProperty("composeVersion").getOrElse("1.12.
 dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
-    testImplementation("androidx.compose.foundation:foundation:$composeVersion")
+    implementation("androidx.compose.foundation:foundation:$composeVersion")
     implementation(project(":protocol"))
     implementation("androidx.compose.ui:ui-tooling-data:$composeVersion")
     implementation("androidx.compose.ui:ui:$composeVersion")

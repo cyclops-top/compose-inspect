@@ -160,6 +160,20 @@ enum AppStyle {
     static let selected = Color.accentColor.opacity(0.12)
 }
 
+struct IconButton: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+        }
+        .labelStyle(.iconOnly)
+        .help(title)
+    }
+}
+
 struct SectionCaption: View {
     let text: String
     var body: some View {

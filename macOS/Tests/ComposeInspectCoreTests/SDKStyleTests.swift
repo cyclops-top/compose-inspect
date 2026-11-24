@@ -27,7 +27,7 @@ final class SDKStyleTests: XCTestCase {
             return InspectorJSON.object(fields)
         }
         let response: InspectorJSON = .object([
-            "protocolVersion": .number("1"), "packageName": .string("dev.sample"), "pid": .number("1"),
+            "protocolVersion": .number("1"), "sdkVersion": .string("0.1.2"), "packageName": .string("dev.sample"), "pid": .number("1"),
             "complete": .bool(true), "diagnostics": .array([]), "windows": .array([.object([
                 "screenOffset": .array([.number("30"), .number("50")]), "tables": .array(indexed),
                 "styleCatalogs": .array(catalogs)

@@ -5,6 +5,10 @@ import Observation
 @MainActor @Observable
 final class WorkspaceStore {
     private(set) var snapshot: InspectorSnapshot
+    var observation: ComponentObservation?
+    func observe(_ field: NodeParameter, on node: InspectorNode) {
+        observation = ComponentObservation(node: node, field: field, snapshot: snapshot)
+    }
     private var captureRevision = UUID()
     private var captureRequestID = UUID()
 
@@ -261,6 +265,11 @@ final class WorkspaceStore {
         selectNode(nodeID)
     }
 
+    func selectPageComponent(_ nodeID: String) {
+        guard !isCapturing else { return }
+        selectNode(nodeID)
+    }
+
     private func selectNode(_ nodeID: String) {
         imageHitCycle.reset()
         guard snapshotIndex.byID[nodeID] != nil else { return }
@@ -396,14 +405,118 @@ final class WorkspaceStore {
     }
 
     var captureProgressText: String {
+        if verificationTask != nil { return verificationResult ?? "正在复核点击目标…" }
         if deviceSession.resolvingCaptureTarget { return "正在定位应用…" }
         return deviceSession.progress.isEmpty ? "正在抓取界面信息…" : deviceSession.progress
     }
 
     private(set) var isCapturing = false
+    private(set) var verificationResult: String?
+    private var verificationTask: Task<Void, Never>?
+
+    func verifyClick(expected: String, settings: ToolchainSettings) async {
+        guard !isCapturing, !deviceSession.resolvingCaptureTarget,
+              !expected.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let node = selectedNode, let device = deviceSession.selectedDevice,
+              let action = node.observableFields.first(where: { $0.group == .unmergedSemantics && $0.name == "OnClick" }) else { return }
+        isCapturing = true
+        defer { isCapturing = false; verificationTask = nil }
+        let baseline = snapshot
+        let baselineIndex = snapshotIndex
+        var phase = "尚未点击"
+        let started = ContinuousClock.now
+        var expired = false
+        verificationResult = "正在复核目标"
+        let worker = Task { @MainActor in
+            do {
+                let tools = try settings.resolvedTools()
+                let sdk = SDKInspectorClient(tools: tools)
+                let adb = InspectorClient(tools: tools)
+                let original = try ClickTarget(node: node, snapshot: baseline)
+                @MainActor func checkTarget() throws {
+                    try Task.checkCancellation()
+                    guard device.serial == original.serial, deviceSession.selectedSerial == original.serial,
+                          deviceSession.packageName == original.package else {
+                        throw CommandFailure.failed("当前设备或应用已切换。")
+                    }
+                }
+                @MainActor func readSnapshot() async throws -> CapturedSnapshot {
+                    try checkTarget()
+                    return try await sdk.capture(serial: original.serial, package: original.package, deviceName: device.model)
+                }
+                let before = try await readSnapshot().snapshot
+                let index = InspectorSnapshotIndex(before)
+                var probe = ComponentObservation(node: node, field: action, snapshot: baseline)
+                guard let id = probe.advance(from: baseline, index: baselineIndex, to: before, index: index),
+                      let fresh = index.byID[id], fresh.clickTargetID == node.clickTargetID else {
+                    throw CommandFailure.failed("重新采集后无法唯一确认点击实例。")
+                }
+                let target = try ClickTarget(node: fresh, snapshot: before)
+                guard target.label == original.label, target.screen == original.screen else {
+                    throw CommandFailure.failed("目标内容或屏幕尺寸已变化，请重新选择。")
+                }
+                try await adb.checkTap(target, expected: expected)
+                try checkTarget()
+                phase = "点击命令已提交，执行结果未知"
+                verificationResult = phase
+                _ = try await adb.adb(["-s", target.serial, "shell", "input", "-d", "0", "tap",
+                                      String(Int(target.point.x)), String(Int(target.point.y))], timeout: 3)
+                phase = "已点击一次"
+                verificationResult = phase + "，等待「" + expected + "」"
+                var checks = 0
+                var satisfied = false
+                // Reserve four seconds of the overall budget for the final SDK snapshot.
+                let pollDeadline = started + .seconds(16)
+                while ContinuousClock.now < pollDeadline {
+                    try checkTarget()
+                    let remaining = ContinuousClock.now.duration(to: pollDeadline).components
+                    let seconds = Double(remaining.seconds) + Double(remaining.attoseconds) / 1e18
+                    do {
+                        satisfied = try await adb.expectedTextVisible(expected, target: target, timeout: min(6, max(0, seconds)))
+                    } catch CommandFailure.timedOut {
+                        if ContinuousClock.now >= pollDeadline { break }
+                        throw CommandFailure.timedOut
+                    }
+                    if satisfied { break }
+                    checks += 1
+                    verificationResult = phase + " · 已检查 " + String(checks) + " 次，尚未出现「" + expected + "」"
+                    try await Task.sleep(until: min(pollDeadline, .now + .milliseconds(min(2000, checks * 500))), clock: .continuous)
+                }
+                phase += satisfied ? "，已观察到「" + expected + "」" : "，条件等待超时 · 未观察到「" + expected + "」"
+                verificationResult = phase + "，获取结果快照中"
+                let final = try await readSnapshot()
+                try checkTarget()
+                guard final.snapshot.document?.root["sdkCapture"]?["pid"]?.int64 == target.pid else {
+                    throw CommandFailure.failed("目标进程发生变化。")
+                }
+                try await applyCapture(final, requiringCurrentTarget: true)
+                try checkTarget()
+                guard snapshot.id == final.snapshot.id else { throw CancellationError() }
+                if selectedNodeID == nil,
+                   let matched = probe.advance(from: before, index: index, to: snapshot, index: snapshotIndex),
+                   presentationIndex.byID[matched] != nil { selectNode(matched) }
+                verificationResult = (satisfied ? "验证通过 · " : "") + phase + " · 已获取结果快照"
+                notice = "单次点击验证完成"
+            } catch {
+                let prior = verificationResult
+                let reason = expired ? "20 秒预算已用尽" : (Task.isCancelled ? "已停止" : error.localizedDescription)
+                verificationResult = (expired ? (prior ?? phase) : phase) + " · " + reason
+                notice = "单次点击验证结束"
+            }
+        }
+        verificationTask = worker
+        let deadline = Task { @MainActor in
+            try await Task.sleep(for: .seconds(20))
+            expired = true
+            worker.cancel()
+        }
+        await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
+        deadline.cancel()
+    }
 
     func stopCapture() {
         guard isCapturing else { return }
+        verificationTask?.cancel()
         captureRequestID = UUID()
         captureRevision = UUID()
         deviceSession.cancel()
@@ -415,6 +528,7 @@ final class WorkspaceStore {
         guard !isCapturing, !deviceSession.resolvingCaptureTarget else { return }
         isCapturing = true
         defer { isCapturing = false }
+        verificationResult = nil
         captureRequestID = UUID()
         let requestID = captureRequestID
         discardCaptureIssues()
@@ -433,6 +547,7 @@ final class WorkspaceStore {
             if captureRequestID == requestID { notice = "已取消抓取。" }
         } catch {
             if captureRequestID == requestID {
+                observation?.interrupt("本次采集失败")
                 notice = "获取界面失败"
                 errorMessage = error.localizedDescription
             }
@@ -471,12 +586,15 @@ final class WorkspaceStore {
         discardCaptureIssues()
         cancelFilterIndexes()
         rawPresentation = nil
+        let observedNode = observation?.advance(from: snapshot, index: snapshotIndex,
+                                                to: captured.snapshot, index: indexes.full)
         snapshot = captured.snapshot
         image = newImage
         search = ""
         installIndexes(indexes)
         expandedNodes = Set(snapshot.roots.map(\.id))
         windowRootID = snapshot.roots.first?.id
+        if let observedNode, presentationIndex.byID[observedNode] != nil { selectNode(observedNode) }
         fitImage()
         notice = "已获取界面"
     }

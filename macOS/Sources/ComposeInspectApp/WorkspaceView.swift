@@ -41,7 +41,7 @@ struct WorkspaceView: View {
                             }.disabled(!device.online)
                         }
                     } label: { HStack(spacing: 5) { Image(systemName: "iphone"); Text(store.deviceSession.selectedDevice?.model ?? "选择设备") } }
-                    .disabled(store.deviceSession.capturing || store.deviceSession.resolvingCaptureTarget)
+                    .disabled(store.isCapturing || store.deviceSession.resolvingCaptureTarget)
                     .help("使用设置中的 ADB 查找设备，离线与未授权设备不可抓取")
                     Menu {
                         Toggle("截图前自动获取前台应用", isOn: Binding(
@@ -59,7 +59,7 @@ struct WorkspaceView: View {
                         }.disabled(store.deviceSession.automaticallySelectForeground)
                         .help("按前台 Activity 定位主应用；其他应用的悬浮窗请通过应用列表手动选择。")
                     } label: { HStack(spacing: 5) { Image(systemName: "app"); Text(store.deviceSession.automaticallySelectForeground ? "自动获取前台应用" : (store.deviceSession.packageName.isEmpty ? "选择应用" : store.deviceSession.packageName)) } }
-                    .disabled(store.deviceSession.capturing || store.deviceSession.resolvingCaptureTarget)
+                    .disabled(store.isCapturing || store.deviceSession.resolvingCaptureTarget)
                 }.font(.system(size: 12))
             }
             if #available(macOS 26, *) {
@@ -79,7 +79,7 @@ struct WorkspaceView: View {
                     .help("下次采集时排除系统类型悬浮窗；保留普通对话框和弹出菜单。截图仍包含屏幕上可见的悬浮窗。")
                     if let metadata = store.snapshot.captureMetadata {
                         Button { showingCaptureMethod.toggle() } label: {
-                            Label("SDK", systemImage: "bolt.fill").foregroundStyle(.green)
+                            Label("SDK 采集信息", systemImage: "bolt.fill").labelStyle(.iconOnly).foregroundStyle(.green)
                         }
                         .help("查看当前结果的采集方式")
                         .popover(isPresented: $showingCaptureMethod) {
@@ -365,7 +365,7 @@ private struct RecentProjectsView: View {
                         if path == settings.androidProjectPath {
                             Label("当前", systemImage: "checkmark").foregroundStyle(.secondary)
                         } else {
-                            Button("切换") {
+                            IconButton(title: "切换到 \((path as NSString).lastPathComponent)", systemImage: "arrow.right.circle") {
                                 settings.openProject(path)
                                 if settings.androidProjectPath == path { dismiss() }
                             }
@@ -376,7 +376,7 @@ private struct RecentProjectsView: View {
                 }
             }
             HStack {
-                Button("清空最近记录") { settings.clearRecentProjects() }.disabled(settings.recentProjects.isEmpty)
+                IconButton(title: "清空最近记录", systemImage: "trash") { settings.clearRecentProjects() }.disabled(settings.recentProjects.isEmpty)
                 Spacer()
                 Button("完成") { dismiss() }.keyboardShortcut(.defaultAction)
             }

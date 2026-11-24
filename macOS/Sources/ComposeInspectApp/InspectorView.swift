@@ -6,12 +6,14 @@ struct InspectorView: View {
     @Environment(ToolchainSettings.self) private var tools
     private enum Tab: String, CaseIterable {
         case basic = "基础"
+        case state = "状态"
         case style = "样式"
         case location = "定位"
         case parameters = "参数"
     }
 
-    @State private var selectedTab = Tab.basic
+    @State private var expectedText = ""
+    @State private var selectedTab = Tab.state
     @State private var expandedGroups: Set<NodeParameter.Group> = [.layout, .font, .modifier, .parameter, .attribute]
     var body: some View {
         VStack(spacing: 0) {
@@ -23,6 +25,26 @@ struct InspectorView: View {
                     .accessibilityLabel("查看完整 JSON")
                     .disabled(store.snapshot.document == nil)
             }.padding(.horizontal, 14).frame(height: 35).overlay(alignment: .bottom) { Divider() }
+            if let result = store.verificationResult {
+                Text(result).font(.caption).textSelection(.enabled).padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Divider()
+            }
+            if let watch = store.observation {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("\(watch.component) · \(watch.group.rawValue) \(watch.field)").font(.caption.bold())
+                        Spacer()
+                        IconButton(title: "结束关注", systemImage: "eye.slash") { store.observation = nil }.buttonStyle(.borderless)
+                    }
+                    if let before = watch.previous {
+                        Text("上次 \(before.time.formatted(date: .omitted, time: .standard)) · \(before.value)")
+                    }
+                    Text("最近有效 \(watch.latest.time.formatted(date: .omitted, time: .standard)) · \(watch.latest.value)")
+                    Text(watch.detail).foregroundStyle(.secondary)
+                }.font(.caption).textSelection(.enabled).padding(10)
+                Divider()
+            }
             if let node = store.selectedNode {
                 HStack {
                     Text(node.shortName)
@@ -54,11 +76,46 @@ struct InspectorView: View {
                             if let style = node.style {
                                 BoxPreview(style: style)
                             }
+                        case .state:
+                            if node.isClickable, store.snapshot.captureMetadata != nil {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    SectionCaption(text: "单次点击验证")
+                                    TextField("点击后出现的完整文本或描述", text: $expectedText)
+                                        .textFieldStyle(.roundedBorder)
+                                    IconButton(title: "点击一次并验证", systemImage: "hand.tap") {
+                                        let condition = expectedText
+                                        Task { await store.verifyClick(expected: condition, settings: tools) }
+                                    }.disabled(expectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                }.disabled(store.isCapturing)
+                                Divider()
+                            }
+                            if LazyViewport.componentNames.contains(node.shortName) { viewportSection(node) }
+                            let fields = node.observableFields
+                            if fields.isEmpty { Text("本次采集没有可观察的标量字段").foregroundStyle(.secondary) }
+                            ForEach(fields) { field in
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(field.name).font(.caption.bold())
+                                        Text(field.group == .unmergedSemantics || field.group == .mergedSemantics
+                                             ? "\(field.group.rawValue) · 关联布局" : field.group.rawValue).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(field.original?["value"] == .null ? "null" : field.value).textSelection(.enabled)
+                                    IconButton(title: "关注\(field.name)", systemImage: "eye") { store.observe(field, on: node) }
+                                        .disabled(store.isCapturing)
+                                }
+                            }
+                            if node.kind == "ComposeNode", !fields.contains(where: { $0.group == .mergedSemantics }) {
+                                let reason = node.parameters.first { $0.name == "合并语义采集限制" || $0.name == "交互采集限制" }
+                                Text(reason.map { "\($0.name) · \($0.value)" } ?? "未取得此组件独立的合并语义节点")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         case .style:
                             if let text = TextComponentPreview(node: node), let content = text.content {
                                 TextComponentPreviewView(content: content, preview: text)
                             }
-                            ComponentStylePreview(node: node, ancestors: Array(store.snapshotIndex.path(to: node.id).dropLast()))
+                            ComponentStylePreview(node: node, ancestors: Array(store.snapshotIndex.path(to: node.id).dropLast()),
+                                                  snapshotID: store.snapshot.id, screenshot: store.image)
                         case .location:
                             locationDetails(for: node)
                         case .parameters:
@@ -79,6 +136,31 @@ struct InspectorView: View {
                 EmptyState(icon: "cursorarrow", title: "未选中组件", subtitle: "点击截图或左侧组件树，查看参数。")
             }
         }.background(AppStyle.background)
+    }
+
+    @ViewBuilder
+    private func viewportSection(_ node: InspectorNode) -> some View {
+        SectionCaption(text: "列表视口")
+        if let viewport = LazyViewport(node: node) {
+            Text("\(viewport.axis) · \(viewport.start)…\(viewport.end) px")
+            Text("state.layoutInfo · 可见条目 \(viewport.count) 个")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(viewport.items) { item in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("索引 \(item.id) · 主轴\(item.extent)")
+                    Text(item.gridBounds ?? "主轴偏移 \(item.offset) px · 长度 \(item.size) px")
+                    Text(item.key.map { "条目 key " + $0 } ?? "key 未提供标量值")
+                }.font(.caption).textSelection(.enabled)
+            }
+            if viewport.items.count < viewport.count {
+                Text("已采集前 \(viewport.items.count) 项").font(.caption)
+            }
+            Text("相交范围按列表主轴计算。祖先裁剪与窗口遮挡需结合截图判断。")
+                .font(.caption).foregroundStyle(.secondary)
+        } else {
+            Text("本次未取得该列表的 state.layoutInfo").font(.caption).foregroundStyle(.secondary)
+        }
+        Divider()
     }
 
     @ViewBuilder
@@ -190,6 +272,10 @@ private struct BoxPreview: View {
 private struct ComponentStylePreview: View {
     let node: InspectorNode
     let ancestors: [InspectorNode]
+    let snapshotID: UUID
+    let screenshot: NSImage?
+    @State private var showingLayers = false
+    @FocusState private var previewFocused: Bool
     var includeInternalStyles = true
 
     private var internalStyles: [InspectorNode] {
@@ -225,7 +311,24 @@ private struct ComponentStylePreview: View {
     private func number(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(0...1))) }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionCaption(text: includeInternalStyles ? "当前组件 · 自身样式" : "内部组件 · 自身样式")
+            HStack {
+                SectionCaption(text: includeInternalStyles ? "当前组件 · 自身样式" : "内部组件 · 自身样式")
+                Spacer()
+                IconButton(title: "立体样式预览", systemImage: "square.3.layers.3d") { showingLayers = true }
+                    .focused($previewFocused)
+                    .disabled(node.style?.layers.isEmpty != false)
+            }
+            .background {
+                if let style = node.style, !style.layers.isEmpty {
+                    StylePreviewSheet(isPresented: $showingLayers, onDismiss: { previewFocused = true }) {
+                        ExplodedStylePreview(name: node.shortName, style: style, screenshot: screenshot,
+                                             bounds: node.bounds, dismiss: { showingLayers = false })
+                    }
+                }
+            }
+            .onChange(of: snapshotID) { showingLayers = false }
+            .onChange(of: node.id) { showingLayers = false }
+            if node.style == nil { Text("未取得组件样式").foregroundStyle(.secondary) }
             if includeInternalStyles && node.isClickable {
                 Text("点击布局范围 · x \(number(node.bounds.minX)) y \(number(node.bounds.minY)) · \(number(node.bounds.width)) × \(number(node.bounds.height)) px")
                     .foregroundStyle(.secondary)
@@ -235,7 +338,7 @@ private struct ComponentStylePreview: View {
                     BoxPreview(style: style)
                 }
                 if style.layers.isEmpty {
-                    Text("当前布局没有采集到 padding、背景或裁剪层。")
+                    Text("未采集到外观层")
                         .foregroundStyle(.secondary)
                 }
                 ForEach(style.layers) { layer in
@@ -290,7 +393,7 @@ private struct ComponentStylePreview: View {
                         Text("归属：" + child.name).fontWeight(.medium)
                         if let source = child.source { Text(source.text).foregroundStyle(.secondary) }
                         Text("位置：x \(number(child.bounds.minX)) y \(number(child.bounds.minY)) · \(number(child.bounds.width)) × \(number(child.bounds.height)) px").foregroundStyle(.secondary)
-                        ComponentStylePreview(node: child, ancestors: [], includeInternalStyles: false)
+                        ComponentStylePreview(node: child, ancestors: [], snapshotID: snapshotID, screenshot: screenshot, includeInternalStyles: false)
                     }.padding(8)
                         .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 6))
                 }
@@ -300,7 +403,7 @@ private struct ComponentStylePreview: View {
 
 }
 
-private func styleColor(_ hex: String) -> Color? {
+func styleColor(_ hex: String) -> Color? {
     guard hex.count == 8, let value = UInt32(hex, radix: 16) else { return nil }
     return Color(.sRGB, red: Double((value >> 16) & 255) / 255, green: Double((value >> 8) & 255) / 255,
                  blue: Double(value & 255) / 255, opacity: Double(value >> 24) / 255)
@@ -360,7 +463,7 @@ private struct StyleLayerCanvas: View {
 
 /// A spatial box model: values are placed on their physical sides, without implying
 /// that the schematic spacing is to scale or equals the measured layout allocation.
-private struct PaddingBoxDiagram: View {
+struct PaddingBoxDiagram: View {
     let insets: ComponentStyle.Insets
     let title: String
     private func value(_ number: Double) -> String { number.formatted(.number.precision(.fractionLength(0...1))) }
@@ -396,7 +499,7 @@ private struct PaddingBoxDiagram: View {
     }
 }
 
-private struct CornerRadiiDiagram: View {
+struct CornerRadiiDiagram: View {
     let shape: ComponentStyle.Shape
     let density: Double
     let bounds: CGRect

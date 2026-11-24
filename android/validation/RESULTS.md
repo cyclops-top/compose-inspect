@@ -10,3 +10,73 @@
 - 本次记录对应两个分别编译的示例，尚未验证同一预编译 AAR 跨 Compose、Kotlin 编译器及不同宿主运行的兼容性。
 
 当前验证步骤见 [SDK 真机验证](../README.md#sdk-真机验证)。
+
+## 桌面组件状态观察 · 2026-11-24
+
+在 API 37 的 arm64 模拟器上，以默认 Compose 1.12.1 构建 debug 示例，使用运行时 SDK 0.1.2、协议 1。桌面采集入口在握手和读取响应时均校验这个版本。选中组件后，右侧「状态」显示 SDK 实际返回的顶层标量参数和交互语义，点击「关注」后可通过再次获取界面比较一个字段。
+
+[六份可回放的 SDK 响应](observation/) 保留了原始字段和值。下表耗时取自每份响应的 Android 主线程 collectMs，各场景单次采样。
+
+| 样本 | 观测结果 | 主线程采集 |
+|---|---|---:|
+| baseline | ParameterCard.count = 7 | 55.2 ms |
+| unchanged | 同一页面再次读取，count = 7 | 20.5 ms |
+| incremented | 点击卡片一次，count = 8 | 18.2 ms |
+| scrolled | 列表滚动，首个可见索引从 0 变为 6，偏移 −9 px | 18.7 ms |
+| dialog | 重启示例进入 Dialog，原进程的观测中断 | 18.1 ms |
+| interactions | LazyRow 和网格提供视口、默认 key 不编码；子节点原始三态与父级合并语义分别读取 | 70.4 ms |
+
+运行 `swift test --package-path macOS --filter ComponentObservationTests` 可离线验证计数读数、列表复用、进程切换和版本提示。调用点和父链双向唯一时，桌面将比较标为需复核。低端物理设备耗时仍待实测。
+
+## 定向研究 · 2026-11-24
+
+在 API 37 arm64 模拟器、独立样例包上分别构建 Compose 1.12.1 与 1.10.6。两次构建均使用 SDK 0.1.2 和协议 1。第二个构建用于实验对照，桌面端的版本校验规则保持精确匹配。性能样例固定显示 24 张卡片，每张有 6 层嵌套。
+
+### 会话开销
+
+每个模式先测 5 次目标进程冷启后的首次采集，再在同一进程测 20 次热采。冷热分别交替模式顺序。冷启行计时从申请转发开始，不包含启动 Activity 的时间。热复用模式只保留已握手的 ADB forward，各次请求仍独立建 socket，逐次核对包、SDK、协议和 PID。计时包含主机接收、解压和 Python JSON 解析，不包含截图或桌面渲染。
+
+| Compose | 冷采单次连接 / 首次建会话，中位 ms | 热采单次连接，中位 / P95 ms | 热采复用，中位 / P95 ms |
+|---|---:|---:|---:|
+| 1.12.1 | 206.94 / 213.00 | 75.34 / 93.10 | 48.81 / 72.88 |
+| 1.10.6 | 206.54 / 203.24 | 71.03 / 86.33 | 44.97 / 83.51 |
+
+100 次请求全部成功。每个版本 40 份热采窗口树的规范化 JSON 哈希一致。主线程 collectMs 的热采中位数分别为 23.10 / 25.77 ms（1.12.1）与 24.39 / 23.72 ms（1.10.6）。本轮继续按需建连：单次点击流程只有两次 SDK 采集，一次复用可节省约 26 ms，UI Automator 等待、截图和主线程遍历仍在。保存连接的收益可在以后需要连续多次读取时重新评估。[会话原型](../tools/benchmark_session.py) · [1.12.1 原始记录](session-1.12.1.json) · [1.10.6 原始记录](session-1.10.6.json)
+
+### 轻量文本读取
+
+同一 instrumentation 进程交替运行完整 SDK 采集与合并语义文本读取，各预热 2 次、实测 20 次。每轮核对 24 个预期卡片标签。计时包含提交到主线程和返回结果；完整模式在计时结束后进行 JSON 编码及内容校验。统计不包含传输、截图、UI Automator 等待和帧耗。
+
+| Compose | 完整读取，中位 / P95 ms | 文本读取，中位 / P95 ms |
+|---|---:|---:|
+| 1.12.1 | 27.13 / 48.35 | 0.70 / 1.03 |
+| 1.10.6 | 27.32 / 39.90 | 0.60 / 0.93 |
+
+该结果支持继续开发 Compose 文本条件的定向读取。原型只在一个 Activity 的 Compose 语义树中验证文本，尚未验证跨窗口遮挡、Android View 和 contentDescription。当前产品仍通过无障碍树确认点击结果，以保留现有条件的语义。[设备端原型](../sample/src/androidTest/java/dev/composeinspect/sample/SemanticsReadBenchmark.kt) · [1.12.1 原始记录](semantics-read-1.12.1.json) · [1.10.6 原始记录](semantics-read-1.10.6.json)
+
+### 内部状态和列表引用
+
+同一调用点生成 A、B 两个实例。每个实例持有局部布尔值，子组件参数和语义均未输出该值。关闭登记时，操作前后的参数名与页面文本相同，两个构建的 SDK 均没有给出具名内部读数。开启登记后，手动采样依次得到 `A=false, B=false`、`A=true, B=false`。移除 A 后仅剩 `B=false`。登记和读取都在 debug 样例中，组件离开组合时释放读取器。它验证的是已知引用按需读取，没有记录两次采样之间的变化。通用面板继续使用已暴露的参数和语义。
+
+同一脚本还核对了两个构建中的 LazyColumn、LazyRow、LazyVerticalGrid：分别有 5、8、6 个视口条目，索引互异。现有基于 state 引用的列表摘要继续交付。[样例](../sample/src/debug/java/dev/composeinspect/sample/InternalStateProbeActivity.kt) · [验证脚本](../tools/validate_state_probe.py) · [1.12.1 结果](state-probe-1.12.1.json) · [1.10.6 结果](state-probe-1.10.6.json)
+
+### 复测
+
+以下命令在 android 目录运行，SERIAL 指向专用测试设备，脚本会重启样例进程。对照版本可用 `-PcomposeVersion=1.10.6` 构建，并同步修改结果标签。
+
+```sh
+./gradlew :sample:assembleDebug :sample:assembleDebugAndroidTest -PcomposeVersion=1.12.1
+adb -s "$SERIAL" install -r sample/build/outputs/apk/debug/sample-debug.apk
+adb -s "$SERIAL" install -r sample/build/outputs/apk/androidTest/debug/sample-debug-androidTest.apk
+python3 tools/benchmark_session.py --serial "$SERIAL" --package dev.composeinspect.sample --compose 1.12.1 --output artifacts/session.json
+python3 tools/validate_state_probe.py --serial "$SERIAL" --package dev.composeinspect.sample --compose 1.12.1 --output artifacts/state.json
+adb -s "$SERIAL" shell am instrument -w dev.composeinspect.sample.test/dev.composeinspect.sample.SemanticsReadBenchmark
+```
+
+### 整体验收回归
+
+2026-11-24 按 API 37 模拟器验收通过。低端真机上的采集耗时、掉帧和单次点击表现单列为后续实测项。
+
+macOS 完整回归共 169 项，164 项通过、5 项因未启用对应的可选测试环境而跳过，零失败。另在模拟器上对无障碍树、输入窗口和截图命令各额外延迟 1 秒，复跑单次点击端到端测试：预期已存在时未执行点击，成功和超时两次各只增加一个计数，超时保留了结果快照。这项验证覆盖慢命令路径，目标低端物理设备的 UI 帧耗与采集预算仍待实测。
+
+Android collector 与 protocol 共 24 项单测通过。debug、release 及 instrumentation APK 均构建成功，已核对 release APK 的 DEX 与 Manifest：发布样例不含采集 SDK 或内部状态原型，语义计时器只在测试 APK 中。重新构建的 macOS Release 可执行文件与 /Applications/CompScope.app 中运行的文件一致，应用签名通过严格验证。

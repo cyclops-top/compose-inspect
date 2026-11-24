@@ -20,7 +20,7 @@ final class SDKCaptureTests: XCTestCase {
                 .object(["name": .string("age"), "value": .object(["type": .string("Int"), "value": .number("37")])])
             ])])])
         ]
-        return .object(["protocolVersion": .number("1"), "packageName": .string("dev.sample"), "pid": .number("123"),
+        return .object(["protocolVersion": .number("1"), "sdkVersion": .string("0.1.2"), "packageName": .string("dev.sample"), "pid": .number("123"),
                         "complete": .bool(complete), "diagnostics": .array([]),
                         "windows": .array([.object(["screenOffset": .array([.number("30"), .number("50")]),
                             "tables": .array(tables ?? [.object(["tree": group(nil, children: [group("BasicText", parameters: parameters)])])])])])])

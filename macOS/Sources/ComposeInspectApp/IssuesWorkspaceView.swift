@@ -19,8 +19,8 @@ struct IssuesWorkspaceView: View {
                 Text("\(store.issues.count)").font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
                 if store.canUndoClearIssues {
-                    Button("撤销清空") { store.undoClearIssues() }
-                        .buttonStyle(.link).font(.system(size: 11))
+                    IconButton(title: "撤销清空", systemImage: "arrow.uturn.backward") { store.undoClearIssues() }
+                        .buttonStyle(.borderless).font(.system(size: 11))
                 }
                 Button { store.clearIssues() } label: { Image(systemName: "trash") }
                     .buttonStyle(.plain).foregroundStyle(.secondary)
@@ -39,7 +39,7 @@ struct IssuesWorkspaceView: View {
             }
         }.background(AppStyle.sidebar)
             .overlay(alignment: .bottomTrailing) {
-                copyButton("复制全部 \(store.issues.count) 条", help: "复制全部问题（⌘⇧C）", disabled: store.issues.isEmpty) { store.copyAllIssues() }
+                copyButton("复制全部 \(store.issues.count) 条", icon: "square.stack", help: "复制全部问题（⌘⇧C）", disabled: store.issues.isEmpty) { store.copyAllIssues() }
             }
     }
 
@@ -49,16 +49,16 @@ struct IssuesWorkspaceView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.quaternary.opacity(0.15)).accessibilityLabel("AI 定位文本预览")
             .overlay(alignment: .bottomTrailing) {
-                copyButton("复制当前组件", help: "复制当前组件的 AI 定位信息（⌘⌥C）", disabled: text.isEmpty) {
+                copyButton("复制当前组件", icon: "doc.on.doc", help: "复制当前组件的 AI 定位信息（⌘⌥C）", disabled: text.isEmpty) {
                     store.copyCurrentLocator()
                 }
             }
     }
 
-    private func copyButton(_ title: String, help: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+    private func copyButton(_ title: String, icon: String, help: String, disabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(title, systemImage: "doc.on.doc").font(.system(size: 11, weight: .medium))
-                .fixedSize().padding(.horizontal, 10).frame(height: 32)
+            Label(title, systemImage: icon).labelStyle(.iconOnly)
+                .font(.system(size: 14)).frame(width: 32, height: 32)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
                 .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(AppStyle.divider.opacity(0.6)) }
                 .shadow(color: .black.opacity(0.12), radius: 5, y: 2)

@@ -130,15 +130,12 @@ public enum SDKSnapshotImporter {
             nextID += 1
             if layouts.count == 1, let layout = layouts.first, layout.bounds == frame.raw["boundsInWindow"] {
                 node["sdkLayoutIdentity"] = layout.identity
-                if let interaction = layout.value,
-                   let click = interaction["hasClickAction"]?.boolean,
-                   let longClick = interaction["hasLongClickAction"]?.boolean,
-                   let disabled = interaction["disabled"]?.boolean {
-                    node["unmergedSemantics"] = .array([
-                        .object(["name": .string("OnClick"), "value": .bool(click)]),
-                        .object(["name": .string("OnLongClick"), "value": .bool(longClick)]),
-                        .object(["name": .string("Disabled"), "value": .bool(disabled)])
-                    ])
+                if let interaction = layout.value {
+                    node["unmergedSemantics"] = semantics(interaction)
+                    if let merged = interaction["merged"] { node["mergedSemantics"] = semantics(merged) }
+                    if let error = interaction["mergedError"]?.string {
+                        node["attributes"] = .array([.object(["name": .string("合并语义采集限制"), "value": .string(error)])])
+                    }
                 }
                 if let error = layout.error {
                     node["attributes"] = .array([.object(["name": .string("交互采集限制"), "value": .string(error)])])
@@ -151,6 +148,17 @@ public enum SDKSnapshotImporter {
             converted[frame.path] = [.object(node)]
         }
         return converted["0"] ?? []
+    }
+
+    private static func semantics(_ interaction: InspectorJSON) -> InspectorJSON {
+        var fields: [InspectorJSON] = []
+        for (key, name) in [("hasClickAction", "OnClick"), ("hasLongClickAction", "OnLongClick"),
+                            ("disabled", "Disabled"), ("selected", "Selected"), ("focused", "Focused"),
+                            ("toggleableState", "ToggleableState")] {
+            guard let value = interaction[key], value.boolean != nil || value.string != nil else { continue }
+            fields.append(.object(["name": .string(name), "value": value]))
+        }
+        return .array(fields)
     }
 
     private static func parameter(_ raw: InspectorJSON) throws -> InspectorJSON {
@@ -184,6 +192,8 @@ public enum SDKSnapshotImporter {
         var result: [String: InspectorJSON] = ["name": .string(name)]
         if let value = encoded["value"] {
             result["value"] = value
+        } else if let count = encoded["viewport"]?["count"]?.int64 {
+            result["value"] = .string("\(type.components(separatedBy: ".").last ?? type) · 可见条目 \(count)")
         } else if let items = encoded["items"]?.array {
             result["value"] = .string("List[\(encoded["size"]?.int64 ?? Int64(items.count))]")
             result["isCollection"] = .bool(true)

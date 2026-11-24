@@ -96,4 +96,36 @@ final class AutomaticCaptureIntegrationTests: XCTestCase {
             try JSONEncoder().encode(store.snapshot.captureMetadata).write(to: directory.appendingPathComponent("metadata.json"))
         }
     }
+    func testSingleClickValidationOnSample() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["COMPSCOPE_SAMPLE_CLICK"] == "1" else { throw XCTSkip("Requires foreground sample counter") }
+        _ = NSApplication.shared
+        let suite = "verify-click-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = ToolchainSettings(defaults: defaults)
+        settings.adbOverride = try XCTUnwrap(env["COMPOSEINSPECT_ADB"])
+        let store = WorkspaceStore(filterDefaults: defaults)
+        try await store.deviceSession.refresh(settings: settings)
+        try await store.deviceSession.selectDevice(try XCTUnwrap(env["COMPOSEINSPECT_SERIAL"]), settings: settings)
+        await store.capture(settings: settings)
+        XCTAssertEqual(store.snapshot.packageName, "dev.composeinspect.sample")
+        func selectCounter() throws -> Int {
+            guard store.snapshot.packageName == "dev.composeinspect.sample" else { throw XCTSkip("Sample is not foreground") }
+            let card = try XCTUnwrap(store.snapshot.nodes.first { $0.name == "ParameterCard" })
+            store.select(card.id)
+            XCTAssertEqual(store.selectedNodeID, card.id)
+            return try XCTUnwrap(Int(try XCTUnwrap(card.observableFields.first { $0.name == "count" }).value))
+        }
+        let initial = try selectCounter()
+        await store.verifyClick(expected: "Increment: \(initial)", settings: settings)
+        XCTAssertTrue(store.verificationResult?.contains("预期文本已存在") == true, store.verificationResult ?? "")
+        await store.verifyClick(expected: "Increment: \(initial + 1)", settings: settings)
+        XCTAssertTrue(store.verificationResult?.contains("验证通过") == true, store.verificationResult ?? "")
+        guard try selectCounter() == initial + 1 else { return XCTFail("Expected a single increment") }
+        await store.verifyClick(expected: "unreachable-\(UUID())", settings: settings)
+        XCTAssertTrue(store.verificationResult?.contains("条件等待超时") == true, store.verificationResult ?? "")
+        XCTAssertEqual(try selectCounter(), initial + 2)
+    }
+
 }

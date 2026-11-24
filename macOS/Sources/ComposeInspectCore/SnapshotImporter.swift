@@ -63,7 +63,7 @@ public enum SnapshotImporter {
         guard width >= 0, height >= 0, [x, y, width, height].allSatisfy({ $0.isFinite && abs($0) < 1e12 }) else { throw SnapshotImportError.invalidBounds }
         var parameters: [NodeParameter] = []
         for (namespace, group) in [("parameters", NodeParameter.Group.parameter), ("attributes", .attribute),
-                                    ("unmergedSemantics", .unmergedSemantics)] {
+                                    ("unmergedSemantics", .unmergedSemantics), ("mergedSemantics", .mergedSemantics)] {
             if let value = raw[namespace] {
                 guard let values = value.array else { throw SnapshotImportError.schema("\(pointer)/\(namespace) 不是数组") }
                 parameters += try flatten(values, group: group, pointer: pointer + "/" + namespace)

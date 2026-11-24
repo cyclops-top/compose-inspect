@@ -46,9 +46,9 @@ struct RawJSONView: View {
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(AppStyle.divider))
             HStack {
                 Spacer()
-                Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("导出…") { export() }
-                Button("复制 JSON") {
+                IconButton(title: "关闭 JSON 窗口", systemImage: "xmark") { dismiss() }.keyboardShortcut(.cancelAction)
+                IconButton(title: "导出 JSON…", systemImage: "square.and.arrow.up") { export() }
+                IconButton(title: "复制 JSON", systemImage: "doc.on.doc") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(String(decoding: data, as: UTF8.self), forType: .string)
                 }

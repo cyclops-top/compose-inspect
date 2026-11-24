@@ -83,12 +83,12 @@ python3 tools/validate.py --serial DEVICE_SERIAL --versions 1.12.1
 ## Maven 发布
 
 与 spear 使用相同的 `com.vanniktech.maven.publish:0.37.0` 插件，签名后发布到 Maven Central。
-版本由 `gradle.properties` 的 `sdkVersion` 统一控制，默认 `0.1.1-snapshot`。
+版本由 `gradle.properties` 的 `sdkVersion` 统一控制，默认 `0.1.2-snapshot`。
 
 用户仅需添加（远端发布完成后可用）：
 
 ```kotlin
-debugImplementation("top.cyclops:compose-inspector:0.1.1-snapshot")
+debugImplementation("top.cyclops:compose-inspector:0.1.2-snapshot")
 ```
 
 同时发布 `compose-inspector-collector` 和 `compose-inspector-protocol`，均属于 `top.cyclops`；主制品会传递依赖它们。发布的是库的 release 变体，使用方仍须使用 `debugImplementation`，不要加入生产包。
@@ -111,11 +111,11 @@ debugImplementation("top.cyclops:compose-inspector:0.1.1-snapshot")
 上传后在 Central Portal 检查并发布；如需同时自动发布，运行 `./gradlew publishAndReleaseToMavenCentral`。Maven Central 制品及 sources JAR 将公开，GitHub 仓库可以继续私有。Android SDK 源码采用本目录 `LICENSE` 中的 Apache-2.0。
 
 
-## 性能与压缩协议（本地 0.1.1-snapshot）
+## 性能与压缩协议（本地 0.1.2-snapshot）
 
-本地优化版仍使用 `top.cyclops:compose-inspector:0.1.1-snapshot`；更新同名本地制品后，请刷新 Gradle 依赖并重新安装应用。
+本地优化版仍使用 `top.cyclops:compose-inspector:0.1.2-snapshot`；更新同名本地制品后，请刷新 Gradle 依赖并重新安装应用。
 
-- `hello` 声明 `gzip-json-v1` 时，新 macOS 客户端发送 `capture-gzip`。响应为 4 字节大端压缩长度 + 单个 gzip member，解压后仍为完整、以换行结尾的原始 JSON。未声明该能力的 SDK 保持 `capture` JSON 协议。
+- `hello` 声明 `gzip-json-v1` 时，新 macOS 客户端发送 `capture-gzip`。响应为 4 字节大端压缩长度 + 单个 gzip member，解压后仍为完整、以换行结尾的原始 JSON。桌面端要求运行时 SDK 0.1.2、协议 1 和压缩采集能力。
 - Compose/View 状态只在主线程读取；对象字段元数据仅在单次采集中缓存，实际值始终重新读取。编码、快速压缩和 socket 写入在 SDK 工作线程执行。
 - macOS 复用已解析文档，避免规范化数据再次解析；截图 I/O 与原始 JSON 解析并行。压缩输入与解压输出均有大小限制，CRC、截断、额外数据会报错。
 - `tools/capture.py` 默认写紧凑 JSON，`--pretty` 才生成缩进输出。深层树的缩进文件可能远大于实际传输数据，不应用作传输性能基线。
@@ -174,3 +174,10 @@ macOS SDK 适配器沿 Composition 的实际布局归属映射到公共 `unmerge
 ### 悬浮窗选择
 
 未勾选“跳过悬浮窗”时，优先选择目标进程内最后枚举到的可见系统悬浮窗，不要求它持有焦点；勾选后排除系统悬浮窗，接着检查焦点窗口上方的附属面板（包括无焦点 Popup），有面板时采集面板，否则采集焦点窗口。没有焦点时取最后枚举到的可见窗口。截图为整屏截图，不会移除浮层像素；其他应用或进程的浮层需要选择对应采集目标。SDK 端的窗口选择修复需要重新构建并安装接入新版 SDK 的 Android debug 应用。
+
+
+## 列表视口与交互状态
+
+桌面端的「状态」页显示 LazyColumn、LazyRow、LazyVerticalGrid 和 LazyHorizontalGrid 的视口摘要。SDK 在对应调用的 state 参数上读取 layoutInfo，返回主轴视口起止、可见条目数、每项实际索引、偏移和长度。网格还返回列表局部二维位置与尺寸。单位均为 px，单次最多传回前 100 条。key 仅展示可安全编码的标量，无法据此确认它是否是持久业务标识。
+
+原始和合并语义分别标记来源。合并树通过同一宿主的语义节点 ID 关联，已合并进父级的子节点可能没有独立读数。Selected、Focused 和 ToggleableState 仅在 Compose 提供相应字段时出现。

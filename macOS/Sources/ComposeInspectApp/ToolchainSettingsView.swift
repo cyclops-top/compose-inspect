@@ -32,7 +32,7 @@ struct ToolchainSettingsView: View {
                 Text("配置自动保存").font(.system(size: 11)).foregroundStyle(.tertiary)
                 Spacer()
                 if settings.loadingEnvironment { ProgressView().controlSize(.small) }
-                Button("重新读取环境") { Task { await settings.refreshEnvironment(); await settings.validateADB() } }
+                IconButton(title: "重新读取环境", systemImage: "arrow.clockwise") { Task { await settings.refreshEnvironment(); await settings.validateADB() } }
                     .controlSize(.small).disabled(settings.loadingEnvironment)
             }
             if !settings.environmentMessage.isEmpty {
@@ -57,11 +57,11 @@ struct ToolchainSettingsView: View {
                 TextField("留空使用 ANDROID_HOME / PATH", text: $settings.adbOverride)
                     .textFieldStyle(.roundedBorder).font(.system(size: 11, design: .monospaced))
                     .accessibilityLabel("ADB 路径，留空使用环境变量")
-                Button("选择…") { settings.chooseADB() }
+                IconButton(title: "选择 ADB 可执行文件…", systemImage: "folder") { settings.chooseADB() }
                 Button {
                     settings.adbOverride = ""
                 } label: { Image(systemName: "arrow.counterclockwise") }
-                    .help("恢复环境变量自动检测")
+                    .help("恢复环境变量自动检测").accessibilityLabel("恢复环境变量自动检测")
                     .disabled(settings.adbOverride.isEmpty)
             }.controlSize(.small)
             if let location = resolution.location {
@@ -77,8 +77,9 @@ struct ToolchainSettingsView: View {
                         Task { await settings.validateADB() }
                     } label: {
                         if checking { ProgressView().controlSize(.mini).frame(width: 28) }
-                        else { Text("检测") }
+                        else { Image(systemName: "stethoscope") }
                     }.controlSize(.small).disabled(checking)
+                        .help("检测 ADB").accessibilityLabel("检测 ADB")
                 }
             } else {
                 Label(resolution.error ?? "未找到工具", systemImage: "exclamationmark.circle")

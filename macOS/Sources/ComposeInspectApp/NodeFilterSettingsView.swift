@@ -24,7 +24,7 @@ struct NodeFilterSettingsView: View {
                 Toggle("无独立内容的列表组合包装", isOn: $store.filterConfiguration.hideCompositionWrappers)
                 Toggle("Compose 宿主", isOn: $store.filterConfiguration.hideComposeHosts)
             }
-            Button("恢复默认规则") { store.restoreDefaultFilters() }
+            IconButton(title: "恢复默认规则", systemImage: "arrow.counterclockwise") { store.restoreDefaultFilters() }
                 .disabled(store.filterConfiguration == .defaults)
         }
         .padding(18)

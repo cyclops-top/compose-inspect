@@ -1,0 +1,178 @@
+{
+  "compose": "1.10.6",
+  "sdk": "0.1.2",
+  "beforeAndAfter": {
+    "arguments": [
+      [
+        "instance",
+        "register"
+      ],
+      [
+        "instance",
+        "register"
+      ]
+    ],
+    "text": [
+      "Remove A",
+      "Sample",
+      "Toggle A",
+      "Toggle B"
+    ]
+  },
+  "unregistered": "readers=[]",
+  "registered": [
+    "readers=[A=false, B=false]",
+    "readers=[A=true, B=false]",
+    "readers=[B=false]"
+  ],
+  "viewports": {
+    "LazyColumn": {
+      "start": 0,
+      "end": 473,
+      "axis": "Vertical",
+      "count": 5,
+      "items": [
+        {
+          "index": 0,
+          "offset": 0,
+          "size": 105,
+          "key": 0
+        },
+        {
+          "index": 1,
+          "offset": 105,
+          "size": 105,
+          "key": 1
+        },
+        {
+          "index": 2,
+          "offset": 210,
+          "size": 105,
+          "key": 2
+        },
+        {
+          "index": 3,
+          "offset": 315,
+          "size": 105,
+          "key": 3
+        },
+        {
+          "index": 4,
+          "offset": 420,
+          "size": 105,
+          "key": 4
+        }
+      ]
+    },
+    "LazyRow": {
+      "start": 0,
+      "end": 974,
+      "axis": "Horizontal",
+      "count": 8,
+      "items": [
+        {
+          "index": 0,
+          "offset": 0,
+          "size": 132
+        },
+        {
+          "index": 1,
+          "offset": 132,
+          "size": 132
+        },
+        {
+          "index": 2,
+          "offset": 264,
+          "size": 132
+        },
+        {
+          "index": 3,
+          "offset": 396,
+          "size": 132
+        },
+        {
+          "index": 4,
+          "offset": 528,
+          "size": 132
+        },
+        {
+          "index": 5,
+          "offset": 660,
+          "size": 132
+        },
+        {
+          "index": 6,
+          "offset": 792,
+          "size": 132
+        },
+        {
+          "index": 7,
+          "offset": 924,
+          "size": 132
+        }
+      ]
+    },
+    "LazyVerticalGrid": {
+      "start": 0,
+      "end": 221,
+      "axis": "Vertical",
+      "count": 6,
+      "items": [
+        {
+          "index": 0,
+          "offset": 0,
+          "size": 85,
+          "x": 0,
+          "y": 0,
+          "width": 487,
+          "height": 85
+        },
+        {
+          "index": 1,
+          "offset": 0,
+          "size": 85,
+          "x": 487,
+          "y": 0,
+          "width": 487,
+          "height": 85
+        },
+        {
+          "index": 2,
+          "offset": 85,
+          "size": 85,
+          "x": 0,
+          "y": 85,
+          "width": 487,
+          "height": 85
+        },
+        {
+          "index": 3,
+          "offset": 85,
+          "size": 85,
+          "x": 487,
+          "y": 85,
+          "width": 487,
+          "height": 85
+        },
+        {
+          "index": 4,
+          "offset": 170,
+          "size": 85,
+          "x": 0,
+          "y": 170,
+          "width": 487,
+          "height": 85
+        },
+        {
+          "index": 5,
+          "offset": 170,
+          "size": 85,
+          "x": 487,
+          "y": 170,
+          "width": 487,
+          "height": 85
+        }
+      ]
+    }
+  }
+}
