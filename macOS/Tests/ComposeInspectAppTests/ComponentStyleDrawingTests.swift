@@ -115,13 +115,15 @@ final class ComponentStyleDrawingTests: XCTestCase {
         let tree = node("root", [node("wrapper", [node("left", [node("color", style: styled)]),
                                                     node("right", [node("inset", bounds: box.insetBy(dx: 5, dy: 5))])])])
         let group = PagePreviewGroup(tree)
-        XCTAssertEqual(group.names, ["root", "wrapper"])
         XCTAssertEqual(group.children.map(\.id), ["left", "right"])
-        XCTAssertEqual(group.children.flatMap(\.children).map(\.id), ["color", "inset"])
+        XCTAssertEqual(group.children.flatMap(\.children).map(\.id), ["inset"])
+        let shadow = ComponentStyle.Layer(id: 0, name: "shadow", kind: "shadow", bounds: box,
+            padding: nil, argb: nil, alpha: 1, shape: nil, unsupported: nil)
+        let painted = ComponentStyle(density: 1, contentBounds: box, outerBounds: box, layers: [shadow])
+        XCTAssertEqual(PagePreviewGroup(node("outer", [node("inner", style: painted)])).children.map(\.id), ["inner"])
 
         let measured = node("Column", [node("measure", bounds: .zero), node("Layout", [node("Reusable")])])
         let measuredGroup = PagePreviewGroup(measured)
-        XCTAssertEqual(measuredGroup.names, ["Column", "Layout", "Reusable"])
         XCTAssertEqual(measuredGroup.children.map(\.id), ["measure"])
 
         let fork = node("root", [node("wrapper", [node("visible")], bounds: .zero), node("Layout")])
@@ -171,13 +173,15 @@ final class ComponentStyleDrawingTests: XCTestCase {
         let style = ComponentStyle(density: 2, contentBounds: b, outerBounds: b, layers: [padding, background])
         let front = StylePlane(0, style: style, transform: .identity)
         XCTAssertTrue(front.contains(CGPoint(x: 315, y: 190)))
-        XCTAssertFalse(front.contains(CGPoint(x: 320, y: 190)))
+        XCTAssertFalse(front.surface.contains(CGPoint(x: b.midX, y: b.midY)))
+        XCTAssertTrue(front.contains(CGPoint(x: b.midX, y: b.midY)))
         let layout = StyleStackLayout(style: style, size: CGSize(width: 430, height: 380))
         let inner = layout.plane(1).outline.boundingRect
         let outer = layout.plane(0).outline.boundingRect
         XCTAssertLessThan(inner.midY, outer.midY)
         XCTAssertEqual(inner.midX, outer.midX, accuracy: 0.01)
         XCTAssertEqual(layout.hit(CGPoint(x: inner.midX, y: inner.midY)), 1)
+        XCTAssertEqual(layout.hit(CGPoint(x: outer.midX, y: outer.midY)), 0)
     }
 
     func testOnlyPrecedingExplicitClipsRestrictInnerPlanes() {

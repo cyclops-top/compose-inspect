@@ -311,13 +311,20 @@ private struct ComponentStylePreview: View {
     private func number(_ value: Double) -> String { value.formatted(.number.precision(.fractionLength(0...1))) }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                SectionCaption(text: includeInternalStyles ? "当前组件 · 自身样式" : "内部组件 · 自身样式")
-                Spacer()
-                IconButton(title: "立体样式预览", systemImage: "square.3.layers.3d") { showingLayers = true }
-                    .focused($previewFocused)
-                    .disabled(node.style?.layers.isEmpty != false)
+            Button { showingLayers = true } label: {
+                HStack {
+                    SectionCaption(text: includeInternalStyles ? "当前组件 · 自身样式" : "内部组件 · 自身样式")
+                    Spacer()
+                    Label("展开样式", systemImage: "square.3.layers.3d")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(minHeight: 32)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("展开立体样式预览")
+            .focused($previewFocused)
+            .disabled(node.style?.layers.isEmpty != false)
             .background {
                 if let style = node.style, !style.layers.isEmpty {
                     StylePreviewSheet(isPresented: $showingLayers, onDismiss: { previewFocused = true }) {

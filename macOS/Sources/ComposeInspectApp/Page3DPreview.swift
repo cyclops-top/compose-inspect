@@ -5,12 +5,10 @@ import SwiftUI
 
 struct PagePreviewGroup: Identifiable {
     let id: String
-    var names: [String]
     let bounds: CGRect
     let outline: Path
     let contentClip: Path?
     var children: [PagePreviewGroup]
-    var branches: [PagePreviewGroup]? { children.isEmpty ? nil : children }
 
     init(_ node: InspectorNode) {
         id = node.id
@@ -26,17 +24,31 @@ struct PagePreviewGroup: Identifiable {
             mask = mask?.intersection(path) ?? path
         }
         contentClip = mask
-        names = [node.displayName]
         children = []
         func hasVisibleGeometry(_ node: InspectorNode) -> Bool {
             !node.bounds.isEmpty || node.children.contains(where: hasVisibleGeometry)
+        }
+        func canShareFace(_ parent: InspectorNode, _ child: InspectorNode) -> Bool {
+            guard parent.bounds == child.bounds else { return false }
+            if parent.style == child.style { return true }
+            // Pure layout measurements do not add paint or change the rectangular face.
+            func layoutOnly(_ node: InspectorNode) -> Bool {
+                (node.style?.layers ?? []).allSatisfy {
+                    $0.kind == "padding" && $0.alpha == 1 && $0.unsupported == nil
+                }
+            }
+            guard layoutOnly(parent) else { return false }
+            return (child.style?.layers ?? []).allSatisfy {
+                $0.unsupported == nil && $0.alpha == 1 &&
+                    ($0.kind == "padding" || ($0.kind == "background" &&
+                     $0.bounds == child.bounds && ($0.shape == nil || $0.shape?.kind == "rectangle")))
+            }
         }
         func appendChildren(of parent: InspectorNode) {
             let visible = parent.children.filter(hasVisibleGeometry)
             for child in parent.children {
                 if visible.count == 1, visible.first?.id == child.id,
-                   child.bounds == parent.bounds, child.style == parent.style {
-                    names.append(child.displayName)
+                   canShareFace(parent, child) {
                     appendChildren(of: child)
                 } else {
                     children.append(PagePreviewGroup(child))
@@ -111,7 +123,6 @@ private struct Page3DPreview: View {
     let screenshot: CGImage
     let store: WorkspaceStore
     @State private var resetRequest = 0
-    @State private var expanded = Set<String>()
 
     private var selectionPath: [String] {
         guard let id = store.selectedNodeID else { return [] }
@@ -133,46 +144,13 @@ private struct Page3DPreview: View {
 
     var body: some View {
         let path = groupPath(selectionPath)
-        VSplitView {
-            PageScene(root: root, image: screenshot, selected: path.last, resetRequest: resetRequest, onSelect: store.selectPageComponent)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .topTrailing) {
-                    IconButton(title: "重置视角", systemImage: "arrow.counterclockwise") {
-                        resetRequest += 1
-                    }.padding(10)
-                }
-            VStack(alignment: .leading, spacing: 8) {
-                Text("组件层级").font(.headline)
-                Text("点击选中，拖动旋转，按住空格拖动平移。指向组件后滚动或双指捏合，可围绕该处缩放。仅有一个可见子组件且边界、采集样式一致时，父子共用一层。× 表示合并数。")
-                    .font(.caption).foregroundStyle(.secondary)
-                ScrollViewReader { scroll in
-                    List(selection: Binding(get: { path.last }, set: { id in
-                        if let id { store.selectPageComponent(id) }
-                    })) {
-                        hierarchyRow(root)
-                    }.listStyle(.sidebar)
-                        .onChange(of: path, initial: true) { _, ids in
-                            expanded.formUnion(ids.dropLast())
-                            if let last = ids.last { scroll.scrollTo(last) }
-                        }
-                }
-            }.padding(8).frame(minHeight: 100, idealHeight: 145, maxHeight: 240)
-        }.onAppear { expanded.insert(root.id) }
-    }
-
-    private func hierarchyRow(_ group: PagePreviewGroup) -> AnyView {
-        if group.children.isEmpty { return AnyView(row(group)) }
-        let open = Binding(get: { expanded.contains(group.id) }, set: { value in
-            if value { expanded.insert(group.id) } else { expanded.remove(group.id) }
-        })
-        return AnyView(DisclosureGroup(isExpanded: open) {
-            ForEach(group.children) { hierarchyRow($0) }
-        } label: { row(group) }.tag(group.id).id(group.id))
-    }
-
-    private func row(_ group: PagePreviewGroup) -> some View {
-        Text(group.names.count == 1 ? group.names[0] : "\(group.names[0]) ×\(group.names.count)")
-            .tag(group.id).id(group.id).help(group.names.joined(separator: " → "))
+        PageScene(root: root, image: screenshot, selected: path.last, resetRequest: resetRequest, onSelect: store.selectPageComponent)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .topTrailing) {
+                IconButton(title: "重置视角", systemImage: "arrow.counterclockwise") {
+                    resetRequest += 1
+                }.padding(10)
+            }
     }
 }
 

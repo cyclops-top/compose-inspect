@@ -47,8 +47,7 @@ struct StylePlane {
     }
 
     func contains(_ point: CGPoint) -> Bool {
-        outline.strokedPath(StrokeStyle(lineWidth: 7)).contains(point) ||
-            (!layer.uncertain && surface.contains(point))
+        outline.contains(point)
     }
 
     func draw(in context: GraphicsContext, selected: Bool) {
@@ -87,10 +86,15 @@ struct StyleStackLayout {
     }
 
     func hit(_ point: CGPoint) -> Int? {
+        var nearby: Int?
         for index in style.layers.indices.reversed() {
-            if plane(index).contains(point) { return index }
+            let candidate = plane(index)
+            if candidate.contains(point) { return index }
+            if nearby == nil, candidate.outline.strokedPath(StrokeStyle(lineWidth: 18)).contains(point) {
+                nearby = index
+            }
         }
-        return nil
+        return nearby
     }
 }
 
@@ -225,6 +229,8 @@ struct ExplodedStylePreview: View {
                             .frame(minWidth: 22, minHeight: 22)
                             .background(i == selection.index ? Color.accentColor : Color(nsColor: .controlBackgroundColor), in: Circle())
                             .foregroundStyle(i == selection.index ? Color.white : Color.primary)
+                            .frame(width: 32, height: 32)
+                            .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                     .position(x: max(14, b.minX - 16), y: b.midY)
                     .accessibilityLabel("第 \(i + 1) 层 · \(style.layers[i].title)")
