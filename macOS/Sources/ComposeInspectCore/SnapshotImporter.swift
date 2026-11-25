@@ -31,13 +31,13 @@ public enum SnapshotImporter {
                     return ComponentStyleCatalog(json: $0)
                 }
             }
-            return try convert(root, catalogs: catalogs, pointer: "/windows/\(index)/root")
+            return try convert(root, catalogs: catalogs, requireLayoutIdentity: document.root["sdkCapture"]?["onlySourceNodes"]?.boolean == true, pointer: "/windows/\(index)/root")
         }
         return InspectorSnapshot(packageName: packageName, deviceName: "导入的快照", pixelSize: imageSize,
                                  roots: roots, document: document)
     }
 
-    private static func convert(_ raw: InspectorJSON, catalogs: [ComponentStyleCatalog?], pointer: String) throws -> InspectorNode {
+    private static func convert(_ raw: InspectorJSON, catalogs: [ComponentStyleCatalog?], requireLayoutIdentity: Bool, pointer: String) throws -> InspectorNode {
         // Conversion has a large stack frame in debug builds. Keep depth on the heap so real
         // Compose trees can be decoded safely on Swift concurrency worker threads.
         var pending: [(raw: InspectorJSON, pointer: String, catalog: ComponentStyleCatalog?, ready: Bool)] = [(raw, pointer, nil, false)]
@@ -51,7 +51,8 @@ public enum SnapshotImporter {
             } else { children = [] }
             if frame.ready {
                 let nodes = children.indices.map { converted.removeValue(forKey: "\(frame.pointer)/children/\($0)")! }
-                converted[frame.pointer] = try convertNode(frame.raw, pointer: frame.pointer, catalog: frame.catalog,
+                let catalog = requireLayoutIdentity && frame.raw["sdkLayoutIdentity"] == nil ? nil : frame.catalog
+                converted[frame.pointer] = try convertNode(frame.raw, pointer: frame.pointer, catalog: catalog,
                     convertedChildren: nodes)
             } else {
                 let catalog: ComponentStyleCatalog?

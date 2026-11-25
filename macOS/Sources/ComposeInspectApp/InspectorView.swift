@@ -30,21 +30,6 @@ struct InspectorView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Divider()
             }
-            if let watch = store.observation {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("\(watch.component) · \(watch.group.rawValue) \(watch.field)").font(.caption.bold())
-                        Spacer()
-                        IconButton(title: "结束关注", systemImage: "eye.slash") { store.observation = nil }.buttonStyle(.borderless)
-                    }
-                    if let before = watch.previous {
-                        Text("上次 \(before.time.formatted(date: .omitted, time: .standard)) · \(before.value)")
-                    }
-                    Text("最近有效 \(watch.latest.time.formatted(date: .omitted, time: .standard)) · \(watch.latest.value)")
-                    Text(watch.detail).foregroundStyle(.secondary)
-                }.font(.caption).textSelection(.enabled).padding(10)
-                Divider()
-            }
             if let node = store.selectedNode {
                 HStack {
                     Text(node.shortName)
@@ -91,7 +76,7 @@ struct InspectorView: View {
                             }
                             if LazyViewport.componentNames.contains(node.shortName) { viewportSection(node) }
                             let fields = node.observableFields
-                            if fields.isEmpty { Text("本次采集没有可观察的标量字段").foregroundStyle(.secondary) }
+                            if fields.isEmpty { Text("本次采集没有标量字段").foregroundStyle(.secondary) }
                             ForEach(fields) { field in
                                 HStack {
                                     VStack(alignment: .leading) {
@@ -101,8 +86,6 @@ struct InspectorView: View {
                                     }
                                     Spacer()
                                     Text(field.original?["value"] == .null ? "null" : field.value).textSelection(.enabled)
-                                    IconButton(title: "关注\(field.name)", systemImage: "eye") { store.observe(field, on: node) }
-                                        .disabled(store.isCapturing)
                                 }
                             }
                             if node.kind == "ComposeNode", !fields.contains(where: { $0.group == .mergedSemantics }) {

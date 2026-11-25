@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
-        <meta-data android:name="dev.composeinspect.SDK_VERSION" android:value="0.1.3" />
+        <meta-data android:name="dev.composeinspect.SDK_VERSION" android:value="0.1.4-SNAPSHOT" />
         <meta-data android:name="dev.composeinspect.PROTOCOL_VERSION" android:value="1" />
         <provider android:name="dev.composeinspect.sdk.InspectorInitProvider"
             android:authorities="${applicationId}.composeinspect.init"

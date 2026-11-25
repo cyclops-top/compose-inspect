@@ -30,8 +30,10 @@ class LayoutStyles internal constructor() {
         private fun isRectangle(name: String) = name == "androidx.compose.ui.graphics.RectangleShape" ||
             name.startsWith("androidx.compose.ui.graphics.RectangleShapeKt\$RectangleShape\$")
 
-        @JvmStatic fun capture(view: View): JSONObject? =
-            if (view.javaClass.name.endsWith("AndroidComposeView")) LayoutStyles().captureView(view) else null
+        @JvmStatic fun capture(view: View): JSONObject? = capture(view, null)
+
+        internal fun capture(view: View, included: Set<Any>?): JSONObject? =
+            if (view.javaClass.name.endsWith("AndroidComposeView")) LayoutStyles().captureView(view, included) else null
 
         @JvmStatic fun shape(shape: Any, coords: Any, node: Any): JSONObject =
             LayoutStyles().readShape(shape, coords, node)
@@ -53,7 +55,7 @@ class LayoutStyles internal constructor() {
         return JSONObject().put("type", name).put("fields", values)
     }
 
-    private fun captureView(view: View): JSONObject {
+    private fun captureView(view: View, included: Set<Any>?): JSONObject {
         val result = JSONObject()
         try {
             result.put("version", 1).put("density", view.resources.displayMetrics.density.toDouble())
@@ -62,7 +64,7 @@ class LayoutStyles internal constructor() {
             val records = JSONArray()
             val errors = JSONArray()
             visit(call(view, "getRoot"), screen[0] - window[0], screen[1] - window[1],
-                records, errors, Collections.newSetFromMap(IdentityHashMap()))
+                records, errors, Collections.newSetFromMap(IdentityHashMap()), included)
             result.put("records", records).put("diagnostics", errors)
         } catch (failure: Throwable) {
             result.put("error", failure.toString())
@@ -70,9 +72,9 @@ class LayoutStyles internal constructor() {
         return result
     }
 
-    private fun visit(node: Any?, dx: Int, dy: Int, records: JSONArray, errors: JSONArray, visited: MutableSet<Any>) {
+    private fun visit(node: Any?, dx: Int, dy: Int, records: JSONArray, errors: JSONArray, visited: MutableSet<Any>, included: Set<Any>?) {
         if (node == null || !visited.add(node)) return
-        try {
+        if (included == null || node in included) try {
             val coordinates = call(node, "getCoordinates")
             if (call(coordinates, "isAttached") == true) {
                 val record = JSONObject().put("layoutIdentity", System.identityHashCode(node))
@@ -94,7 +96,7 @@ class LayoutStyles internal constructor() {
         }
         val children = call(node, "getChildren")
         val list = children as? Iterable<*> ?: call(children, "asMutableList") as? Iterable<*>
-        list?.forEach { visit(it, dx, dy, records, errors, visited) }
+        list?.forEach { visit(it, dx, dy, records, errors, visited, included) }
     }
 
     private fun layer(modifier: Any, coords: Any, node: Any, dx: Int, dy: Int): JSONObject? {

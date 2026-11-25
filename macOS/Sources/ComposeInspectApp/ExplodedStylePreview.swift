@@ -2,6 +2,12 @@ import ComposeInspectCore
 import SwiftUI
 
 private extension ComponentStyle.Layer {
+    var clipPath: Path? {
+        guard kind == "clip", unsupported == nil, let shape,
+              ["rectangle", "rounded", "cut", "path"].contains(shape.kind) else { return nil }
+        return ComponentStyleDrawing.path(in: bounds, shape: shape, scale: 1)
+    }
+
     var title: String {
         switch kind {
         case "padding": "Padding"
@@ -31,9 +37,7 @@ struct StylePlane {
         labelBounds = shape.applying(transform).boundingRect
         var visible = shape
         // All masks use the measured screen coordinates, before separating the planes.
-        for clip in style.layers[..<index] where clip.kind == "clip" && clip.unsupported == nil {
-            guard let kind = clip.shape?.kind, ["rectangle", "rounded", "cut", "path"].contains(kind) else { continue }
-            let mask = ComponentStyleDrawing.path(in: clip.bounds, shape: clip.shape, scale: 1)
+        for mask in style.layers[..<index].compactMap(\.clipPath) {
             visible = visible.intersection(mask)
         }
         outline = visible.applying(transform)
@@ -162,7 +166,7 @@ struct ExplodedStylePreview: View {
                             if let crop {
                                 Divider()
                                 Text("截图局部").foregroundStyle(.secondary)
-                                Image(decorative: crop, scale: 1).resizable().scaledToFit()
+                                screenshotPreview(crop)
                                     .frame(maxWidth: .infinity, maxHeight: 100)
                             }
                         }.font(.callout).frame(maxWidth: .infinity, alignment: .leading).padding(16)
@@ -192,6 +196,33 @@ struct ExplodedStylePreview: View {
         }
     }
 
+    private func screenshotPreview(_ crop: CGImage) -> some View {
+        // The crop starts at the first on-screen pixel for partially visible components.
+        let origin = bounds.integral.origin
+        let masks = style.layers[...selection.index].compactMap(\.clipPath)
+        return Canvas { context, size in
+            let rect = CGRect(origin: .zero, size: size)
+            if !masks.isEmpty {
+                Self.drawCheckerboard(in: context, size: size)
+                let scale = size.width / CGFloat(crop.width)
+                let transform = CGAffineTransform(a: scale, b: 0, c: 0, d: scale,
+                                                  tx: -max(0, origin.x) * scale,
+                                                  ty: -max(0, origin.y) * scale)
+                for mask in masks { context.clip(to: mask.applying(transform)) }
+            }
+            context.draw(Image(decorative: crop, scale: 1), in: rect)
+        }
+        .aspectRatio(CGFloat(crop.width) / CGFloat(crop.height), contentMode: .fit)
+    }
+
+    private static func drawCheckerboard(in context: GraphicsContext, size: CGSize) {
+        for y in stride(from: 0, to: Int(ceil(size.height)), by: 8) {
+            for x in stride(from: 0, to: Int(ceil(size.width)), by: 8) where (x / 8 + y / 8).isMultiple(of: 2) {
+                context.fill(Path(CGRect(x: x, y: y, width: 8, height: 8)), with: .color(.secondary.opacity(0.13)))
+            }
+        }
+    }
+
     private var face: some View {
         Canvas { context, size in
             let b = layer.bounds
@@ -199,11 +230,7 @@ struct ExplodedStylePreview: View {
             let t = CGAffineTransform(a: scale, b: 0, c: 0, d: scale, tx: size.width / 2 - b.midX * scale,
                                       ty: size.height / 2 - b.midY * scale)
             if layer.kind == "background" {
-                for y in stride(from: 0, to: Int(size.height), by: 8) {
-                    for x in stride(from: 0, to: Int(size.width), by: 8) where (x / 8 + y / 8).isMultiple(of: 2) {
-                        context.fill(Path(CGRect(x: x, y: y, width: 8, height: 8)), with: .color(.secondary.opacity(0.13)))
-                    }
-                }
+                Self.drawCheckerboard(in: context, size: size)
             }
             StylePlane(selection.index, style: style, transform: t).draw(in: context, selected: false)
         }

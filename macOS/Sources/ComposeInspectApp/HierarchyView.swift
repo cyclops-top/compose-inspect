@@ -29,8 +29,6 @@ struct HierarchyView: View {
                     .help(store.onlyClickableNodes ? "仅可点击模式必须开启精简" : "隐藏内部实现及 Android 宿主容器，保留子组件")
                 Toggle("仅可点击", isOn: $store.onlyClickableNodes)
                     .help("保留窗口根节点及具有点击动作的组件，并自动开启精简")
-                Toggle("仅有源码", isOn: $store.onlySourceNodes)
-                    .help("保留窗口根节点和自身有源码位置的组件；SDK 已关联工程时，仅显示能匹配工程文件的组件")
                 Spacer(minLength: 0)
                 Button { showingFilterConfiguration = true } label: {
                     Image(systemName: "gearshape")
@@ -42,7 +40,7 @@ struct HierarchyView: View {
                     .font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 6)
             }
             if store.searchesAllComponents {
-                Button("正在搜索全部组件 · 恢复筛选") { store.searchesAllComponents = false }
+                Button("正在搜索本次采集 · 恢复筛选") { store.searchesAllComponents = false }
                     .font(.caption)
             }
             NativeHierarchyView(store: store)
@@ -51,7 +49,7 @@ struct HierarchyView: View {
                         VStack(spacing: 8) {
                             Text("未找到“\(store.search)”").lineLimit(3)
                             if (store.hideInternalNodes || store.onlySourceNodes) && !store.searchesAllComponents {
-                                Button("在全部组件中搜索") { store.searchesAllComponents = true }
+                                Button("在本次采集的全部组件中搜索") { store.searchesAllComponents = true }
                             }
                         }.font(.callout).padding().multilineTextAlignment(.center)
                     }
@@ -80,6 +78,7 @@ struct NativeHierarchyView: NSViewRepresentable {
         outline.addTableColumn(column)
         outline.outlineTableColumn = column
         outline.headerView = nil
+        outline.usesAutomaticRowHeights = false
         outline.rowHeight = 28
         outline.intercellSpacing = NSSize(width: 0, height: 1)
         outline.indentationPerLevel = 12
@@ -96,6 +95,7 @@ struct NativeHierarchyView: NSViewRepresentable {
         outline.setAccessibilityLabel("组件树，单击选择，双击展开或收起")
         let scroll = HierarchyScrollView()
         scroll.documentView = outline
+        scroll.verticalScrollElasticity = .none
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = true
         scroll.usesPredominantAxisScrolling = false

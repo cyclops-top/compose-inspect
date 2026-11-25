@@ -1,7 +1,7 @@
 import XCTest
 @testable import ComposeInspectCore
 
-final class ComponentObservationTests: XCTestCase {
+final class ComponentStateTests: XCTestCase {
     private func load(_ name: String) throws -> InspectorSnapshot {
         let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
@@ -17,66 +17,47 @@ final class ComponentObservationTests: XCTestCase {
             serial: "emulator-5554", packageName: package, startedAt: Date(), finishedAt: Date(), diagnostics: [], baselineJSON: bytes))
     }
 
-    func testCounterAcrossRealCaptures() throws {
-        let baseline = try load("baseline"), unchanged = try load("unchanged"), incremented = try load("incremented")
+    func testCurrentCounterFields() throws {
+        let baseline = try load("baseline")
         let node = try XCTUnwrap(baseline.nodes.first { $0.name == "ParameterCard" })
         let fields = node.observableFields
         XCTAssertFalse(fields.contains { $0.name.hasPrefix("profile") || $0.name == "onClick" })
         let count = try XCTUnwrap(fields.first { $0.name == "count" })
-        var watch = ComponentObservation(node: node, field: count, snapshot: baseline)
-        XCTAssertNotNil(watch.advance(from: baseline, index: .init(baseline), to: unchanged, index: .init(unchanged)), watch.detail)
-        XCTAssertTrue(watch.detail.contains("读数相同"))
-        XCTAssertNotNil(watch.advance(from: unchanged, index: .init(unchanged), to: incremented, index: .init(incremented)), watch.detail)
-        XCTAssertEqual(watch.previous?.value, "7")
-        XCTAssertEqual(watch.latest.value, "8")
-        XCTAssertFalse(watch.interrupted)
+        XCTAssertEqual(count.value, "7")
     }
 
-    func testDuplicateCallSitesMissingFieldsAndChangesOfSourceStayUnresolved() throws {
+    func testClickMatchRejectsDuplicateCallsMissingActionsAndDifferentSources() throws {
         let base = try load("baseline")
         let current = try XCTUnwrap(base.nodes.first { $0.name == "ParameterCard" })
-        let count = try XCTUnwrap(current.observableFields.first { $0.name == "count" })
+        let action = try XCTUnwrap(current.observableFields.first { $0.name == "OnClick" && $0.group == .unmergedSemantics })
         func row(_ id: String, _ x: CGFloat = 0, fields: [NodeParameter]? = nil) -> InspectorNode {
             InspectorNode(id: id, rawID: 0, name: current.name, label: "相同",
                           bounds: current.bounds.offsetBy(dx: x, dy: 0), source: current.source,
-                          parameters: fields ?? [count])
+                          parameters: fields ?? [action], clickTargetID: current.clickTargetID)
         }
         func snapshot(_ rows: [InspectorNode], sdk: Bool = true) -> InspectorSnapshot {
             let window = InspectorNode(id: "window", rawID: 0, name: "Window", bounds: .zero, children: rows)
             return InspectorSnapshot(packageName: base.packageName, deviceName: base.deviceName, pixelSize: base.pixelSize,
                                      roots: [window], document: sdk ? base.document : nil, captureMetadata: base.captureMetadata)
         }
-        func observe(_ before: InspectorSnapshot, _ after: InspectorSnapshot) -> ComponentObservation {
-            let selected = before.roots[0].children[0]
-            var watch = ComponentObservation(node: selected, field: count, snapshot: before)
-            _ = watch.advance(from: before, index: .init(before), to: after, index: .init(after))
-            return watch
+        func match(_ before: InspectorSnapshot, _ after: InspectorSnapshot) -> InspectorNode? {
+            ClickTarget.match(before.roots[0].children[0], from: before, index: .init(before), to: after, index: .init(after))
         }
         let a = snapshot([row("a")])
-        // Whole-screen movement changes geometry and snapshot-local IDs only.
-        XCTAssertFalse(observe(a, snapshot([row("b", 120)])).interrupted)
-        // Overlapping outgoing/incoming calls during an animation.
-        XCTAssertTrue(observe(a, snapshot([row("a"), row("b")])).interrupted)
-        // A head insertion cannot turn three identical siblings into a reliable match.
+        XCTAssertEqual(match(a, snapshot([row("b", 120)]))?.id, "b")
+        XCTAssertNil(match(a, snapshot([row("a"), row("b")])))
         let twins = snapshot([row("a"), row("b")])
-        XCTAssertTrue(observe(twins, snapshot([row("new"), row("a"), row("b")])).interrupted)
-        let stopped = observe(a, snapshot([row("b", fields: [])]))
-        XCTAssertTrue(stopped.interrupted)
-        XCTAssertEqual(stopped.latest.value, "7")
-        XCTAssertTrue(observe(a, snapshot([row("a")], sdk: false)).interrupted)
+        XCTAssertNil(match(twins, snapshot([row("new"), row("a"), row("b")])))
+        XCTAssertNil(match(a, snapshot([row("b", fields: [])])))
+        XCTAssertNil(match(a, snapshot([row("a")], sdk: false)))
     }
 
-    func testListAndProcessChangesStopObservation() throws {
+    func testClickMatchRejectsReusedListRowsAndProcessChanges() throws {
         let before = try load("baseline"), scrolled = try load("scrolled"), dialog = try load("dialog")
         let row = try XCTUnwrap(before.nodes.first { $0.name == "LazyRowProbe" })
-        var watch = ComponentObservation(node: row, field: try XCTUnwrap(row.observableFields.first), snapshot: before)
-        XCTAssertNil(watch.advance(from: before, index: .init(before), to: scrolled, index: .init(scrolled)))
-        XCTAssertTrue(watch.interrupted)
-        XCTAssertEqual(watch.latest.snapshotID, before.id)
+        XCTAssertNil(ClickTarget.match(row, from: before, index: .init(before), to: scrolled, index: .init(scrolled)))
         let card = try XCTUnwrap(before.nodes.first { $0.name == "ParameterCard" })
-        watch = ComponentObservation(node: card, field: try XCTUnwrap(card.observableFields.first), snapshot: before)
-        XCTAssertNil(watch.advance(from: before, index: .init(before), to: dialog, index: .init(dialog)))
-        XCTAssertTrue(watch.detail.contains("进程"))
+        XCTAssertNil(ClickTarget.match(card, from: before, index: .init(before), to: dialog, index: .init(dialog)))
     }
 
     func testViewportUsesActualStateAndScrollOffsets() throws {

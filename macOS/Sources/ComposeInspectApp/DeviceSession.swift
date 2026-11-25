@@ -91,16 +91,15 @@ final class DeviceSession {
         packageName = foreground
     }
 
-    func capture(settings: ToolchainSettings) async throws -> CapturedSnapshot {
+    func capture(settings: ToolchainSettings, onlySourceNodes: Bool = false, sourceKeys: [String]? = nil) async throws -> CapturedSnapshot {
         guard !capturing, let device = selectedDevice, device.online else { throw CommandFailure.configuration("请先选择在线设备。") }
         let package = packageName.trimmingCharacters(in: .whitespacesAndNewlines)
         let sdk = SDKInspectorClient(tools: try settings.resolvedTools())
         captureStartedAt = Date()
         capturing = true
         defer { capturing = false; progress = "" }
-        let skipOverlayWindows = settings.skipOverlayWindows
         return try await sdk.capture(serial: device.serial, package: package, deviceName: device.model,
-                                     skipOverlayWindows: skipOverlayWindows) { [weak self] value in
+                                     windowImages: true, onlySourceNodes: onlySourceNodes, sourceKeys: sourceKeys) { [weak self] value in
             await self?.setProgress(value)
         }
     }

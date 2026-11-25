@@ -5,10 +5,6 @@ import Observation
 @MainActor @Observable
 final class WorkspaceStore {
     private(set) var snapshot: InspectorSnapshot
-    var observation: ComponentObservation?
-    func observe(_ field: NodeParameter, on node: InspectorNode) {
-        observation = ComponentObservation(node: node, field: field, snapshot: snapshot)
-    }
     private var captureRevision = UUID()
     @ObservationIgnored private var captureTask: Task<Void, Error>?
 
@@ -166,7 +162,9 @@ final class WorkspaceStore {
     @ObservationIgnored private var imageHitCycle = ImageHitCycle()
     var errorMessage: String?
     var notice = "等待获取界面"
-    private(set) var image: NSImage?
+    private var screenImage: NSImage?
+    private var windowImages: [String: NSImage] = [:]
+    var image: NSImage? { visibleRoot.flatMap { windowImages[$0.id] } ?? screenImage }
     private var transientParameters: [ComponentKey: Set<String>] = [:]
     let deviceSession = DeviceSession()
     var rawPresentation: RawJSONPresentation?
@@ -262,11 +260,6 @@ final class WorkspaceStore {
 
     func select(_ nodeID: String) {
         guard !isCapturing, presentationIndex.byID[nodeID] != nil else { return }
-        selectNode(nodeID)
-    }
-
-    func selectPageComponent(_ nodeID: String) {
-        guard !isCapturing else { return }
         selectNode(nodeID)
     }
 
@@ -417,8 +410,7 @@ final class WorkspaceStore {
     func verifyClick(expected: String, settings: ToolchainSettings) async {
         guard !isCapturing, !deviceSession.resolvingCaptureTarget,
               !expected.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let node = selectedNode, let device = deviceSession.selectedDevice,
-              let action = node.observableFields.first(where: { $0.group == .unmergedSemantics && $0.name == "OnClick" }) else { return }
+              let node = selectedNode, node.isClickable, let device = deviceSession.selectedDevice else { return }
         isCapturing = true
         defer { isCapturing = false; verificationTask = nil }
         let baseline = snapshot
@@ -426,7 +418,6 @@ final class WorkspaceStore {
         var phase = "尚未点击"
         let started = ContinuousClock.now
         let pollDeadline = started + .seconds(16)
-        let skipOverlayWindows = settings.skipOverlayWindows
         var expired = false
         verificationResult = "正在复核目标"
         let worker = Task { @MainActor in
@@ -442,16 +433,16 @@ final class WorkspaceStore {
                         throw CommandFailure.failed("当前设备或应用已切换。")
                     }
                 }
+                let filtered = baseline.document?.root["sdkCapture"]
+                let sourceKeys = filtered?["projectSourcesOnly"]?.boolean == true ? projectSources.captureSourceKeys : nil
                 @MainActor func readSnapshot() async throws -> CapturedSnapshot {
                     try checkTarget()
                     return try await sdk.capture(serial: original.serial, package: original.package, deviceName: device.model,
-                                                 skipOverlayWindows: skipOverlayWindows)
+                                                 onlySourceNodes: filtered?["onlySourceNodes"]?.boolean == true, sourceKeys: sourceKeys)
                 }
                 let before = try await readSnapshot().snapshot
                 let index = InspectorSnapshotIndex(before)
-                var probe = ComponentObservation(node: node, field: action, snapshot: baseline)
-                guard let id = probe.advance(from: baseline, index: baselineIndex, to: before, index: index),
-                      let fresh = index.byID[id], fresh.clickTargetID == node.clickTargetID else {
+                guard let fresh = ClickTarget.match(node, from: baseline, index: baselineIndex, to: before, index: index) else {
                     throw CommandFailure.failed("重新采集后无法唯一确认点击实例。")
                 }
                 let target = try ClickTarget(node: fresh, snapshot: before)
@@ -498,8 +489,8 @@ final class WorkspaceStore {
                 try checkTarget()
                 guard snapshot.id == final.snapshot.id else { throw CancellationError() }
                 if selectedNodeID == nil,
-                   let matched = probe.advance(from: before, index: index, to: snapshot, index: snapshotIndex),
-                   presentationIndex.byID[matched] != nil { selectNode(matched) }
+                   let matched = ClickTarget.match(fresh, from: before, index: index, to: snapshot, index: snapshotIndex),
+                   presentationIndex.byID[matched.id] != nil { selectNode(matched.id) }
                 verificationResult = (satisfied ? "验证通过 · " : "") + phase + " · 已获取结果快照"
                 notice = "单次点击验证完成"
             } catch {
@@ -546,7 +537,8 @@ final class WorkspaceStore {
             try Task.checkCancellation()
             try await deviceSession.prepareCaptureTarget(settings: settings)
             try Task.checkCancellation()
-            let captured = try await deviceSession.capture(settings: settings)
+            let captured = try await deviceSession.capture(settings: settings, onlySourceNodes: onlySourceNodes,
+                                                           sourceKeys: onlySourceNodes ? projectSources.captureSourceKeys : nil)
             try Task.checkCancellation()
             let source = captured.snapshot
             guard source.captureMetadata?.serial == deviceSession.selectedSerial,
@@ -560,7 +552,6 @@ final class WorkspaceStore {
             if task.isCancelled || error is CancellationError {
                 notice = "已停止获取界面。"
             } else {
-                observation?.interrupt("本次采集失败")
                 notice = "获取界面失败"
                 errorMessage = error.localizedDescription
             }
@@ -595,19 +586,35 @@ final class WorkspaceStore {
             if configuration == filterConfiguration { break }
             configuration = filterConfiguration
         }
-        guard let newImage = NSImage(data: captured.imageData) else { throw CocoaError(.fileReadCorruptFile) }
+        let newImage = captured.windowImages.isEmpty ? NSImage(data: captured.imageData) : nil
+        let size = captured.snapshot.pixelSize
+        let pairedImages = try captured.windowImages.mapValues { entry -> NSImage in
+            guard let source = NSBitmapImageRep(data: entry.png)?.cgImage else { throw CocoaError(.fileReadCorruptFile) }
+            if entry.origin == .zero, source.width == Int(size.width), source.height == Int(size.height) {
+                return NSImage(cgImage: source, size: size)
+            }
+            guard let canvas = CGContext(data: nil, width: Int(size.width), height: Int(size.height),
+                                         bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            let height = CGFloat(source.height)
+            canvas.draw(source, in: CGRect(x: entry.origin.x, y: size.height - entry.origin.y - height,
+                                           width: CGFloat(source.width), height: height))
+            guard let result = canvas.makeImage() else { throw CocoaError(.fileReadCorruptFile) }
+            return NSImage(cgImage: result, size: size)
+        }
+        guard newImage != nil || !pairedImages.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
         discardCaptureIssues()
         cancelFilterIndexes()
         rawPresentation = nil
-        let observedNode = observation?.advance(from: snapshot, index: snapshotIndex,
-                                                to: captured.snapshot, index: indexes.full)
         snapshot = captured.snapshot
-        image = newImage
+        screenImage = newImage
+        windowImages = pairedImages
         search = ""
         installIndexes(indexes)
         expandedNodes = Set(snapshot.roots.map(\.id))
         windowRootID = snapshot.roots.first?.id
-        if let observedNode, presentationIndex.byID[observedNode] != nil { selectNode(observedNode) }
         fitImage()
         notice = "已获取界面"
     }

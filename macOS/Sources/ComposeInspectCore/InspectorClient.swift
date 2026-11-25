@@ -122,6 +122,12 @@ public struct CaptureMetadata: Codable, Equatable, Sendable {
 public struct CapturedSnapshot: Sendable {
     public let snapshot: InspectorSnapshot
     public let imageData: Data
+    public var windowImages: [String: WindowImage] = [:]
+
+    public struct WindowImage: Sendable {
+        public let png: Data
+        public let origin: CGPoint
+    }
 }
 
 public struct InspectorClient: Sendable {

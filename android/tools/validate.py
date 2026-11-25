@@ -92,6 +92,13 @@ def validate_sdk(directory, source):
             assert source[location["offset"]:].startswith(node["name"]), location
         if scenario != "main":
             continue
+        assert not any(n["name"] in {"ProbeBoundary", "CompositionLocalProvider", "probeValue"} for n in nodes)
+        assert any(n["name"] == "BasicText" and any(
+            p["value"].get("value") == "ComposeInspect capability probe" for p in n["parameters"]
+        ) for n in nodes), "A lifted content slot must retain its text in the raw SDK payload"
+        assert any(n["name"] == "BasicText" and any(
+            p["value"].get("value") == "value-call-child" for p in n["parameters"]
+        ) for n in nodes), "A value-returning composable must still promote its UI children"
         card = next(n for n in nodes if n["name"] == "ParameterCard")
         params = {p["name"]: p for p in card["parameters"]}
         for name, value in {"title": "explicit-title", "count": 7, "enabled": True, "spacing": 12}.items():

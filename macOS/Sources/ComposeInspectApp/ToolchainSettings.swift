@@ -34,9 +34,6 @@ final class ToolchainSettings {
     private(set) var androidProjectPath: String {
         didSet { defaults.set(androidProjectPath, forKey: "source.androidProjectPath") }
     }
-    var skipOverlayWindows: Bool {
-        didSet { defaults.set(skipOverlayWindows, forKey: "capture.skipOverlays") }
-    }
     init(defaults: UserDefaults = .standard, environment: [String: String] = ProcessInfo.processInfo.environment) {
         self.defaults = defaults
         self.environment = environment
@@ -45,7 +42,6 @@ final class ToolchainSettings {
         recentProjects = defaults.stringArray(forKey: "source.recentProjects") ?? (current.isEmpty ? [] : [current])
         androidProjectPath = current
         adbOverride = defaults.string(forKey: "toolchain.adbPath") ?? ""
-        skipOverlayWindows = defaults.bool(forKey: "capture.skipOverlays")
     }
 
     var adbResolution: ExecutableResolution {

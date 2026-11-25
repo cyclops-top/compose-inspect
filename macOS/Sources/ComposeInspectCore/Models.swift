@@ -312,10 +312,21 @@ public enum ComposeNodeFilter {
             }
         }
         var pending = roots.reversed().map { (node: $0, insideText: false, isRoot: true, ready: false) }
+        var transitionScaffolding = Set<String>()
         var projected: [String: [InspectorNode]] = [:]
         while let (node, insideText, isRoot, ready) = pending.popLast() {
             try checkpoint()
             if !ready {
+                if configuration.hideCompositionWrappers && node.kind == "ComposeNode" {
+                    if node.children.contains(where: { $0.shortName == "SharedTransitionLayout" }) {
+                        transitionScaffolding.insert(node.id)
+                    }
+                    if transitionScaffolding.contains(node.id) {
+                        for child in node.children where child.kind == "ComposeNode" && transitionImplementation.contains(child.shortName) {
+                            transitionScaffolding.insert(child.id)
+                        }
+                    }
+                }
                 pending.append((node, insideText, isRoot, true))
                 let childInsideText = insideText || (node.kind == "ComposeNode" && node.shortName == "Text")
                 pending.append(contentsOf: node.children.reversed().map { ($0, childInsideText, false, false) })
@@ -326,23 +337,36 @@ public enum ComposeNodeFilter {
             let file = node.source?.file.components(separatedBy: "/").last
             let textImplementation = configuration.hideTextImplementation && compose && insideText && name == "BasicText" && (file == nil || file == "Text.kt")
             let layoutImplementation = configuration.hideLayoutImplementation && compose && (
-                (name == "ReusableComposeNode" && (file == nil || file == "Layout.kt" || file == "SubcomposeLayout.kt" || file == "Composables.kt"))
+                (name == "ReusableComposeNode" && (file == nil || file == "Layout.kt" || file == "SubcomposeLayout.kt" || file == "Composables.kt" || file == "LookaheadScope.kt"))
                 || (name == "Layout" && file.map { layoutCallSites.contains($0) } == true))
             let children = node.children.flatMap { projected.removeValue(forKey: $0.id) ?? [] }
             // Known composition wrappers have no independent layout. Keep any identity or
             // semantics attached to them, but don't retain bookkeeping parameters as UI rows.
             let meaningfulIdentity = node.label?.isEmpty == false
                 || node.parameters.contains {
-                    [.semantics, .unmergedSemantics, .attribute].contains($0.group)
+                    [.semantics, .mergedSemantics, .unmergedSemantics, .attribute].contains($0.group)
                         && !["false", "null", ""].contains($0.value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
                 }
                 || node.style?.layers.isEmpty == false
+            // Once projected, an idle transition host forwards its sole measured slot.
+            // Retain the stacking boundary when a preview adds another visible child.
+            let hasOneSlot = configuration.hideCompositionWrappers && compose && node.parameters.lazy.filter { parameter in
+                guard parameter.group == .parameter, let sdk = parameter.original?["sdkParameter"] else { return false }
+                if let flag = sdk["forwardsContent"]?.boolean { return flag }
+                return sdk["value"]?["type"]?.string == "androidx.compose.runtime.internal.ComposableLambdaImpl"
+            }.prefix(2).count == 1
+            let hasModifier = node.parameters.contains { $0.group == .modifier && $0.original?["sdkParameter"]?["fromDefault"]?.boolean != true }
+            let contentWrapper = ((hasOneSlot && !hasModifier) || transitionScaffolding.contains(node.id)) && !meaningfulIdentity && !node.isClickable && {
+                let measured = children.lazy.filter { !$0.bounds.isEmpty }.prefix(2)
+                return (measured.isEmpty && transitionScaffolding.contains(node.id)) ||
+                    (measured.count == 1 && measured.first?.bounds == node.bounds)
+            }()
             let compositionWrapper = configuration.hideCompositionWrappers && compose && (
                 nonVisualCall(name, file: file)
                     || (node.isVirtualLayoutGroup && (name != "Item" || !meaningfulIdentity)))
             let composeHost = configuration.hideComposeHosts && node.kind == "ViewNode"
                 && (name.hasSuffix("AndroidComposeView") || name == "ComposeHost")
-            if !isRoot && (textImplementation || layoutImplementation || compositionWrapper || composeHost
+            if !isRoot && (textImplementation || layoutImplementation || compositionWrapper || contentWrapper || composeHost
                 || (onlyClickable && (!node.isClickable || node.clickTargetID.map { preferred[$0] != node.id } == true))) {
                 projected[node.id] = children
                 continue
@@ -351,9 +375,13 @@ public enum ComposeNodeFilter {
         }
         return roots.flatMap { projected.removeValue(forKey: $0.id) ?? [] }
     }
+    private static let transitionImplementation: Set<String> = [
+        "SharedTransitionLayout", "SharedTransitionScope", "LookaheadScope", "Box",
+        "Layout", "ReusableComposeNode", "CompositionLocalProvider"
+    ]
     private static let layoutCallSites: Set<String> = [
         "Layout.kt", "Text.kt", "BasicText.kt", "Box.kt", "Row.kt", "Column.kt", "Spacer.kt",
-        "SubcomposeLayout.kt", "Icon.kt", "Image.kt"
+        "SubcomposeLayout.kt", "Icon.kt", "Image.kt", "FlowLayout.kt"
     ]
 
     // Tooling does not expose return types. Only known non-UI calls are classified here;
@@ -364,7 +392,7 @@ public enum ComposeNodeFilter {
         if name.hasPrefix("animate") && name.hasSuffix("AsState") { return true }
         if name.hasPrefix("<get-") && name.hasSuffix(">") { return true }
         switch (name, file) {
-        case ("resourceCardColor", "ResourceFolderSelectorCard.kt"),
+        case ("LazySaveableStateHolderProvider", "LazyLayout.kt"), ("collectInto", "SnapshotFlow.kt"), ("resourceCardColor", "ResourceFolderSelectorCard.kt"),
              ("masteryColor", "ResourceMastery.kt"), ("masteryLabel", "ResourceMastery.kt"):
             return true
         default: return false

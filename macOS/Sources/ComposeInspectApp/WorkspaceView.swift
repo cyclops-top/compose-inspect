@@ -69,14 +69,6 @@ struct WorkspaceView: View {
             }
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 14) {
-                    Toggle("跳过悬浮窗", isOn: Binding(
-                        get: { tools.skipOverlayWindows },
-                        set: { tools.skipOverlayWindows = $0 }
-                    ))
-                    .toggleStyle(.checkbox)
-                    .font(.system(size: 12))
-                    .disabled(store.isCapturing)
-                    .help("下次采集时排除系统类型悬浮窗；保留普通对话框和弹出菜单。截图仍包含屏幕上可见的悬浮窗。")
                     if let metadata = store.snapshot.captureMetadata {
                         Button { showingCaptureMethod.toggle() } label: {
                             Label("SDK 采集信息", systemImage: "bolt.fill").labelStyle(.iconOnly).foregroundStyle(.green)

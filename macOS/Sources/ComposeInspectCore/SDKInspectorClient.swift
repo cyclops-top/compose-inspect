@@ -1,11 +1,15 @@
 import Foundation
 
 public struct SDKInspectorClient: Sendable {
-    public static let supportedSDKVersion = "0.1.3"
+    public static let supportedSDKVersion = "0.1.4-SNAPSHOT"
+    static func supports(_ reported: String?) -> Bool {
+        reported == supportedSDKVersion || reported == "0.1.3"
+    }
     private let adb: InspectorClient
     public init(tools: InspectorToolchain) { adb = InspectorClient(tools: tools) }
 
-    public func capture(serial: String, package: String, deviceName: String, skipOverlayWindows: Bool = false,
+    public func capture(serial: String, package: String, deviceName: String, windowImages: Bool = false, onlySourceNodes: Bool = false,
+                        sourceKeys: [String]? = nil,
                         progress: @escaping @Sendable (String) async -> Void = { _ in }) async throws -> CapturedSnapshot {
         guard InspectorClient.validPackage(package) else { throw CommandFailure.configuration("无效包名") }
         try Task.checkCancellation()
@@ -22,7 +26,7 @@ public struct SDKInspectorClient: Sendable {
         do {
             try Task.checkCancellation()
             result = try await capture(port: port, serial: serial, package: package, deviceName: deviceName,
-                                       skipOverlayWindows: skipOverlayWindows, progress: progress)
+                                       windowImages: windowImages, onlySourceNodes: onlySourceNodes, sourceKeys: sourceKeys, progress: progress)
         } catch {
             await removeForward(port: port, serial: serial)
             throw error
@@ -41,8 +45,8 @@ public struct SDKInspectorClient: Sendable {
         let document = try InspectorDocument(data: data)
         if let error = document.root["error"]?.string { throw CommandFailure.failed("SDK：\(error)") }
         let reported = document.root["sdkVersion"]?.string
-        guard reported == supportedSDKVersion, document.root["protocolVersion"]?.int64 == 1 else {
-            throw CommandFailure.failed("当前 CompScope 仅支持采集 SDK \(supportedSDKVersion)（协议 1）。目标应用报告 SDK \(reported ?? "未知")，协议 \(document.root["protocolVersion"]?.display ?? "未知")。请使用对应 SDK 重新构建调试包。")
+        guard supports(reported), document.root["protocolVersion"]?.int64 == 1 else {
+            throw CommandFailure.failed("当前 CompScope 支持采集 SDK 0.1.3 和 \(supportedSDKVersion)（协议 1）。目标应用报告 SDK \(reported ?? "未知")，协议 \(document.root["protocolVersion"]?.display ?? "未知")。请使用对应 SDK 重新构建调试包。")
         }
         guard document.root["packageName"]?.string == package else { throw CommandFailure.failed("SDK 响应包名与目标不一致。") }
         guard let pid = document.root["pid"]?.int64, pid > 0 else { throw CommandFailure.failed("SDK 响应缺少有效进程标识。") }
@@ -50,7 +54,7 @@ public struct SDKInspectorClient: Sendable {
         return document
     }
 
-    private func capture(port: UInt16, serial: String, package: String, deviceName: String, skipOverlayWindows: Bool,
+    private func capture(port: UInt16, serial: String, package: String, deviceName: String, windowImages: Bool, onlySourceNodes: Bool, sourceKeys: [String]?,
                          progress: @escaping @Sendable (String) async -> Void) async throws -> CapturedSnapshot {
         let started = Date()
         let helloData: Data
@@ -73,24 +77,35 @@ public struct SDKInspectorClient: Sendable {
         guard hello.root["capabilities"]?.array?.contains(.string("composition-tables")) == true else {
             throw CommandFailure.failed("SDK 未声明组件树采集能力。")
         }
-        if skipOverlayWindows && hello.root["capabilities"]?.array?.contains(.string("skip-overlays-v1")) != true {
-            throw CommandFailure.failed("SDK 不支持跳过悬浮窗，请更新 SDK。")
-        }
         let pid = hello.root["pid"]!.int64!
         guard hello.root["capabilities"]?.array?.contains(.string("gzip-json-v1")) == true else {
             throw CommandFailure.failed("SDK 缺少压缩采集能力，请使用开发版本 \(Self.supportedSDKVersion)。")
         }
         await progress("通过 SDK 读取组件树…")
         let readStarted = Date()
-        let data = try await SDKTransport.request(port: port, command: "capture-gzip",
-                                                  timeout: 20, compressed: true, skipOverlayWindows: skipOverlayWindows)
+        let paired = windowImages && hello.root["capabilities"]?.array?.contains(.string("window-images-v1")) == true
+        let filterAtSource = onlySourceNodes && hello.root["capabilities"]?.array?.contains(.string("source-only-v1")) == true
+        async let screenResult: CommandOutput? = paired ? nil : adb.adb(["-s", serial, "shell", "-T", "screencap", "-p"])
+        let payload = try await SDKTransport.request(port: port, command: "capture-gzip",
+                                                  timeout: 20, compressed: true,
+                                                  windowImages: paired, onlySourceNodes: filterAtSource, sourceKeys: filterAtSource ? sourceKeys : nil)
         let readFinished = Date()
-        await progress("获取截图并解析 SDK 响应…")
-        // The UI tree is already captured. Screenshot I/O and JSON parsing can overlap safely.
-        async let screenResult = adb.adb(["-s", serial, "shell", "-T", "screencap", "-p"])
+        let separator = paired ? payload.firstIndex(of: 10) : nil
+        let data = separator.map { Data(payload[..<$0]) } ?? payload
+        var remaining = separator.map { payload.suffix(from: $0 + 1) } ?? Data()
         let document = try Self.validateResponse(data, package: package, expectedPID: pid)
         let screen = try await screenResult
-        let size = try InspectorClient.imageSize(screen.stdout)
+        let size: CGSize
+        if let screen {
+            size = try InspectorClient.imageSize(screen.stdout)
+        } else {
+            guard let dimensions = document.root["displaySize"]?.array, dimensions.count == 2,
+                  let w = dimensions[0].int64, let h = dimensions[1].int64,
+                  w > 0, h > 0, w <= 16384, h <= 16384, w * h <= 32_000_000 else {
+                throw CommandFailure.failed("SDK 窗口截图缺少有效的屏幕尺寸。")
+            }
+            size = CGSize(width: Int(w), height: Int(h))
+        }
         await progress("解析 SDK 节点与参数…")
         let importStarted = Date()
         let snapshot = try SDKSnapshotImporter.decode(document, imageSize: size, packageName: package)
@@ -101,7 +116,13 @@ public struct SDKInspectorClient: Sendable {
                            readFinished.timeIntervalSince(readStarted), importStarted.timeIntervalSince(readFinished),
                            importFinished.timeIntervalSince(importStarted)),
                     "SDK 原始 Composition 表保留为窗口内的独立分支；尚未拼接 Lazy 子表或采集 Android View 属性。",
-                    String(decoding: screen.stderr, as: UTF8.self)]
+                    paired ? "截图来源：SDK 独立窗口。" : "截图来源：ADB 整屏。"]
+        if onlySourceNodes {
+            if sourceKeys != nil && filterAtSource && document.root["projectSourcesOnly"]?.boolean != true {
+                logs.append("工程索引超过请求上限，SDK 已按源码位置采集，工程匹配由桌面完成。")
+            }
+            logs.append(filterAtSource ? "SDK 已按源码位置过滤组件。" : "目标 SDK 缺少源码过滤能力，已在桌面筛选本次完整采集。")
+        }
         logs.append(contentsOf: document.root["warnings"]?.array?.compactMap(\.string) ?? [])
         if hello.root["capabilities"]?.array?.contains(.string("layout-interactions-v1")) != true {
             logs.append("当前 SDK 未声明交互语义采集能力；仅可点击筛选可能为空，请更新 SDK 后重新编译安装应用。")
@@ -117,7 +138,29 @@ public struct SDKInspectorClient: Sendable {
         let metadata = CaptureMetadata(serial: serial, packageName: package, startedAt: started, finishedAt: Date(),
                                        diagnostics: logs, baselineJSON: data)
         try Task.checkCancellation()
+        var images: [String: CapturedSnapshot.WindowImage] = [:]
+        if paired {
+            var byCaptureIndex: [Int: Data] = [:]
+            for (index, window) in document.windows.enumerated() {
+                guard let count = window["pngBytes"]?.int64 else { continue }
+                guard count > 0, count <= remaining.count else { throw CommandFailure.failed("SDK 窗口截图不完整。") }
+                byCaptureIndex[index] = Data(remaining.prefix(Int(count)))
+                remaining = remaining.dropFirst(Int(count))
+            }
+            guard remaining.isEmpty else { throw CommandFailure.failed("SDK 窗口截图包含多余数据。") }
+            for root in snapshot.roots {
+                guard let index = snapshot.document?.window(for: root.id)?["sdkWindow"]?["captureIndex"]?.int64,
+                      let windows = document.root["windows"]?.array, windows.indices.contains(Int(index)),
+                      let offset = windows[Int(index)]["screenOffset"]?.array, offset.count == 2,
+                      let x = offset[0].double, let y = offset[1].double,
+                      let png = byCaptureIndex[Int(index)] else {
+                    throw CommandFailure.failed("SDK 组件树与窗口截图配对失败。")
+                }
+                _ = try InspectorClient.imageSize(png)
+                images[root.id] = .init(png: png, origin: CGPoint(x: x, y: y))
+            }
+        }
         return CapturedSnapshot(snapshot: snapshot.withCaptureContext(deviceName: deviceName, metadata: metadata),
-                                imageData: screen.stdout)
+                                imageData: screen?.stdout ?? Data(), windowImages: images)
     }
 }

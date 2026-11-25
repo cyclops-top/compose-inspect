@@ -9,6 +9,49 @@ public struct ClickTarget: Sendable {
     public let point: CGPoint
     public let screen: CGSize
 
+    /// Revalidate the selected action for this click operation only.
+    public static func match(_ node: InspectorNode, from before: InspectorSnapshot, index old: InspectorSnapshotIndex,
+                             to after: InspectorSnapshot, index new: InspectorSnapshotIndex) -> InspectorNode? {
+        guard let serial = before.captureMetadata?.serial, !serial.isEmpty,
+              after.captureMetadata?.serial == serial, before.packageName == after.packageName,
+              let a = before.document?.root, let b = after.document?.root,
+              [a, b].allSatisfy({ $0["captureBackend"]?.string == "sdk" &&
+                  SDKInspectorClient.supports($0["sdkCapture"]?["sdkVersion"]?.string) }),
+              let pid = a["sdkCapture"]?["pid"]?.int64, pid == b["sdkCapture"]?["pid"]?.int64 else {
+            return nil
+        }
+        let path = old.path(to: node.id)
+        guard let root = path.first, let target = path.last, target.source?.line != nil,
+              old.roots.filter({ $0.name == root.name }).count == 1,
+              new.roots.filter({ $0.name == root.name }).count == 1,
+              let nextRoot = new.roots.first(where: { $0.name == root.name }) else {
+            return nil
+        }
+        guard !path.contains(where: { $0.shortName.hasPrefix("Lazy") || $0.source?.file.hasPrefix("Lazy") == true || $0.shortName == "ReusableContent" }) else {
+            return nil
+        }
+        func candidates(_ index: InspectorSnapshotIndex, root: InspectorNode) -> [InspectorNode] {
+            (index.nodesByRoot[root.id] ?? []).filter { node in
+                guard node.name == target.name, node.source == target.source else { return false }
+                let other = index.path(to: node.id)
+                return other.count == path.count && zip(other, path).allSatisfy {
+                    $0.name == $1.name && $0.kind == $1.kind && $0.source == $1.source
+                }
+            }
+        }
+        let matches = candidates(new, root: nextRoot)
+        guard matches.count == 1, candidates(old, root: root).count == 1 else {
+            return nil
+        }
+        let candidate = matches[0]
+        func hasUniqueAction(_ node: InspectorNode) -> Bool {
+            node.observableFields.filter { $0.group == .unmergedSemantics && $0.name == "OnClick" }.count == 1
+        }
+        guard let identity = target.clickTargetID, candidate.clickTargetID == identity,
+              hasUniqueAction(target), hasUniqueAction(candidate) else { return nil }
+        return candidate
+    }
+
     public init(node: InspectorNode, snapshot: InspectorSnapshot) throws {
         guard node.isClickable, node.clickTargetID != nil, let metadata = snapshot.captureMetadata,
               let doc = snapshot.document, doc.root["captureBackend"]?.string == "sdk",
@@ -17,6 +60,9 @@ public struct ClickTarget: Sendable {
               let x = bounds["x"]?.double, let y = bounds["y"]?.double,
               let width = bounds["width"]?.double, let height = bounds["height"]?.double,
               width > 0, height > 0 else { throw CommandFailure.failed("组件缺少已确认的点击布局。") }
+        if let index = doc.window(for: node.id)?["sdkWindow"]?["captureIndex"]?.int64, index != 0 {
+            throw CommandFailure.failed("请先将目标窗口切换到前台，再重新获取并复核点击。")
+        }
         var labels = Set<String>()
         var pending = [node]
         while let current = pending.popLast() {

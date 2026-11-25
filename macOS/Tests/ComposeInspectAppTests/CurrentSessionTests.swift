@@ -5,6 +5,31 @@ import SwiftUI
 @testable import ComposeInspectCore
 
 final class CurrentSessionTests: XCTestCase {
+    @MainActor func testLiveWindowImagesSwitchWithComposeRoots() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let scenario = env["COMPOSEINSPECT_WINDOW_SCENARIO"] else {
+            throw XCTSkip("Requires the SDK sample with the dialog or popup scenario visible")
+        }
+        let tools = try InspectorToolchain(adb: URL(fileURLWithPath: XCTUnwrap(env["COMPOSEINSPECT_ADB"])), environment: env)
+        let captured = try await SDKInspectorClient(tools: tools).capture(serial: XCTUnwrap(env["COMPOSEINSPECT_SERIAL"]),
+            package: "dev.composeinspect.sample", deviceName: "Window image test", windowImages: true)
+        let roots = captured.snapshot.roots
+        XCTAssertEqual(roots.count, 2)
+        guard roots.count == 2 else { return }
+        _ = NSApplication.shared
+        let store = WorkspaceStore()
+        try await store.applyCapture(captured)
+        let image = try XCTUnwrap(store.image)
+        let pixels = try XCTUnwrap(ScreenshotPixels(XCTUnwrap(image.cgImage(forProposedRect: nil, context: nil, hints: nil))))
+        let marker = try XCTUnwrap(captured.snapshot.nodes.first { $0.name == (scenario == "popup" ? "PopupContent" : "DialogContent") })
+        XCTAssertEqual(store.snapshotIndex.rootIDs[marker.id], roots[0].id)
+        let point = CGPoint(x: marker.bounds.minX + 4, y: marker.bounds.minY + 4)
+        XCTAssertEqual(pixels.hex(at: point, imageSize: image.size), scenario == "popup" ? "#FFFF00" : "#FFFFFF")
+        store.windowRootID = roots[1].id
+        XCTAssertNotNil(store.image)
+        XCTAssertFalse(store.image === image)
+    }
+
     @MainActor func testPreviewPanStopsAtEdgesAndCentersLetterboxedAxes() {
         let image = CGSize(width: 200, height: 400)
         let canvas = CGSize(width: 300, height: 400)

@@ -19,6 +19,28 @@ public indirect enum InspectorJSON: Codable, Equatable, Sendable {
         }
     }
     public func jsonString(pretty: Bool = false, level: Int = 0) -> String {
+        var output = ""
+        emitJSON(pretty: pretty, level: level) { output += $0 }
+        return output
+    }
+
+    public func writeJSON(to url: URL, pretty: Bool) throws {
+        try Data().write(to: url)
+        let handle = try FileHandle(forWritingTo: url)
+        defer { try? handle.close() }
+        var buffer = Data()
+        try emitJSON(pretty: pretty, level: 0) { token in
+            buffer.append(contentsOf: token.utf8)
+            if buffer.count >= 65536 {
+                try Task.checkCancellation()
+                try handle.write(contentsOf: buffer)
+                buffer.removeAll(keepingCapacity: true)
+            }
+        }
+        try handle.write(contentsOf: buffer)
+    }
+
+    private func emitJSON(pretty: Bool, level: Int, emit: (String) throws -> Void) rethrows {
         enum Work {
             case value(InspectorJSON, Int)
             case text(String)
@@ -31,19 +53,18 @@ public indirect enum InspectorJSON: Codable, Equatable, Sendable {
             return String(decoding: try! encoder.encode(value), as: UTF8.self)
         }
         var pending: [Work] = [.value(self, level)]
-        var output = ""
         while let work = pending.popLast() {
             switch work {
-            case .text(let text): output += text
+            case .text(let text): try emit(text)
             case .value(let value, let depth):
                 switch value {
-                case .number(let token): output += token
-                case .string(let string): output += quote(string)
-                case .null: output += "null"
-                case .bool(let bool): output += bool ? "true" : "false"
+                case .number(let token): try emit(token)
+                case .string(let string): try emit(quote(string))
+                case .null: try emit("null")
+                case .bool(let bool): try emit(bool ? "true" : "false")
                 case .array(let values):
-                    guard !values.isEmpty else { output += "[]"; continue }
-                    output += pretty ? "[\n" : "["
+                    guard !values.isEmpty else { try emit("[]"); continue }
+                    try emit(pretty ? "[\n" : "[")
                     pending.append(.text(pretty ? "\n" + String(repeating: "  ", count: depth) + "]" : "]"))
                     for index in values.indices.reversed() {
                         if index < values.count - 1 { pending.append(.text(pretty ? ",\n" : ",")) }
@@ -51,9 +72,9 @@ public indirect enum InspectorJSON: Codable, Equatable, Sendable {
                         if pretty { pending.append(.text(String(repeating: "  ", count: depth + 1))) }
                     }
                 case .object(let values):
-                    guard !values.isEmpty else { output += "{}"; continue }
+                    guard !values.isEmpty else { try emit("{}"); continue }
                     let keys = values.keys.sorted()
-                    output += pretty ? "{\n" : "{"
+                    try emit(pretty ? "{\n" : "{")
                     pending.append(.text(pretty ? "\n" + String(repeating: "  ", count: depth) + "}" : "}"))
                     for index in keys.indices.reversed() {
                         if index < keys.count - 1 { pending.append(.text(pretty ? ",\n" : ",")) }
@@ -63,7 +84,6 @@ public indirect enum InspectorJSON: Codable, Equatable, Sendable {
                 }
             }
         }
-        return output
     }
 
     public func value(at pointer: String) -> InspectorJSON? {

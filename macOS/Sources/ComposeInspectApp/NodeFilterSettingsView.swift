@@ -21,7 +21,7 @@ struct NodeFilterSettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle("Text 内部的 BasicText", isOn: $store.filterConfiguration.hideTextImplementation)
                 Toggle("已知 Layout / ReusableComposeNode 实现", isOn: $store.filterConfiguration.hideLayoutImplementation)
-                Toggle("无独立内容的列表组合包装", isOn: $store.filterConfiguration.hideCompositionWrappers)
+                Toggle("无独立内容的组合包装（含单内容槽）", isOn: $store.filterConfiguration.hideCompositionWrappers)
                 Toggle("Compose 宿主", isOn: $store.filterConfiguration.hideComposeHosts)
             }
             IconButton(title: "恢复默认规则", systemImage: "arrow.counterclockwise") { store.restoreDefaultFilters() }

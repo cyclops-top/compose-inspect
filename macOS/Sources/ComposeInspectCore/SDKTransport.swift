@@ -5,8 +5,15 @@ import Darwin
 /// No Python/netcat runtime is needed by the desktop app.
 enum SDKTransport {
     static func request(port: UInt16, command: String, timeout: TimeInterval, maxBytes: Int = 32 * 1024 * 1024,
-                        compressed: Bool = false, skipOverlayWindows: Bool = false) async throws -> Data {
-        let request = try JSONSerialization.data(withJSONObject: ["command": command, "skipOverlayWindows": skipOverlayWindows]) + Data([10])
+                        compressed: Bool = false, windowImages: Bool = false, onlySourceNodes: Bool = false, sourceKeys: [String]? = nil) async throws -> Data {
+        var options: [String: Any] = ["command": command, "windowImages": windowImages, "onlySourceNodes": onlySourceNodes]
+        options["sourceKeys"] = sourceKeys
+        var request = try JSONSerialization.data(withJSONObject: options)
+        if request.count >= 4 * 1024 * 1024 {
+            options.removeValue(forKey: "sourceKeys")
+            request = try JSONSerialization.data(withJSONObject: options)
+        }
+        request.append(10)
         let worker = Task.detached(priority: .userInitiated) {
             try exchange(port: port, request: request, timeout: timeout, maxBytes: maxBytes, compressed: compressed)
         }

@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.util.Log
+import dev.composeinspect.collector.ComposableReturns
 import dev.composeinspect.collector.ComposeCollector
 import dev.composeinspect.protocol.Protocol
 import dev.composeinspect.protocol.JsonResponseEncoder
@@ -45,38 +46,56 @@ class InspectorInitProvider : ContentProvider() {
             })
             thread(name = "ComposeInspect", isDaemon = true) {
                 try {
+                    val returnTypes by lazy {
+                        val info = app.applicationInfo
+                        try {
+                            ComposableReturns.fromApks(listOf(info.sourceDir) + info.splitSourceDirs.orEmpty())
+                        } catch (e: Exception) {
+                            Log.w("ComposeInspect", "Cannot resolve composable return signatures", e)
+                            ComposableReturns.empty
+                        }
+                    }
                     LocalServerSocket(Protocol.socketName(app.packageName)).use { server ->
                         while (!Thread.currentThread().isInterrupted) {
                             server.accept().use { socket ->
                                 var compressed = false
-                                fun send(response: JSONObject) {
+                                fun send(response: JSONObject, attachments: List<ByteArray> = emptyList()) {
                                     val json = JsonResponseEncoder.encode(response)
-                                    socket.outputStream.write(if (compressed) GzipFrame.encode(json) else json)
+                                    socket.outputStream.write(if (compressed) GzipFrame.encode(json, attachments) else json)
                                 }
                                 try {
                                     // ADB forwarding originates from shell/root; other apps are rejected.
                                     if (socket.peerCredentials.uid !in setOf(0, 2000, Process.myUid())) return@use
                                     socket.soTimeout = 5000
-                                    val input = socket.inputStream
-                                    val request = StringBuilder()
-                                    while (request.length < 4096) {
+                                    val input = socket.inputStream.buffered()
+                                    val request = java.io.ByteArrayOutputStream()
+                                    val maxBytes = 4 * 1024 * 1024
+                                    while (request.size() < maxBytes) {
                                         val byte = input.read()
                                         if (byte == -1 || byte == 10) break
-                                        request.append(byte.toChar())
+                                        request.write(byte)
                                     }
-                                    require(request.length < 4096) { "Request too large" }
-                                    val options = JSONObject(request.toString())
+                                    require(request.size() < maxBytes) { "Request too large" }
+                                    val options = JSONObject(request.toString("UTF-8"))
                                     val command = options.getString("command")
                                     compressed = command == "capture-gzip"
+                                    val windowImages = options.optBoolean("windowImages") && compressed && android.os.Build.VERSION.SDK_INT >= 34
+                                    val copies = WindowCopies()
                                     val response = when (command) {
                                         "hello" -> JSONObject().put("capabilities", Protocol.array(listOf(
                                             "composition-tables", "parameters", "call-source-locations", "gzip-json-v1",
-                                            "style-layers-v1", "layout-interactions-v1", "skip-overlays-v1")))
+                                            "style-layers-v1", "layout-interactions-v1", "skip-overlays-v1", "source-only-v1") +
+                                            if (android.os.Build.VERSION.SDK_INT >= 34) listOf("window-images-v1") else emptyList()))
                                         "capture", "capture-gzip" -> {
+                                            val sourceKeys = options.optJSONArray("sourceKeys")?.let { keys ->
+                                                (0 until keys.length()).mapTo(HashSet()) { keys.getString(it) }
+                                            }
+                                            val signatures = returnTypes
                                             val queued = android.os.SystemClock.elapsedRealtimeNanos()
                                             val task = FutureTask {
                                                 val started = android.os.SystemClock.elapsedRealtimeNanos()
-                                                ComposeCollector.capture(activities.toList(), options.optBoolean("skipOverlayWindows", false)).apply {
+                                                ComposeCollector.capture(activities.toList(), options.optBoolean("skipOverlayWindows", false),
+                                                    if (windowImages) copies::start else null, signatures, options.optBoolean("onlySourceNodes"), sourceKeys).apply {
                                                     put("timings", (optJSONObject("timings") ?: JSONObject())
                                                         .put("mainThreadQueueMs", (started - queued) / 1e6)
                                                         .put("collectMs", (android.os.SystemClock.elapsedRealtimeNanos() - started) / 1e6))
@@ -89,9 +108,10 @@ class InspectorInitProvider : ContentProvider() {
                                         }
                                         else -> Protocol.error("Unknown command: $command")
                                     }
+                                    val attachments = if (windowImages) copies.finish(response) else emptyList()
                                     response.put("protocolVersion", Protocol.VERSION).put("sdkVersion", Protocol.SDK_VERSION)
                                         .put("packageName", app.packageName).put("pid", Process.myPid())
-                                    send(response)
+                                    send(response, attachments)
 
                                 } catch (e: StackOverflowError) {
                                     // A tooling failure must not terminate the host app.

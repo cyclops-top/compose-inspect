@@ -25,6 +25,47 @@ final class ComponentStyleDrawingTests: XCTestCase {
     }
 
     @MainActor
+    func testPageFilterRefreshPreservesOrbitAndZoom() throws {
+        let box = CGRect(x: 0, y: 0, width: 80, height: 60)
+        let child = InspectorNode(id: "card", rawID: 2, name: "Card", bounds: box.insetBy(dx: 5, dy: 5))
+        let root = InspectorNode(id: "root", rawID: 1, name: "Window", bounds: box, children: [child])
+        let bitmap = try XCTUnwrap(CGContext(data: nil, width: 80, height: 60, bitsPerComponent: 8, bytesPerRow: 0,
+                                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        let image = try XCTUnwrap(bitmap.makeImage())
+        func page(_ revision: UInt, reset: Int = 0) throws -> PageScene {
+            PageScene(surfaces: try PageSurfaces(root: PagePreviewGroup(root, isVisible: { revision == 0 || $0 == root.id }),
+                      image: image, structuralOnly: true), revision: revision, selected: nil,
+                      resetRequest: reset, onSelect: { _ in })
+        }
+        let host = NSHostingView(rootView: try page(0))
+        host.frame = CGRect(x: 0, y: 0, width: 480, height: 320)
+        func refresh() {
+            host.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        func sceneView(_ view: NSView) -> SCNView? {
+            (view as? SCNView) ?? view.subviews.lazy.compactMap(sceneView).first
+        }
+        refresh()
+        let view = try XCTUnwrap(sceneView(host))
+        let camera = try XCTUnwrap(view.pointOfView)
+        let initial = camera.simdWorldTransform
+        camera.position = SCNVector3(4, 2, 6)
+        camera.look(at: SCNVector3Zero)
+        view.defaultCameraController.target = SCNVector3Zero
+        let moved = camera.simdWorldTransform
+        XCTAssertNotNil(view.scene?.rootNode.childNode(withName: child.id, recursively: false))
+        host.rootView = try page(1)
+        refresh()
+        XCTAssertTrue(sceneView(host)?.pointOfView === camera)
+        XCTAssertTrue(simd_equal(camera.simdWorldTransform, moved))
+        XCTAssertNil(view.scene?.rootNode.childNode(withName: child.id, recursively: false))
+        host.rootView = try page(1, reset: 1)
+        refresh()
+        XCTAssertTrue(simd_equal(camera.simdWorldTransform, initial))
+    }
+
+    @MainActor
     func testPageZoomKeepsOffCenterSurfaceUnderPointer() throws {
         _ = NSApplication.shared
         let view = PageSceneView(frame: CGRect(x: 0, y: 0, width: 480, height: 360))
@@ -64,7 +105,15 @@ final class ComponentStyleDrawingTests: XCTestCase {
         let box = CGRect(x: 30, y: 50, width: 100, height: 80)
         let shape = ComponentStyle.Shape(name: "RoundedCornerShape", kind: "rounded",
                                          topLeft: 36, topRight: 0, bottomLeft: 0, bottomRight: 0)
-        let face = ComponentStyleDrawing.path(in: box, shape: shape, scale: 1)
+        let clip = ComponentStyle.Layer(id: 0, name: "clip", kind: "clip", bounds: box,
+                                        padding: nil, argb: nil, alpha: 1, shape: shape, unsupported: nil)
+        let style = ComponentStyle(density: 1, contentBounds: box, outerBounds: box, layers: [clip])
+        let child = InspectorNode(id: "child", rawID: 1, name: "Image", bounds: box.insetBy(dx: -10, dy: -10))
+        let parent = InspectorNode(id: "parent", rawID: 0, name: "Box", bounds: box, children: [child], style: style)
+        let layers = PageSceneLayer.layout(PagePreviewGroup(parent), screen: box.insetBy(dx: -20, dy: -20), structuralOnly: true)
+        let clipped = try XCTUnwrap(layers.first { $0.id == child.id })
+        XCTAssertEqual(clipped.box, box)
+        let face = clipped.face
         let front = SCNMaterial(), back = SCNMaterial(), side = SCNMaterial()
         let geometry = PageScene.solid(face: face, box: box, unit: 0.02, thickness: 0.065,
                                        front: front, side: side, back: back)
@@ -103,6 +152,15 @@ final class ComponentStyleDrawingTests: XCTestCase {
         XCTAssertGreaterThan(layers[foreground].depth, underneath.depth)
         XCTAssertTrue(underneath.coveringLayers.contains(foreground))
         XCTAssertEqual(layers.last?.depth, underneath.depth)
+
+        let structure = PageSceneLayer.layout(PagePreviewGroup(root), screen: screen, structuralOnly: true)
+        let contentLayer = try XCTUnwrap(structure.first { $0.id == "content" })
+        let roomIndex = try XCTUnwrap(structure.firstIndex { $0.id == "room" })
+        XCTAssertEqual(contentLayer.coveringLayers, [roomIndex])
+        XCTAssertTrue(structure[roomIndex].coveringLayers.isEmpty)
+        XCTAssertEqual(structure.first { $0.id == "marker" }?.depth, 1)
+        XCTAssertEqual(structure.first { $0.id == "room" }?.depth, 2)
+
     }
 
     func testPagePreviewCollapsesMatchingChainsAndPreservesBranchAndStyleChanges() {

@@ -38,7 +38,7 @@ def main():
     parser.add_argument("--compose", required=True, help="Resolved Compose version of installed sample build")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    expected_sdk = "0.1.3"
+    expected_sdk = "0.1.4-SNAPSHOT"
 
     def adb(*args_):
         return subprocess.check_output(["adb", "-s", args.serial, *args_], text=True, timeout=30).strip()

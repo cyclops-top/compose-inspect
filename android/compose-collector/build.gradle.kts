@@ -12,6 +12,7 @@ dependencies {
     testImplementation("org.json:json:20240303")
     implementation("androidx.compose.foundation:foundation:$composeVersion")
     implementation(project(":protocol"))
+    implementation("org.smali:dexlib2:2.5.2")
     implementation("androidx.compose.ui:ui-tooling-data:$composeVersion")
     implementation("androidx.compose.ui:ui:$composeVersion")
 }

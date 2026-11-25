@@ -19,8 +19,12 @@
 SDK 的非导出 ContentProvider 随 AAR Manifest 合并，在 Activity 首次组合前启用 `isDebugInspectorInfoEnabled`。Compose 自身记录 `inspection_slot_table_set` 并调用参数信息收集逻辑。SDK 读取 `CompositionData.mapTree`，不替换 `setContent`，不设置预览模式，不要求业务包装 Composable。
 
 - Android 29+ 使用 `WindowInspector.getGlobalWindowViews()` 包含 Dialog/Popup；26–28 回退到 Activity decor，并明确返回窗口覆盖限制。
+- Android 14+ 的新版 SDK 支持按窗口配对截图。Mac 端选择窗口时会切换到对应的 PixelCopy 图像，并按窗口屏幕偏移显示。低版本系统或旧版 SDK 使用 ADB 整屏截图，与组件树并行获取。窗口像素复制和树遍历之间可能跨帧。
 - 在主线程读取 Composition 表；socket 工作在后台线程，单次请求有超时。源码位置是**调用点**，不是函数定义；只包含文件名、行号、UTF-16 offset/length 和包 hash，不含完整源文件路径。
 - `source.line` 保留 tooling 原始值。在已测两个版本中它是 1 起算，已用业务源码行和 offset 验证；不能仅根据 tooling 的旧注释再加 1。
+- 声明 `source-only-v1` 的 SDK 支持每次抓取传入 `onlySourceNodes`，在读取参数之前跳过无源码文件名的节点。可选的 `sourceKeys` 限定工程中唯一的文件名与包哈希组合。保留子组件顺序，只为可关联到保留组件的布局读取语义与样式。
+- 采集时直接提升纯内容包装的子节点，保留顺序。SDK 检查单个 Composable 内容槽、同尺寸子分支和独立布局边界；文本、交互参数或额外可见分支会阻止这项通用折叠。外观层为空本身不会触发过滤。
+- SDK 在首次采集时从当前 APK 和 split APK 读取 Compose 方法签名，并在进程内复用。能确认返回非 Unit 的调用会在编码前提升其子节点，计数见 `stats.filteredValueCalls`。声明信息缺失或同文件同名重载的返回类别冲突时，返回类型规则保留节点。
 - 原始 Composition 表分别输出，**尚未跨表拼接 Lazy 子组合，也未与 Android View 树合并**。
 - 参数编码最多 3 层、20 个元素、2048 字符；截断或不支持的类型会显式标记。标准 Shape、盒装 Color/Dp 已有专用编码；其他未支持的 Android/AndroidX 对象和回调保留类型，尚不支持参数续读。
 - `complete` 只表示这次发现的表没有读取错误，不表示任意应用的所有窗口、所有参数和所有代码路径都完整。
@@ -83,12 +87,12 @@ python3 tools/validate.py --serial DEVICE_SERIAL --versions 1.12.1
 ## Maven 发布
 
 与 spear 使用相同的 `com.vanniktech.maven.publish:0.37.0` 插件，签名后发布到 Maven Central。
-版本由 `gradle.properties` 的 `sdkVersion` 统一控制，当前版本为 `0.1.3`。
+版本由 `gradle.properties` 的 `sdkVersion` 统一控制，当前版本为 `0.1.4-SNAPSHOT`。
 
 在业务应用的调试依赖中添加：
 
 ```kotlin
-debugImplementation("top.cyclops:compose-inspector:0.1.3")
+debugImplementation("top.cyclops:compose-inspector:0.1.4-SNAPSHOT")
 ```
 
 同时发布 `compose-inspector-collector` 和 `compose-inspector-protocol`，均属于 `top.cyclops`；主制品会传递依赖它们。发布的是库的 release 变体，使用方仍须使用 `debugImplementation`，不要加入生产包。
@@ -115,7 +119,7 @@ debugImplementation("top.cyclops:compose-inspector:0.1.3")
 
 升级采集 SDK 后，重新构建并安装业务应用的调试包。
 
-- `hello` 声明 `gzip-json-v1` 时，新 macOS 客户端发送 `capture-gzip`。响应为 4 字节大端压缩长度 + 单个 gzip member，解压后仍为完整、以换行结尾的原始 JSON。桌面端要求运行时 SDK 0.1.3、协议 1 和压缩采集能力。
+- `hello` 声明 `gzip-json-v1` 时，新 macOS 客户端发送 `capture-gzip`。响应为 4 字节大端压缩长度 + 单个 gzip member，解压后仍为完整、以换行结尾的原始 JSON。桌面端支持运行时 SDK 0.1.3 和 0.1.4-SNAPSHOT、协议 1 和压缩采集能力。
 - Compose/View 状态只在主线程读取；对象字段元数据仅在单次采集中缓存，实际值始终重新读取。编码、快速压缩和 socket 写入在 SDK 工作线程执行。
 - macOS 复用已解析文档，避免规范化数据再次解析；截图 I/O 与原始 JSON 解析并行。压缩输入与解压输出均有大小限制，CRC、截断、额外数据会报错。
 - `tools/capture.py` 默认写紧凑 JSON，`--pretty` 才生成缩进输出。深层树的缩进文件可能远大于实际传输数据，不应用作传输性能基线。
@@ -173,7 +177,7 @@ macOS SDK 适配器沿 Composition 的实际布局归属映射到公共 `unmerge
 
 ### 悬浮窗选择
 
-未勾选“跳过悬浮窗”时，优先选择目标进程内最后枚举到的可见系统悬浮窗，不要求它持有焦点；勾选后排除系统悬浮窗，接着检查焦点窗口上方的附属面板（包括无焦点 Popup），有面板时采集面板，否则采集焦点窗口。没有焦点时取最后枚举到的可见窗口。截图为整屏截图，不会移除浮层像素；其他应用或进程的浮层需要选择对应采集目标。SDK 端的窗口选择修复需要重新构建并安装接入新版 SDK 的 Android debug 应用。
+采集包含目标进程内可见的悬浮窗。窗口菜单从底层开始编号，最底层为窗口 1；默认预览前台窗口。其他进程的悬浮窗需要选择对应采集目标。
 
 
 ## 列表视口与交互状态

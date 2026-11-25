@@ -9,6 +9,7 @@ struct PreviewView: View {
         let image: ObjectIdentifier
     }
     @State private var showing3D = false
+    @State private var loaded3D = false
     @Bindable var store: WorkspaceStore
     @GestureState private var pinch: MagnifyGesture.Value?
     private static let zoomRange: ClosedRange<CGFloat> = 0.5...4
@@ -39,7 +40,7 @@ struct PreviewView: View {
                 Spacer()
                 if !pickingColor && store.snapshot.roots.count > 1 {
                     Menu {
-                        ForEach(Array(store.snapshot.roots.enumerated()), id: \.element.id) { index, root in
+                        ForEach(Array(store.snapshot.roots.reversed().enumerated()), id: \.element.id) { index, root in
                             Button("窗口 \(index + 1) · \(root.shortName)") { store.windowRootID = root.id; store.hitCandidates = [] }
                         }
                     } label: { Label("选择窗口", systemImage: "macwindow.on.rectangle").labelStyle(.iconOnly) }
@@ -48,20 +49,25 @@ struct PreviewView: View {
                 }
             }.padding(.horizontal, 10).padding(.vertical, 6)
             Divider()
-            Group {
-                if showing3D {
-                    if let root = store.snapshot.roots.first(where: { $0.id == (store.visibleRoot?.id ?? store.windowRootID) }) ?? store.snapshot.roots.first,
+            ZStack {
+                if showing3D || loaded3D {
+                    if let root = store.visibleRoot,
                        let image = store.image {
-                        InlinePagePreview(node: root, image: image, store: store)
+                        InlinePagePreview(node: root, image: image, store: store, active: showing3D)
+                            .opacity(showing3D ? 1 : 0).allowsHitTesting(showing3D).accessibilityHidden(!showing3D)
                             .id(PageSource(snapshot: store.snapshot.id, root: root.id, image: ObjectIdentifier(image)))
-                    } else {
+                    } else if showing3D {
                         EmptyState(icon: "view.3d", title: "尚无 3D 预览", subtitle: "获取界面后可查看当前窗口的组件层级。")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                } else {
+                }
+                if !showing3D {
                     screenshotCanvas
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(AppStyle.canvas)
+            .clipped()
             .disabled(store.isCapturing)
             .overlay {
                 if store.isCapturing {
@@ -94,6 +100,7 @@ struct PreviewView: View {
         }
         .onChange(of: showing3D) { _, active in
             if active {
+                loaded3D = true
                 clearMeasurementHover()
                 store.pickingColor = false
             }
@@ -500,7 +507,9 @@ struct PreviewView: View {
                         .buttonStyle(.plain).foregroundStyle(node.id == store.selectedNodeID ? .primary : .secondary)
                 }
             }.font(.system(size: 10)).padding(.horizontal, 12).frame(height: 29)
-        }.background(AppStyle.background).overlay(alignment: .top) { Divider() }
+        }.frame(height: 29)
+        .background(AppStyle.background)
+        .overlay(alignment: .top) { Rectangle().fill(AppStyle.divider).frame(height: 1) }
     }
 }
 

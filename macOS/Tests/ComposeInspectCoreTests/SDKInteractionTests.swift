@@ -19,10 +19,11 @@ final class SDKInteractionTests: XCTestCase {
         return .object(raw)
     }
 
-    private func decode(_ children: [InspectorJSON]) throws -> InspectorSnapshot {
+    private func decode(_ children: [InspectorJSON], sourceOnly: Bool = false) throws -> InspectorSnapshot {
         let raw: InspectorJSON = .object([
             "protocolVersion": .number("1"), "sdkVersion": .string("0.1.3"), "packageName": .string("dev.sample"), "pid": .number("1"),
-            "complete": .bool(true), "diagnostics": .array([]), "windows": .array([.object([
+            "onlySourceNodes": .bool(sourceOnly), "complete": .bool(true), "diagnostics": .array([]), "windows": .array([.object([
+                "windowSize": .array([.number("180"), .number("240")]),
                 "screenOffset": .array([.number("30"), .number("50")]),
                 "tables": .array([.object(["tree": group(nil, children: children)])])
             ])])
@@ -57,6 +58,18 @@ final class SDKInteractionTests: XCTestCase {
         ])
         XCTAssertEqual(snapshot.nodes.filter(\.isClickable).map(\.name), ["First", "Second"])
         XCTAssertEqual(InspectorSnapshotIndex(snapshot, onlyClickable: true).nodes.map(\.name), ["Window", "First", "Second"])
+    }
+
+    func testSourceOnlyPreservesExplicitLayoutOwnershipAndEmptyWindows() throws {
+        var raw = try XCTUnwrap(group("Text", click: true).object)
+        raw["layoutIdentity"] = .number("42")
+        let snapshot = try decode([group("Container", children: [.object(raw)])], sourceOnly: true)
+        XCTAssertEqual(snapshot.nodes.filter(\.isClickable).map(\.name), ["Text"])
+        XCTAssertEqual(snapshot.nodes.first { $0.name == "Text" }?.clickTargetID, "sdk:42")
+        let empty = try decode([], sourceOnly: true)
+        let window = try XCTUnwrap(empty.roots.first)
+        XCTAssertTrue(window.children.isEmpty)
+        XCTAssertEqual(window.bounds, CGRect(x: 30, y: 50, width: 180, height: 240))
     }
 
     func testCompositionLocalProviderIsHiddenWithoutLosingItsClickableChild() throws {

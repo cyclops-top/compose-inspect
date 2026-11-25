@@ -16,6 +16,7 @@ public enum SDKSnapshotImporter {
             throw CommandFailure.failed("SDK 组件树采集不完整：\(reasons)")
         }
         guard let windows = document.root["windows"]?.array else { throw SnapshotImportError.schema("SDK 缺少 windows") }
+        let sourceOnly = document.root["onlySourceNodes"]?.boolean == true
         var normalized: [InspectorJSON] = []
         var nextID: Int64 = 1
         for (windowIndex, window) in windows.enumerated() {
@@ -27,7 +28,7 @@ public enum SDKSnapshotImporter {
             var branches: [[InspectorJSON]] = []
             for table in tables {
                 guard let tree = table["tree"], tree.object != nil else { throw SnapshotImportError.schema("SDK Composition 表缺少 tree") }
-                let nodes = try convert(tree, offset: CGPoint(x: x, y: y), nextID: &nextID)
+                let nodes = try convert(tree, offset: CGPoint(x: x, y: y), sourceOnly: sourceOnly, nextID: &nextID)
                 if !nodes.isEmpty {
                     if let index = table["styleCatalogIndex"]?.int64 {
                         guard let catalogs = window["styleCatalogs"]?.array, index >= 0, index < catalogs.count else {
@@ -55,8 +56,14 @@ public enum SDKSnapshotImporter {
             }
             let children = orderedChildren(branches)
             // View-only windows are not evidence that a usable Compose capture succeeded.
-            guard !children.isEmpty else { continue }
-            let box = children.reduce(CGRect.null) { $0.union(rect($1["bounds"])) }
+            let box: CGRect
+            if sourceOnly, !tables.isEmpty, let size = window["windowSize"]?.array, size.count == 2,
+               let width = size[0].double, let height = size[1].double, width > 0, height > 0 {
+                box = CGRect(x: x, y: y, width: width, height: height)
+            } else {
+                guard !children.isEmpty else { continue }
+                box = children.reduce(CGRect.null) { $0.union(rect($1["bounds"])) }
+            }
             let root: InspectorJSON = .object([
                 "type": .string("ViewNode"), "id": .number(String(nextID)),
                 "className": .string(window["rootClass"]?.string ?? "Window"),
@@ -83,7 +90,7 @@ public enum SDKSnapshotImporter {
         let identity: InspectorJSON?
     }
 
-    private static func convert(_ root: InspectorJSON, offset: CGPoint, nextID: inout Int64) throws -> [InspectorJSON] {
+    private static func convert(_ root: InspectorJSON, offset: CGPoint, sourceOnly: Bool, nextID: inout Int64) throws -> [InspectorJSON] {
         var pending: [(raw: InspectorJSON, path: String, ready: Bool)] = [(root, "0", false)]
         var converted: [String: [InspectorJSON]] = [:]
         var layoutRoots: [String: [LayoutInteraction]] = [:]
@@ -107,7 +114,9 @@ public enum SDKSnapshotImporter {
                 let childRoots = layoutRoots.removeValue(forKey: "\(frame.path)/\(index)") ?? []
                 layouts.append(contentsOf: childRoots.prefix(2 - layouts.count))
             }
-            if frame.raw["kind"]?.string == "layout" {
+            // A source-only SDK resolves anonymous layout boundaries before lifting their children.
+            if sourceOnly { layouts.removeAll() }
+            if sourceOnly ? frame.raw["layoutIdentity"]?.int64 != nil : frame.raw["kind"]?.string == "layout" {
                 layouts = [LayoutInteraction(bounds: frame.raw["boundsInWindow"], value: frame.raw["interaction"],
                                              error: frame.raw["interactionError"]?.string, identity: frame.raw["layoutIdentity"])]
             }

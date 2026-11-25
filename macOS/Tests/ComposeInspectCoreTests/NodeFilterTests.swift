@@ -11,6 +11,38 @@ final class NodeFilterTests: XCTestCase {
         InspectorSnapshot(packageName: "test.app", deviceName: "test", pixelSize: rect.size, roots: [root])
     }
 
+    func testTransitionHostPromotesIdleContentAndPreservesActiveOverlay() {
+        let content = node("content", "Content", children: [node("article", "Article")])
+        func filtered(_ slots: [InspectorNode]) -> InspectorSnapshotIndex {
+            let box = node("box", "Box", children: slots)
+            let layout = node("transition", "SharedTransitionLayout", children: [box])
+            return InspectorSnapshotIndex(snapshot(node("window", "Window", children: [
+                node("host", "ImagePreviewHost", children: [layout])
+            ])), hidingInternals: true)
+        }
+        XCTAssertEqual(filtered([content]).nodes.map(\.id), ["window", "content", "article"])
+        let active = filtered([content, node("preview", "AnimatedVisibility", children: [node("controls", "Controls")])])
+        XCTAssertEqual(active.byID["box"]?.children.map(\.id), ["content", "preview"])
+        XCTAssertNotNil(active.byID["controls"])
+    }
+
+    func testUnrelatedNamesAndSlotNamesUseSDKForwardingEvidence() {
+        let content = node("content", "Dashboard")
+        func wrapper(_ forwards: Bool, children: [InspectorNode], label: String? = nil) -> InspectorNode {
+            let slot = NodeParameter(id: "body", name: "body", value: "lambda", group: .parameter,
+                                     original: .object(["sdkParameter": .object(["forwardsContent": .bool(forwards)])]))
+            return InspectorNode(id: "outer", rawID: 2, name: "SessionBoundary", label: label, bounds: rect,
+                                 parameters: [slot], children: children)
+        }
+        func names(_ wrapper: InspectorNode) -> [String] {
+            ComposeNodeFilter.roots([node("window", "Window", children: [wrapper])])[0].children.map(\.id)
+        }
+        XCTAssertEqual(names(wrapper(true, children: [content])), ["content"])
+        XCTAssertEqual(names(wrapper(false, children: [content])), ["outer"])
+        XCTAssertEqual(names(wrapper(true, children: [content], label: "Account")), ["outer"])
+        XCTAssertEqual(names(wrapper(true, children: [content, node("panel", "Panel")])), ["outer"])
+    }
+
     func testTextImplementationIsHiddenWithoutDroppingSlotContentOrOriginalData() throws {
         let slot = node("slot", "InlineBusinessContent", file: "Article.kt")
         let internalNode = node("reuse", "ReusableComposeNode", file: "Layout.kt", children: [slot])

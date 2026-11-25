@@ -19,6 +19,34 @@ final class LiveInspectorTests: XCTestCase {
         }
     }
 
+    func testSampleSourceOnlyCapture() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard env["COMPOSEINSPECT_SOURCE_SAMPLE"] == "1" else { throw XCTSkip("Requires the current SDK sample main screen") }
+        let tools = try InspectorToolchain(adb: URL(fileURLWithPath: XCTUnwrap(env["COMPOSEINSPECT_ADB"])), environment: env)
+        let client = SDKInspectorClient(tools: tools)
+        let serial = try XCTUnwrap(env["COMPOSEINSPECT_SERIAL"])
+        func capture(_ enabled: Bool, keys: [String]? = nil) async throws -> CapturedSnapshot {
+            try await client.capture(serial: serial, package: "dev.composeinspect.sample", deviceName: "sample",
+                                     windowImages: true, onlySourceNodes: enabled, sourceKeys: keys)
+        }
+        let full = try await capture(false)
+        let project = try await capture(true, keys: ["577838147:MainActivity.kt"])
+        let raw = try XCTUnwrap(project.snapshot.document?.root["sdkCapture"])
+        XCTAssertEqual(raw["projectSourcesOnly"]?.boolean, true)
+        let kept = project.snapshot.nodes.filter { $0.kind == "ComposeNode" }
+        XCTAssertFalse(kept.isEmpty)
+        XCTAssertTrue(kept.allSatisfy { $0.source?.file == "MainActivity.kt" && $0.source?.packageHash == 577838147 })
+        XCTAssertLessThan(kept.count, full.snapshot.nodes.filter { $0.kind == "ComposeNode" }.count)
+        XCTAssertTrue(kept.contains { $0.name == "ParameterCard" && $0.isClickable && $0.style != nil })
+        let empty = try await capture(true, keys: [])
+        let root = try XCTUnwrap(empty.snapshot.roots.first)
+        XCTAssertTrue(root.children.isEmpty)
+        XCTAssertFalse(root.bounds.isEmpty)
+        XCTAssertFalse(empty.windowImages.isEmpty && empty.imageData.isEmpty)
+        let restored = try await capture(false)
+        XCTAssertEqual(restored.snapshot.nodes.count, full.snapshot.nodes.count)
+    }
+
     func testConfiguredDeviceCapturePreservesOriginalDump() async throws {
         let env = ProcessInfo.processInfo.environment
         guard env["COMPOSEINSPECT_LIVE"] == "1" else { throw XCTSkip("Set COMPOSEINSPECT_LIVE=1 with explicit tool/target paths to run a real-device capture.") }

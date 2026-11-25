@@ -29,6 +29,7 @@ final class AndroidSourceFilesTests: XCTestCase {
         }
         try await expect(["Screen.kt"])
         XCTAssertTrue(index.confirms(source))
+        XCTAssertTrue(index.captureSourceKeys?.contains("577838147:Screen.kt") == true)
         XCTAssertFalse(index.confirms(SourceAnchor(file: "Screen.kt", packageHash: -1)))
         // Java block comments end at the first closing delimiter.
         try "/* example: /* */ package dev.composeinspect.sample;".write(
@@ -44,6 +45,7 @@ final class AndroidSourceFilesTests: XCTestCase {
         try content.write(to: module.appendingPathComponent("Screen.kt"), atomically: true, encoding: .utf8)
         try await expect(["Screen.kt", "feature/Screen.kt"])
         XCTAssertFalse(index.confirms(source))
+        XCTAssertFalse(index.captureSourceKeys?.contains("577838147:Screen.kt") == true)
         try "package different".write(to: file, atomically: true, encoding: .utf8)
         try await expect(["feature/Screen.kt"])
         let moved = root.appendingPathComponent("renamed")

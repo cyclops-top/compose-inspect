@@ -19,7 +19,7 @@ struct ComposeInspectApp: App {
                             .font(.headline).foregroundStyle(.orange)
                         Text("请选择 Android SDK 中的 adb 可执行文件。")
                             .font(.callout)
-                        ToolchainSettingsView(settings: toolchain)
+                        ToolchainSettingsView(settings: toolchain, store: store)
                         HStack {
                             Spacer()
                             Button("稍后配置") { toolchain.showEnvironmentSetup = false }
@@ -81,7 +81,7 @@ struct ComposeInspectApp: App {
             }
         }
         Settings {
-            ToolchainSettingsView(settings: toolchain)
+            ToolchainSettingsView(settings: toolchain, store: store)
         }
     }
 }

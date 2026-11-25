@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ToolchainSettingsView: View {
     @Bindable var settings: ToolchainSettings
+    @Bindable var store: WorkspaceStore
 
     var body: some View {
         ScrollView { toolsPage }
@@ -22,6 +23,9 @@ struct ToolchainSettingsView: View {
             }
             Text("通过 ADB 连接设备。目标应用需在 debug 构建中通过 debugImplementation 接入 Compose Inspector SDK。")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
+            Toggle("仅采集有源码的组件", isOn: $store.onlySourceNodes)
+            Text("下次抓取时，SDK 跳过没有源码文件名的组件，保留其有源码的子组件。关联工程后仅保留能唯一匹配工程文件的组件。关闭后重新抓取可查看完整组件树。")
+                .font(.caption).foregroundStyle(.secondary)
             adbSection
             HStack(alignment: .top, spacing: 7) {
                 Image(systemName: "info.circle").foregroundStyle(.secondary)

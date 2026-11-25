@@ -36,10 +36,20 @@ class MainActivity : ComponentActivity() {
 data class Profile(val name: String, val age: Int, val tags: List<String>)
 
 @Composable
+private inline fun <reified T> probeValue(): T {
+    BasicText("value-call-child")
+    return remember(T::class) { "ComposeInspect capability probe" as T }
+}
+
+@Composable
+private fun ProbeBoundary(body: @Composable () -> Unit) { body() }
+
+@Composable
 fun ProbeScreen(scenario: String) {
     var count by remember { mutableIntStateOf(7) }
     Column(Modifier.fillMaxSize().background(Color.White).padding(24.dp)) {
-        BasicText("ComposeInspect capability probe")
+        val title = probeValue<String>()
+        ProbeBoundary { BasicText(title) }
         ParameterCard("explicit-title", count, true, Profile("Ada", 37, listOf("compose", "debug")), 12.dp, Color.Red) { count++ }
         DefaultCard()
         InlineWrapper("inline-marker") { BasicText("inline-child") }

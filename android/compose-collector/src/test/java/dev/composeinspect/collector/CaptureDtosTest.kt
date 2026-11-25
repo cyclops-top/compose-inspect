@@ -21,6 +21,14 @@ class CaptureDtosTest {
         }
     }
 
+    @Test fun forwardingRequiresOneMeasuredChildWithTheSameBounds() {
+        val bounds = listOf(0, 0, 100, 100)
+        val child = NodeDto("Child", "call", null, null, null, false, null, bounds, null, emptyList(), emptyList())
+        assertTrue(sharesContentBounds(bounds, listOf(child, child.copy(boundsInWindow = listOf(0, 0, 0, 0)))))
+        assertFalse(sharesContentBounds(bounds, listOf(child, child)))
+        assertFalse(sharesContentBounds(listOf(0, 0, 120, 100), listOf(child)))
+    }
+
     @Test fun scalarDtosMatchOriginalEncoder() {
         val encoder = ValueEncoder()
         val values = listOf(null, "", "quote\"\n", "中😀".repeat(800), true, 1.toByte(), 2.toShort(),

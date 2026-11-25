@@ -21,7 +21,8 @@ internal data class SourceDto(val file: String?, val line: Int, val offset: Int,
     companion object { private val KEYS = arrayOf("file", "line", "offset", "length", "packageHash") }
 }
 internal data class ParameterDto(val name: String?, val value: Any, val inlineClass: String?,
-    val fromDefault: Boolean, val static: Boolean, val compared: Boolean, val stable: Boolean) : JsonFields {
+    val fromDefault: Boolean, val static: Boolean, val compared: Boolean, val stable: Boolean,
+    val forwardsContent: Boolean? = null) : JsonFields {
     override val jsonKeys get() = KEYS
     override fun jsonValue(index: Int): Any? = when (index) {
         0 -> name
@@ -31,13 +32,15 @@ internal data class ParameterDto(val name: String?, val value: Any, val inlineCl
         4 -> static
         5 -> compared
         6 -> stable
+        7 -> forwardsContent
         else -> error("Invalid JSON field index")
     }
     override fun includeJsonField(index: Int): Boolean = when (index) {
         0 -> name != null
+        7 -> forwardsContent != null
         else -> true
     }
-    companion object { private val KEYS = arrayOf("name", "value", "inlineClass", "fromDefault", "static", "compared", "stable") }
+    companion object { private val KEYS = arrayOf("name", "value", "inlineClass", "fromDefault", "static", "compared", "stable", "forwardsContent") }
 }
 internal data class NodeDto(val name: String?, val kind: String, val layoutIdentity: Int?,
     val interaction: JSONObject?, val interactionError: String?, val inline: Boolean, val sourceInfo: String?,
@@ -65,6 +68,15 @@ internal data class NodeDto(val name: String?, val kind: String, val layoutIdent
         else -> true
     }
     companion object { private val KEYS = arrayOf("name", "kind", "layoutIdentity", "interaction", "interactionError", "inline", "sourceInfo", "boundsInWindow", "source", "parameters", "children") }
+}
+
+/** Call groups can borrow a layout from their single content slot. Keep the raw tree intact. */
+internal fun sharesContentBounds(bounds: List<Int>, children: List<NodeDto>): Boolean {
+    val measured = children.singleOrNull {
+        val box = it.boundsInWindow
+        box.size == 4 && box[2] > box[0] && box[3] > box[1]
+    }
+    return measured != null && measured.boundsInWindow == bounds
 }
 
 /** Detached scalar value; null value and omitted flags remain distinct on the wire. */
