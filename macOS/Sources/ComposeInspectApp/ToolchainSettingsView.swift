@@ -23,6 +23,9 @@ struct ToolchainSettingsView: View {
             }
             Text("通过 ADB 连接设备。目标应用需在 debug 构建中通过 debugImplementation 接入 Compose Inspector SDK。")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
+            Toggle("采集组件详情", isOn: $store.componentDetails)
+            Text("下次抓取时，按组件读取文字、样式、交互状态和列表视口。关闭时仅采集结构、边界和源码位置。")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("仅采集有源码的组件", isOn: $store.onlySourceNodes)
             Text("下次抓取时，SDK 跳过没有源码文件名的组件，保留其有源码的子组件。关联工程后仅保留能唯一匹配工程文件的组件。关闭后重新抓取可查看全部组件。")
                 .font(.caption).foregroundStyle(.secondary)

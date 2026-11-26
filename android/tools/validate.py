@@ -63,17 +63,19 @@ FIXTURES = {
 }
 
 
+def named_nodes(root):
+    pending = [root]
+    while pending:
+        node = pending.pop()
+        if node.get("name"):
+            yield node
+        pending.extend(reversed(node.get("children", [])))
+
+
 def sdk_nodes(document):
     for window in document["windows"]:
         for table in window["tables"]:
-            pending = [table["tree"]]
-            while pending:
-                node = pending.pop()
-                if not node:
-                    continue
-                if node.get("name"):
-                    yield node
-                pending.extend(reversed(node.get("children", [])))
+            yield from named_nodes(table["tree"])
 
 
 def validate_sdk(directory, source):
@@ -103,6 +105,9 @@ def validate_sdk(directory, source):
         assert not any(n["name"] in {"CompositionLocalProvider", "probeValue"} for n in nodes)
         rows = [n for n in nodes if n["name"] == "LazyRowProbe"]
         assert 0 < len(rows) < 100, "Only composed lazy items should be present"
+        lazy_column, = (n for n in nodes if n["name"] == "LazyColumn")
+        nested_rows = [n for n in named_nodes(lazy_column) if n.get("name") == "LazyRowProbe"]
+        assert len(nested_rows) == len(rows), "Lazy items must descend from the list that composed them"
 
 
 def main():

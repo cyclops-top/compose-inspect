@@ -585,6 +585,10 @@ public struct CoordinateMapper: Sendable {
     public func candidates(at point: CGPoint, in index: InspectorSnapshotIndex, imageSize: CGSize, rootID: String? = nil) -> [InspectorNode] {
         let imagePoint = imagePoint(point)
         guard CGRect(origin: .zero, size: imageSize).contains(imagePoint) else { return [] }
+        // Roots are ordered front to back. Keep each window’s hit stack together.
+        if rootID == nil, index.roots.count > 1 {
+            return index.roots.flatMap { candidates(at: point, in: index, imageSize: imageSize, rootID: $0.id) }
+        }
         let nodes = rootID.flatMap { index.nodesByRoot[$0] } ?? index.nodes
         return nodes.enumerated().filter { !$0.element.bounds.isEmpty && $0.element.bounds.contains(imagePoint) }.sorted {
             let a = $0.element.bounds.width * $0.element.bounds.height

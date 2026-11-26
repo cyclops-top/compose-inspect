@@ -8,7 +8,7 @@ public struct SDKInspectorClient: Sendable {
     private let adb: InspectorClient
     public init(tools: InspectorToolchain) { adb = InspectorClient(tools: tools) }
 
-    public func capture(serial: String, package: String, deviceName: String, windowImages: Bool = false, onlySourceNodes: Bool = false,
+    public func capture(serial: String, package: String, deviceName: String, windowImages: Bool = false, componentDetails: Bool = false, onlySourceNodes: Bool = false,
                         sourceKeys: [String]? = nil,
                         progress: @escaping @Sendable (String) async -> Void = { _ in }) async throws -> CapturedSnapshot {
         guard InspectorClient.validPackage(package) else { throw CommandFailure.configuration("无效包名") }
@@ -26,7 +26,7 @@ public struct SDKInspectorClient: Sendable {
         do {
             try Task.checkCancellation()
             result = try await capture(port: port, serial: serial, package: package, deviceName: deviceName,
-                                       windowImages: windowImages, onlySourceNodes: onlySourceNodes, sourceKeys: sourceKeys, progress: progress)
+                                       windowImages: windowImages, componentDetails: componentDetails, onlySourceNodes: onlySourceNodes, sourceKeys: sourceKeys, progress: progress)
         } catch {
             await removeForward(port: port, serial: serial)
             throw error
@@ -54,7 +54,7 @@ public struct SDKInspectorClient: Sendable {
         return document
     }
 
-    private func capture(port: UInt16, serial: String, package: String, deviceName: String, windowImages: Bool, onlySourceNodes: Bool, sourceKeys: [String]?,
+    private func capture(port: UInt16, serial: String, package: String, deviceName: String, windowImages: Bool, componentDetails: Bool, onlySourceNodes: Bool, sourceKeys: [String]?,
                          progress: @escaping @Sendable (String) async -> Void) async throws -> CapturedSnapshot {
         let started = Date()
         let helloData: Data
@@ -88,16 +88,19 @@ public struct SDKInspectorClient: Sendable {
         guard hello.root["capabilities"]?.array?.contains(.string("geometry-only-v1")) == true else {
             throw CommandFailure.failed("目标应用的 SDK 不支持快速采集。请更新调试依赖并重新构建、安装目标应用。")
         }
+        if componentDetails && hello.root["capabilities"]?.array?.contains(.string("component-details-v1")) != true {
+            throw CommandFailure.failed("目标应用的 SDK 不支持组件详情。请更新调试依赖并重新安装目标应用，或在设置中关闭“采集组件详情”。")
+        }
         async let screenResult: CommandOutput? = paired ? nil : adb.adb(["-s", serial, "shell", "-T", "screencap", "-p"])
         let payload = try await SDKTransport.request(port: port, command: "capture-gzip",
-                                                  timeout: 20, compressed: true,
+                                                  timeout: 20, compressed: true, componentDetails: componentDetails,
                                                   windowImages: paired, onlySourceNodes: filterAtSource, sourceKeys: filterAtSource ? sourceKeys : nil)
         let readFinished = Date()
         let separator = paired ? payload.firstIndex(of: 10) : nil
         let data = separator.map { Data(payload[..<$0]) } ?? payload
         var remaining = separator.map { payload.suffix(from: $0 + 1) } ?? Data()
         let document = try Self.validateResponse(data, package: package, expectedPID: pid)
-        guard document.root["geometryOnly"]?.boolean == true else {
+        guard document.root["geometryOnly"]?.boolean == !componentDetails else {
             throw CommandFailure.failed("目标 SDK 返回的采集模式与请求不符。")
         }
         let screen = try await screenResult
@@ -123,7 +126,7 @@ public struct SDKInspectorClient: Sendable {
                            importFinished.timeIntervalSince(importStarted)),
                     "SDK 原始 Composition 表保留为窗口内的独立分支；尚未拼接 Lazy 子表或采集 Android View 属性。",
                     paired ? "截图来源：SDK 独立窗口。" : "截图来源：ADB 整屏。"]
-        logs.append("采集模式：快速采集（结构、源码与边界）。")
+        logs.append(componentDetails ? "采集模式：组件详情（参数、样式与交互）。" : "采集模式：快速采集（结构、源码与边界）。")
         if onlySourceNodes {
             if sourceKeys != nil && filterAtSource && document.root["projectSourcesOnly"]?.boolean != true {
                 logs.append("工程索引超过请求上限，SDK 已按源码位置采集，工程匹配由桌面完成。")

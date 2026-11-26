@@ -5,7 +5,7 @@ import SwiftUI
 struct PreviewView: View {
     private struct PageSource: Hashable {
         let snapshot: UUID
-        let root: String
+        let root: String?
         let image: ObjectIdentifier
     }
     @State private var showing3D = false
@@ -39,23 +39,24 @@ struct PreviewView: View {
                     .disabled(store.isCapturing || (!showing3D && (store.image == nil || store.snapshot.roots.isEmpty)))
                 Spacer()
                 if !pickingColor && store.snapshot.roots.count > 1 {
-                    Menu {
+                    Picker("预览层级", selection: $store.windowRootID) {
+                        Text("全部").tag(nil as String?)
                         ForEach(Array(store.snapshot.roots.reversed().enumerated()), id: \.element.id) { index, root in
-                            Button("窗口 \(index + 1) · \(root.shortName)") { store.windowRootID = root.id; store.hitCandidates = [] }
+                            Text("窗口 \(index + 1) · \(root.shortName)").tag(Optional(root.id))
                         }
-                    } label: { Label("选择窗口", systemImage: "macwindow.on.rectangle").labelStyle(.iconOnly) }
-                    .help("选择预览窗口")
+                    }.pickerStyle(.menu).labelsHidden()
+                    .help("查看全部层级或单个窗口")
                     .fixedSize().font(.system(size: 11))
                 }
             }.padding(.horizontal, 10).padding(.vertical, 6)
             Divider()
             ZStack {
                 if showing3D || loaded3D {
-                    if let root = store.visibleRoot,
+                    if !store.visibleRoots.isEmpty,
                        let image = store.image {
-                        InlinePagePreview(node: root, image: image, store: store, active: showing3D)
+                        InlinePagePreview(store: store, active: showing3D)
                             .opacity(showing3D ? 1 : 0).allowsHitTesting(showing3D).accessibilityHidden(!showing3D)
-                            .id(PageSource(snapshot: store.snapshot.id, root: root.id, image: ObjectIdentifier(image)))
+                            .id(PageSource(snapshot: store.snapshot.id, root: store.windowRootID, image: ObjectIdentifier(image)))
                     } else if showing3D {
                         EmptyState(icon: "view.3d", title: "尚无 3D 预览", subtitle: "获取界面后可查看当前窗口的组件层级。")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -185,7 +186,7 @@ struct PreviewView: View {
             let mapper = CoordinateMapper(imageSize: store.snapshot.pixelSize, canvasSize: geometry.size, zoom: viewport.zoom, pan: viewport.pan)
             let hovered = !pickingColor && !panning && store.canPickImage ? hoverPoint.flatMap {
                 mapper.candidates(at: $0, in: store.presentationIndex, imageSize: store.snapshot.pixelSize,
-                                  rootID: store.visibleRoot?.id).first
+                                  rootID: store.windowRootID).first
             } : nil
             let measurement = measurement(to: hovered)
             ZStack(alignment: .topLeading) {
@@ -200,7 +201,7 @@ struct PreviewView: View {
                         .accessibilityLabel("\(store.snapshot.packageName) 的界面截图")
                     if !pickingColor {
                         if store.canPickImage && store.showWireframes {
-                            ComponentWireframes(snapshotID: store.snapshot.id, rootID: store.visibleRoot?.id,
+                            ComponentWireframes(snapshotID: store.snapshot.id, rootID: store.windowRootID,
                                                 hidingInternals: store.hideInternalNodes, onlyClickable: store.filterClickable,
                                                 presentationRevision: store.presentationRevision,
                                                 nodes: store.visibleNodes, imageSize: store.snapshot.pixelSize,

@@ -330,11 +330,9 @@ struct PageSceneLayer {
 }
 
 struct InlinePagePreview: View {
-    let node: InspectorNode
-    let image: NSImage
     let store: WorkspaceStore
     let active: Bool
-    @State private var page: (root: PagePreviewGroup, surfaces: PageSurfaces, revision: UInt)?
+    @State private var page: (roots: [PagePreviewGroup], surfaces: PageSurfaces, revision: UInt)?
     @State private var failed = false
     private struct FilterKey: Equatable {
         let revision: UInt
@@ -343,10 +341,10 @@ struct InlinePagePreview: View {
 
     var body: some View {
         Group {
-            if store.searchMatches?.contains(node.id) == false {
+            if store.searchMatches?.isEmpty == true {
                 Text("当前窗口没有匹配的组件").foregroundStyle(.secondary)
             } else if let page {
-                Page3DPreview(root: page.root, surfaces: page.surfaces, revision: page.revision, store: store, active: active)
+                Page3DPreview(roots: page.roots, surfaces: page.surfaces, revision: page.revision, store: store, active: active)
             } else if failed {
                 Text("暂无可显示的截图")
             } else {
@@ -354,20 +352,32 @@ struct InlinePagePreview: View {
             }
         }.task(id: FilterKey(revision: store.presentationRevision, query: store.search)) {
             let matches = store.searchMatches
-            guard matches?.contains(node.id) != false else { return }
+            let roots = store.visibleRoots.reversed().filter { matches?.contains($0.id) != false }
+            guard !roots.isEmpty else { return }
             let index = store.presentationIndex
             let revision = (page?.revision ?? 0) &+ 1
-            guard let pixels = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { failed = true; return }
+            var windows: [(InspectorNode, CGImage)] = []
+            for root in roots {
+                guard let pixels = store.image(for: root)?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                else { failed = true; return }
+                windows.append((root, pixels))
+            }
             let sdk = store.snapshot.document?.root["captureBackend"]?.string == "sdk"
             let document = store.snapshot.document
             let original = store.snapshotIndex
-            let worker = Task.detached(priority: .userInitiated) { [node] in
-                let displayed = matches.flatMap { ids in index.filteringNodes { ids.contains($0.id) }.byID[node.id] } ?? node
-                let group = PagePreviewGroup.projected(displayed, original: original)
-                try Task.checkCancellation()
-                let order = PageSceneLayer.layoutOrder(root: original.byID[node.id] ?? node, document: document)
-                let surfaces = try PageSurfaces(root: group, image: pixels, structuralOnly: sdk, order: order)
-                return (group, surfaces, revision)
+            let worker = Task.detached(priority: .userInitiated) { [windows] in
+                let displayed = matches.map { ids in index.filteringNodes { ids.contains($0.id) } } ?? index
+                var groups: [PagePreviewGroup] = []
+                var surfaces: [PageSurfaces] = []
+                for (root, pixels) in windows {
+                    try Task.checkCancellation()
+                    guard let node = displayed.byID[root.id] else { continue }
+                    let group = PagePreviewGroup.projected(node, original: original)
+                    let order = PageSceneLayer.layoutOrder(root: original.byID[root.id] ?? root, document: document)
+                    groups.append(group)
+                    surfaces.append(try PageSurfaces(root: group, image: pixels, structuralOnly: sdk, order: order))
+                }
+                return (groups, PageSurfaces(windows: surfaces), revision)
             }
             do {
                 let next = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
@@ -379,7 +389,7 @@ struct InlinePagePreview: View {
 }
 
 private struct Page3DPreview: View {
-    let root: PagePreviewGroup
+    let roots: [PagePreviewGroup]
     let surfaces: PageSurfaces
     let revision: UInt
     let store: WorkspaceStore
@@ -394,7 +404,7 @@ private struct Page3DPreview: View {
     // Merged wrappers share the solid identified by the outermost node.
     private func groupPath(_ path: [String]) -> [String] {
         var result: [String] = []
-        var candidates = [root]
+        var candidates = roots
         for id in path {
             if let group = candidates.first(where: { $0.id == id }) {
                 if group.showsSurface { result.append(id) }
@@ -533,6 +543,20 @@ final class PageSceneView: SCNView {
 struct PageSurfaces: @unchecked Sendable {
     let nodes: [SCNNode]
     let frontmost: CGFloat
+
+    init(windows: [PageSurfaces]) {
+        var combined: [SCNNode] = []
+        var offset: CGFloat = 0
+        var front: CGFloat = 0
+        for window in windows where !window.nodes.isEmpty {
+            for node in window.nodes { node.position.z += offset }
+            combined.append(contentsOf: window.nodes)
+            front = offset + window.frontmost
+            offset = front + PageSceneLayer.thickness * 2
+        }
+        nodes = combined
+        frontmost = front
+    }
 
     init(root: PagePreviewGroup, image: CGImage, structuralOnly: Bool, order: [String: PageSceneLayer.Placement] = [:]) throws {
         let screen = CGRect(x: 0, y: 0, width: image.width, height: image.height)

@@ -132,6 +132,7 @@ struct NativeHierarchyView: NSViewRepresentable {
         var store: WorkspaceStore
         weak var outline: NSOutlineView?
         private var snapshotID: UUID?
+        private var windowRootID: String?
         private var query = ""
         private var presentationRevision: UInt?
         private var roots: [Item] = []
@@ -150,12 +151,13 @@ struct NativeHierarchyView: NSViewRepresentable {
             synchronizing = true
             defer { synchronizing = false }
             let treeChanged = snapshotID != store.snapshot.id || presentationRevision != store.presentationRevision
-            let rebuilt = treeChanged || query != store.search
+            let rebuilt = treeChanged || query != store.search || windowRootID != store.windowRootID
             let issues = Set(store.issues.filter { $0.component.snapshotID == store.snapshot.id }.map(\.component.nodeID))
             let issuesChanged = issues != issueNodeIDs
             issueNodeIDs = issues
             if rebuilt {
                 snapshotID = store.snapshot.id
+                windowRootID = store.windowRootID
                 query = store.search
                 presentationRevision = store.presentationRevision
                 collapsedSearchItems.removeAll()
@@ -184,7 +186,7 @@ struct NativeHierarchyView: NSViewRepresentable {
                         visibleIDs?.contains($0.id) == false ? nil : items[$0.id]
                     }
                 }
-                roots = index.roots.compactMap { visibleIDs?.contains($0.id) == false ? nil : items[$0.id] }
+                roots = store.visibleRoots.compactMap { visibleIDs?.contains($0.id) == false ? nil : items[$0.id] }
                 outline.reloadData()
             }
             let selectionChanged = selectionRevision != store.selectionRevision

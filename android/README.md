@@ -22,7 +22,7 @@ SDK 的非导出 ContentProvider 随 AAR Manifest 合并，在 Activity 首次�
 - Android 14+ 的新版 SDK 支持按窗口配对截图。Mac 端选择窗口时会切换到对应的 PixelCopy 图像，并按窗口屏幕偏移显示。低版本系统或旧版 SDK 使用 ADB 整屏截图，与组件树并行获取。窗口像素复制和树遍历之间可能跨帧。
 - 在主线程读取 Composition 表；socket 工作在后台线程，单次请求有超时。源码位置是**调用点**，不是函数定义；只包含文件名、行号、UTF-16 offset/length 和包 hash，不含完整源文件路径。
 - `source.line` 保留 tooling 原始值。在已测两个版本中它是 1 起算，已用业务源码行和 offset 验证；不能仅根据 tooling 的旧注释再加 1。
-- SDK 仅提供快速采集，并声明 `geometry-only-v1`。所有请求都使用同一条快速路径。快速采集保留树结构、调用位置和工具链测得的边界，跳过参数、交互语义和样式读取。依赖参数判定的内容包装节点可能保留。可与源码过滤及窗口截图组合使用。
+- SDK 默认使用快速采集，并声明 `geometry-only-v1`。支持 `component-details-v1` 时，客户端可通过 `geometryOnly: false` 请求详情，额外读取组件专属参数、布局样式、交互语义和 Lazy 列表视口。快速采集保留树结构、调用位置和工具链测得的边界，跳过参数、交互语义和样式读取。依赖参数判定的内容包装节点可能保留。可与源码过滤及窗口截图组合使用。
 - 声明 `source-only-v1` 的 SDK 支持每次抓取传入 `onlySourceNodes`，在读取参数之前跳过无源码文件名的节点。可选的 `sourceKeys` 限定工程中唯一的文件名与包哈希组合。保留子组件顺序。
 - AndroidX Startup 创建进程级签名索引协程，首个 Activity 绘制后在后台预热。应用插件生成的索引优先从 assets 读取；缺少可用制品时，安装版本相同则读取应用私有 code cache；首次安装、APK/split 变化、缓存缺失或校验失败时重新扫描 DEX。提前到达的采集请求与预热共享同一个结果，等待发生在 SDK socket 线程。
 - 签名索引用于提升返回非 Unit 的调用，计数见 `stats.filteredValueCalls`。响应的 `timings.returnIndexWaitMs` 是本次请求等待索引的时间，不计入 UI 线程采集耗时。

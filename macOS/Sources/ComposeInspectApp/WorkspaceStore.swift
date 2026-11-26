@@ -103,6 +103,9 @@ final class WorkspaceStore {
     }
     var geometrySnapshot: Bool { snapshot.document?.root["sdkCapture"]?["geometryOnly"]?.boolean == true }
     var filterClickable: Bool { onlyClickableNodes && !geometrySnapshot }
+    var componentDetails: Bool {
+        didSet { filterDefaults.set(componentDetails, forKey: "captureComponentDetails") }
+    }
     var onlySourceNodes: Bool {
         didSet {
             filterDefaults.set(onlySourceNodes, forKey: "onlySourceNodes")
@@ -142,7 +145,7 @@ final class WorkspaceStore {
     }
     private(set) var searchMatches: Set<String>?
     private func updateSearchMatches() {
-        searchMatches = search.isEmpty ? nil : presentationIndex.matchingIDs(search)
+        searchMatches = search.isEmpty ? nil : presentationIndex.matchingIDs(search).filter { isInVisibleWindow($0) }
     }
     var showWireframes = UserDefaults.standard.object(forKey: "showWireframes") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showWireframes, forKey: "showWireframes") }
@@ -156,6 +159,7 @@ final class WorkspaceStore {
     var windowRootID: String? {
         didSet {
             guard oldValue != windowRootID else { return }
+            updateSearchMatches()
             imageHitCycle.reset()
             hitCandidates = []
             if let selectedNodeID, !isInVisibleWindow(selectedNodeID) { clearSelection() }
@@ -166,7 +170,9 @@ final class WorkspaceStore {
     var notice = "等待获取界面"
     private var screenImage: NSImage?
     private var windowImages: [String: NSImage] = [:]
-    var image: NSImage? { visibleRoot.flatMap { windowImages[$0.id] } ?? screenImage }
+    var image: NSImage? { windowRootID.flatMap { windowImages[$0] } ?? screenImage }
+
+    func image(for root: InspectorNode) -> NSImage? { windowImages[root.id] ?? screenImage }
     private var transientParameters: [ComponentKey: Set<String>] = [:]
     let deviceSession = DeviceSession()
     var rawPresentation: RawJSONPresentation?
@@ -174,6 +180,7 @@ final class WorkspaceStore {
 
     init(filterDefaults: UserDefaults = .standard) {
         self.filterDefaults = filterDefaults
+        componentDetails = filterDefaults.bool(forKey: "captureComponentDetails")
         onlySourceNodes = filterDefaults.bool(forKey: "onlySourceNodes")
         let configuration = filterDefaults.data(forKey: "tree.filterConfiguration.v1")
             .flatMap { try? JSONDecoder().decode(NodeFilterConfiguration.self, from: $0) } ?? .defaults
@@ -214,10 +221,18 @@ final class WorkspaceStore {
     var canPickImage: Bool {
         image != nil
     }
-    var visibleRoot: InspectorNode? { presentationIndex.roots.first { $0.id == windowRootID } ?? presentationIndex.roots.first }
-    var visibleNodes: [InspectorNode] { visibleRoot.flatMap { presentationIndex.nodesByRoot[$0.id] } ?? [] }
-    var visibleBounds: [CGRect] { visibleRoot.flatMap { presentationIndex.boundsByRoot[$0.id] } ?? [] }
-    func isInVisibleWindow(_ nodeID: String) -> Bool { snapshotIndex.rootIDs[nodeID] == visibleRoot?.id }
+    var visibleRoots: [InspectorNode] {
+        guard let windowRootID else { return presentationIndex.roots }
+        return presentationIndex.byID[windowRootID].map { [$0] } ?? []
+    }
+    var visibleNodes: [InspectorNode] {
+        windowRootID.flatMap { presentationIndex.nodesByRoot[$0] } ?? presentationIndex.nodes
+    }
+    var visibleBounds: [CGRect] { visibleRoots.flatMap { presentationIndex.boundsByRoot[$0.id] ?? [] } }
+    func isInVisibleWindow(_ nodeID: String) -> Bool {
+        guard let root = snapshotIndex.rootIDs[nodeID] else { return false }
+        return windowRootID == nil || root == windowRootID
+    }
     var issues: [ComponentIssue] { ledger.issues }
     var currentText: String {
         guard let key = selectedKey else { return "" }
@@ -276,7 +291,7 @@ final class WorkspaceStore {
         NSApp.keyWindow?.makeFirstResponder(nil)
         issueEditRevision &+= 1
         selectedNodeID = nodeID
-        windowRootID = snapshotIndex.rootIDs[nodeID]
+        if windowRootID != nil { windowRootID = snapshotIndex.rootIDs[nodeID] }
         for node in presentationIndex.path(to: nodeID).dropLast() { expandedNodes.insert(node.id) }
     }
 
@@ -306,7 +321,7 @@ final class WorkspaceStore {
         }
         guard selectionEnabled else { return }
         let candidates = mapper.candidates(at: point, in: presentationIndex, imageSize: snapshot.pixelSize,
-                                           rootID: visibleRoot?.id).map(\.id)
+                                           rootID: windowRootID).map(\.id)
         var cycle = imageHitCycle
         guard let next = cycle.next(in: candidates, selected: selectedNodeID) else {
             imageHitCycle = cycle; hitCandidates = []; return
@@ -440,7 +455,7 @@ final class WorkspaceStore {
                 @MainActor func readSnapshot() async throws -> CapturedSnapshot {
                     try checkTarget()
                     return try await sdk.capture(serial: original.serial, package: original.package, deviceName: device.model,
-                                                 onlySourceNodes: filtered?["onlySourceNodes"]?.boolean == true, sourceKeys: sourceKeys)
+                                                 componentDetails: true, onlySourceNodes: filtered?["onlySourceNodes"]?.boolean == true, sourceKeys: sourceKeys)
                 }
                 let before = try await readSnapshot().snapshot
                 let index = InspectorSnapshotIndex(before)
@@ -539,7 +554,7 @@ final class WorkspaceStore {
             try Task.checkCancellation()
             try await deviceSession.prepareCaptureTarget(settings: settings)
             try Task.checkCancellation()
-            let captured = try await deviceSession.capture(settings: settings, onlySourceNodes: onlySourceNodes,
+            let captured = try await deviceSession.capture(settings: settings, componentDetails: componentDetails, onlySourceNodes: onlySourceNodes,
                                                            sourceKeys: onlySourceNodes ? projectSources.captureSourceKeys : nil)
             try Task.checkCancellation()
             let source = captured.snapshot
@@ -588,7 +603,7 @@ final class WorkspaceStore {
             if configuration == filterConfiguration { break }
             configuration = filterConfiguration
         }
-        let newImage = captured.windowImages.isEmpty ? NSImage(data: captured.imageData) : nil
+        var newImage = NSImage(data: captured.imageData)
         let size = captured.snapshot.pixelSize
         let pairedImages = try captured.windowImages.mapValues { entry -> NSImage in
             guard let source = NSBitmapImageRep(data: entry.png)?.cgImage else { throw CocoaError(.fileReadCorruptFile) }
@@ -606,7 +621,22 @@ final class WorkspaceStore {
             guard let result = canvas.makeImage() else { throw CocoaError(.fileReadCorruptFile) }
             return NSImage(cgImage: result, size: size)
         }
-        guard newImage != nil || !pairedImages.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
+        if pairedImages.count == 1 {
+            newImage = pairedImages.values.first
+        } else if !pairedImages.isEmpty {
+            guard let canvas = CGContext(data: nil, width: Int(size.width), height: Int(size.height),
+                                         bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            for root in captured.snapshot.roots.reversed() {
+                guard let pixels = pairedImages[root.id]?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+                else { throw CocoaError(.fileReadCorruptFile) }
+                canvas.draw(pixels, in: CGRect(origin: .zero, size: size))
+            }
+            newImage = canvas.makeImage().map { NSImage(cgImage: $0, size: size) }
+        }
+        guard newImage != nil else { throw CocoaError(.fileReadCorruptFile) }
         discardCaptureIssues()
         cancelFilterIndexes()
         rawPresentation = nil
@@ -616,7 +646,7 @@ final class WorkspaceStore {
         search = ""
         installIndexes(indexes)
         expandedNodes = Set(snapshot.roots.map(\.id))
-        windowRootID = snapshot.roots.first?.id
+        windowRootID = nil
         fitImage()
         notice = geometrySnapshot ? "已快速采集结构与边界" : "已获取界面"
     }

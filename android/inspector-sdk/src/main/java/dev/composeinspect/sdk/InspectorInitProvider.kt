@@ -77,7 +77,7 @@ class InspectorInitProvider : ContentProvider() {
                                     val response = when (command) {
                                         "hello" -> JSONObject().put("capabilities", Protocol.array(listOf(
                                             "composition-tables", "call-source-locations", "gzip-json-v1",
-                                            "skip-overlays-v1", "source-only-v1", "geometry-only-v1") +
+                                            "skip-overlays-v1", "source-only-v1", "geometry-only-v1", "component-details-v1") +
                                             if (android.os.Build.VERSION.SDK_INT >= 34) listOf("window-images-v1") else emptyList()))
                                         "capture", "capture-gzip" -> {
                                             val sourceKeys = options.optJSONArray("sourceKeys")?.let { keys ->
@@ -90,7 +90,8 @@ class InspectorInitProvider : ContentProvider() {
                                             val task = FutureTask {
                                                 val started = android.os.SystemClock.elapsedRealtimeNanos()
                                                 ComposeCollector.capture(activities.toList(), options.optBoolean("skipOverlayWindows", false),
-                                                    if (windowImages) copies::start else null, signatures, options.optBoolean("onlySourceNodes"), sourceKeys).apply {
+                                                    if (windowImages) copies::start else null, signatures, options.optBoolean("onlySourceNodes"), sourceKeys,
+                                                    componentDetails = !options.optBoolean("geometryOnly", true)).apply {
                                                     put("timings", (optJSONObject("timings") ?: JSONObject())
                                                         .put("returnIndexWaitMs", waitMs)
                                                         .put("mainThreadQueueMs", (started - queued) / 1e6)

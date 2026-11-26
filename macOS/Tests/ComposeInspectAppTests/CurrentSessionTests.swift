@@ -30,6 +30,46 @@ final class CurrentSessionTests: XCTestCase {
         XCTAssertFalse(store.image === image)
     }
 
+    @MainActor func testMergedWindowPixelsAndSelection() async throws {
+        _ = NSApplication.shared
+        func png(width: Int, color: NSColor) throws -> Data {
+            let context = try XCTUnwrap(CGContext(data: nil, width: width, height: width, bitsPerComponent: 8,
+                bytesPerRow: 0, space: XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB)),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.setFillColor(color.cgColor)
+            context.fill(CGRect(x: 0, y: 0, width: width, height: width))
+            let bitmap = NSBitmapImageRep(cgImage: try XCTUnwrap(context.makeImage()))
+            return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        }
+        let size = CGSize(width: 4, height: 4)
+        let front = InspectorNode(id: "front", rawID: 1, name: "Popup", bounds: CGRect(x: 1, y: 2, width: 1, height: 1))
+        let back = InspectorNode(id: "back", rawID: 2, name: "Activity", bounds: CGRect(origin: .zero, size: size))
+        let snapshot = InspectorSnapshot(packageName: "test", deviceName: "test", pixelSize: size, roots: [front, back])
+        let capture = try CapturedSnapshot(snapshot: snapshot, imageData: Data(), windowImages: [
+            front.id: .init(png: png(width: 1, color: .red), origin: front.bounds.origin),
+            back.id: .init(png: png(width: 4, color: .blue), origin: .zero)
+        ])
+        let store = WorkspaceStore()
+        try await store.applyCapture(capture)
+        func color(_ x: Int, _ y: Int) throws -> String? {
+            let image = try XCTUnwrap(store.image?.cgImage(forProposedRect: nil, context: nil, hints: nil))
+            return ScreenshotPixels(image)?.hex(at: CGPoint(x: x, y: y), imageSize: size)
+        }
+        XCTAssertEqual(try color(1, 2), "#FF0000")
+        XCTAssertEqual(try color(1, 1), "#0000FF")
+        let mapper = CoordinateMapper(imageSize: size, canvasSize: size)
+        store.selectImage(at: CGPoint(x: 1.5, y: 2.5), mapper: mapper)
+        XCTAssertEqual(store.hitCandidates, [front.id, back.id])
+        XCTAssertNil(store.windowRootID)
+        store.windowRootID = back.id
+        XCTAssertEqual(try color(1, 2), "#0000FF")
+        XCTAssertEqual(store.visibleNodes.map(\.id), [back.id])
+        XCTAssertNil(store.selectedNodeID)
+        try await store.applyCapture(capture)
+        XCTAssertNil(store.windowRootID)
+        XCTAssertEqual(store.visibleRoots.map(\.id), [front.id, back.id])
+    }
+
     @MainActor func testPreviewPanStopsAtEdgesAndCentersLetterboxedAxes() {
         let image = CGSize(width: 200, height: 400)
         let canvas = CGSize(width: 300, height: 400)

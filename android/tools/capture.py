@@ -8,14 +8,17 @@ import socket
 import subprocess
 
 
-def capture(adb, serial, package, command="capture"):
-    if command == "capture" and "geometry-only-v1" not in capture(adb, serial, package, "hello").get("capabilities", []):
-        raise RuntimeError("Update the target SDK to a build supporting geometry-only-v1")
+def capture(adb, serial, package, command="capture", component_details=False):
+    geometry_only = not component_details
+    if command == "capture":
+        capability = "component-details-v1" if component_details else "geometry-only-v1"
+        if capability not in capture(adb, serial, package, "hello").get("capabilities", []):
+            raise RuntimeError(f"Update the target SDK to a build supporting {capability}")
     prefix = [adb] + (["-s", serial] if serial else [])
     port = subprocess.check_output(prefix + ["forward", "tcp:0", "localabstract:composeinspect." + package], text=True).strip()
     try:
         with socket.create_connection(("127.0.0.1", int(port)), timeout=20) as connection:
-            connection.sendall((json.dumps({"command": command, "geometryOnly": True}) + "\n").encode())
+            connection.sendall((json.dumps({"command": command, "geometryOnly": geometry_only}) + "\n").encode())
             with connection.makefile("rb") as stream:
                 data = stream.readline(32 * 1024 * 1024)
                 if not data.endswith(b"\n"):
@@ -23,7 +26,7 @@ def capture(adb, serial, package, command="capture"):
                 result = json.loads(data)
                 if "error" in result:
                     raise RuntimeError(result["error"])
-                if command == "capture" and result.get("geometryOnly") is not True:
+                if command == "capture" and result.get("geometryOnly") is not geometry_only:
                     raise RuntimeError("SDK returned an unexpected capture mode")
                 return result
     finally:
@@ -38,8 +41,9 @@ def main():
     parser.add_argument("--command", choices=["hello", "capture"], default="capture")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--pretty", action="store_true", help="Write indented JSON (can be much larger for deep trees)")
+    parser.add_argument("--component-details", action="store_true")
     args = parser.parse_args()
-    result = capture(args.adb, args.serial, args.package, args.command)
+    result = capture(args.adb, args.serial, args.package, args.command, args.component_details)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2 if args.pretty else None, separators=None if args.pretty else (",", ":")) + "\n")
     print(json.dumps(result.get("stats", result), ensure_ascii=False))
