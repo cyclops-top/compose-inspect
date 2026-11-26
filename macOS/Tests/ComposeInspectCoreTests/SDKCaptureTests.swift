@@ -48,6 +48,33 @@ final class SDKCaptureTests: XCTestCase {
         XCTAssertEqual(restored, snapshot)
     }
 
+    func testTextArgumentsInheritStyleOnlyWhenUnspecified() throws {
+        func packed(_ name: String, _ type: String, _ bits: String) -> InspectorJSON {
+            .object(["name": .string(name), "inlineClass": .string(type),
+                     "value": .object(["type": .string("java.lang.Long"), "value": .number(bits)])])
+        }
+        let style: InspectorJSON = .object(["name": .string("style"), "value": .object([
+            "type": .string("TextStyle"), "fields": .array([
+                .object(["name": .string("color"), "value": .object(["value": .string("#FF6D6272")])]),
+                .object(["name": .string("fontSize"), "value": .object(["value": .object([
+                    "value": .number("16"), "unit": .string("sp")])])])
+            ])
+        ])])
+        for bits in ["16", "0"] {
+            let tree = group("Text", parameters: [
+                packed("color", "androidx.compose.ui.graphics.Color", bits),
+                packed("fontSize", "androidx.compose.ui.unit.TextUnit", "2143289344"), style
+            ])
+            let node = try XCTUnwrap(decode(response(tables: [.object(["tree": tree])])).nodes.first { $0.name == "Text" })
+            let color = try XCTUnwrap(node.observableFields.first { $0.name == "color" })
+            let size = try XCTUnwrap(node.observableFields.first { $0.name == "fontSize" })
+            XCTAssertEqual(color.value, bits == "16" ? "Unspecified" : "#00000000")
+            XCTAssertEqual(node.inheritedTextStyle(for: color)?.colorARGB, bits == "16" ? "FF6D6272" : nil)
+            XCTAssertEqual(size.value, "Unspecified")
+            XCTAssertEqual(node.inheritedTextStyle(for: size)?.value, "16sp")
+        }
+    }
+
     func testPartialEmptyWrongPackageAndWrongProtocolAreRejected() throws {
         XCTAssertThrowsError(try decode(response(complete: false)))
         XCTAssertThrowsError(try decode(response(tables: [])))

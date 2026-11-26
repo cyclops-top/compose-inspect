@@ -15,6 +15,7 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
 cp "$APP_BIN_PATH/ComposeInspectLauncher" "$APP_BUNDLE/Contents/MacOS/CompScope"
 cp "$APP_ROOT/Configuration/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp "$APP_ROOT/Configuration/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+cp -R "$APP_BIN_PATH/ComposeInspect_ComposeInspectCore.bundle" "$APP_BUNDLE/Contents/Resources/"
 codesign --force --sign - "$APP_BUNDLE"
 codesign --verify --strict "$APP_BUNDLE"
 if [ -e "$APP_ROOT/dist/CompScope.app" ]; then

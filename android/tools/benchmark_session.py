@@ -2,6 +2,7 @@
 """Compare one-shot and session-scoped ADB forwards on the static sample performance screen."""
 import argparse
 from contextlib import contextmanager
+from capture import prepare
 import gzip
 import hashlib
 import json
@@ -38,7 +39,7 @@ def main():
     parser.add_argument("--compose", required=True, help="Resolved Compose version of installed sample build")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    expected_sdk = "0.1.5-SNAPSHOT"
+    expected_sdk = "2.0.0-SNAPSHOT"
 
     def adb(*args_):
         return subprocess.check_output(["adb", "-s", args.serial, *args_], text=True, timeout=30).strip()
@@ -53,7 +54,7 @@ def main():
     def session():
         port = int(adb("forward", "tcp:0", "localabstract:composeinspect." + args.package))
         try:
-            hello, _ = request(port, "hello")
+            hello = prepare(port, args.package)
             validate(hello)
             if not {"gzip-json-v1", "geometry-only-v1"}.issubset(hello["capabilities"]):
                 raise ValueError("Missing geometry capture or gzip capability")

@@ -4,4 +4,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "ComposeInspectAndroid"
-include(":protocol", ":compose-collector", ":inspector-sdk", ":sample")
+include(":protocol", ":compose-collector", ":inspector-sdk", ":sample", ":collector-payload")

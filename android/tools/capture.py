@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Capture the SDK over ADB. Removes only its own ADB forward."""
 import argparse
+import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -8,27 +10,58 @@ import socket
 import subprocess
 
 
+def exchange(port, options, body=b""):
+    with socket.create_connection(("127.0.0.1", port), timeout=20) as connection:
+        connection.sendall(json.dumps(options).encode() + b"\n" + body)
+        with connection.makefile("rb") as stream:
+            data = stream.readline(32 * 1024 * 1024)
+            if not data.endswith(b"\n"):
+                raise RuntimeError("Incomplete/oversized SDK response")
+            result = json.loads(data)
+            if "error" in result:
+                raise RuntimeError(result["error"])
+            return result
+
+
+def prepare(port, package):
+    hello = exchange(port, {"command": "hello"})
+    if hello.get("packageName") != package:
+        raise RuntimeError("Unexpected SDK package")
+    if "collectorABI" not in hello:
+        return hello
+    if hello["collectorABI"] != 1:
+        raise RuntimeError("Unsupported collector ABI")
+    resources = Path(__file__).resolve().parents[2] / "macOS/Sources/ComposeInspectCore/Collector"
+    jar = (resources / "collector.jar").read_bytes()
+    metadata = json.loads((resources / "collector.json").read_text())
+    if not metadata["version"] or metadata["digest"] != hashlib.sha256(jar).hexdigest():
+        raise RuntimeError("Bundled collector does not match its version manifest")
+    options = dict(collectorABI=1, collectorVersion=metadata["version"], digest=metadata["digest"], pid=hello["pid"],
+                   signature=base64.b64encode((resources / "collector.sig").read_bytes()).decode())
+    ready = exchange(port, dict(command="prepare", **options))
+    if ready.get("state") == "missing":
+        ready = exchange(port, dict(command="install", length=len(jar), **options), jar)
+    if hello.get("checksCollectorVersion") and ready.get("collectorVersion") != metadata["version"]:
+        raise RuntimeError("Unexpected collector version")
+    if ready.get("digest") != options["digest"] or ready.get("pid") != hello["pid"]:
+        raise RuntimeError("Collector identity changed")
+    return ready
+
+
 def capture(adb, serial, package, command="capture", component_details=False):
-    geometry_only = not component_details
-    if command == "capture":
-        capability = "component-details-v1" if component_details else "geometry-only-v1"
-        if capability not in capture(adb, serial, package, "hello").get("capabilities", []):
-            raise RuntimeError(f"Update the target SDK to a build supporting {capability}")
     prefix = [adb] + (["-s", serial] if serial else [])
     port = subprocess.check_output(prefix + ["forward", "tcp:0", "localabstract:composeinspect." + package], text=True).strip()
     try:
-        with socket.create_connection(("127.0.0.1", int(port)), timeout=20) as connection:
-            connection.sendall((json.dumps({"command": command, "geometryOnly": geometry_only}) + "\n").encode())
-            with connection.makefile("rb") as stream:
-                data = stream.readline(32 * 1024 * 1024)
-                if not data.endswith(b"\n"):
-                    raise RuntimeError("Incomplete/oversized SDK response")
-                result = json.loads(data)
-                if "error" in result:
-                    raise RuntimeError(result["error"])
-                if command == "capture" and result.get("geometryOnly") is not geometry_only:
-                    raise RuntimeError("SDK returned an unexpected capture mode")
-                return result
+        hello = prepare(int(port), package)
+        if command == "hello":
+            return hello
+        capability = "component-details-v1" if component_details else "geometry-only-v1"
+        if capability not in hello.get("capabilities", []):
+            raise RuntimeError(f"Update the target SDK to a build supporting {capability}")
+        result = exchange(int(port), dict(command=command, geometryOnly=not component_details))
+        if result.get("geometryOnly") != (not component_details) or result.get("pid") != hello["pid"]:
+            raise RuntimeError("Unexpected capture mode or PID")
+        return result
     finally:
         subprocess.run(prefix + ["forward", "--remove", "tcp:" + port], check=True)
 

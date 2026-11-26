@@ -81,7 +81,7 @@ struct WorkspaceView: View {
                                 Text(metadata.packageName).font(.caption).foregroundStyle(.secondary)
                                 Text("采集耗时：\(max(0, metadata.finishedAt.timeIntervalSince(metadata.startedAt)), specifier: "%.1f") 秒")
                                     .font(.caption)
-                                ForEach(metadata.diagnostics.filter { $0.hasPrefix("耗时：") || $0.hasPrefix("传输：") || $0.hasPrefix("采集模式：") }, id: \.self) { detail in
+                                ForEach(metadata.diagnostics.filter { $0.hasPrefix("耗时：") || $0.hasPrefix("传输：") || $0.hasPrefix("采集模式：") || $0.hasPrefix("采集器：") }, id: \.self) { detail in
                                     Text(detail).font(.caption).foregroundStyle(.secondary)
                                 }
                             }

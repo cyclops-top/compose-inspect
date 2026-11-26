@@ -74,3 +74,21 @@ public struct TextComponentPreview: Equatable, Sendable {
         return named[token]
     }
 }
+
+extension InspectorNode {
+    /// Identifies the style supplying an omitted Material Text argument.
+    public func inheritedTextStyle(for parameter: NodeParameter) -> NodeParameter? {
+        guard kind == "ComposeNode", shortName == "Text", parameter.group == .parameter,
+              ["color", "fontSize"].contains(parameter.name) else { return nil }
+        let raw = parameter.original?["sdkParameter"]
+        // Previously saved snapshots can still contain the packed Color.Unspecified.
+        let packedUnset = parameter.name == "color"
+            && raw?["inlineClass"]?.string == "androidx.compose.ui.graphics.Color"
+            && raw?["value"]?["value"]?.int64 == 0x10
+        guard parameter.value == "Unspecified" || packedUnset else { return nil }
+        return parameters.first {
+            $0.group == .parameter && $0.name == "style." + parameter.name && !$0.isTruncated
+                && (parameter.name == "color" ? $0.colorARGB != nil : ($0.value.hasSuffix("sp") || $0.value.hasSuffix("em")))
+        }
+    }
+}

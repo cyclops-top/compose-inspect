@@ -9,7 +9,7 @@ let package = Package(
         .library(name: "ComposeInspectCore", targets: ["ComposeInspectCore"]),
     ],
     targets: [
-        .target(name: "ComposeInspectCore"),
+        .target(name: "ComposeInspectCore", resources: [.copy("Collector")]),
         .executableTarget(name: "ComposeInspectApp", dependencies: ["ComposeInspectCore"]),
         .testTarget(name: "ComposeInspectCoreTests", dependencies: ["ComposeInspectCore"]),
         .testTarget(name: "ComposeInspectAppTests", dependencies: ["ComposeInspectApp"]),

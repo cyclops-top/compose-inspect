@@ -34,16 +34,12 @@ def apk_check(path, expected):
         dex = b"".join(archive.read(name) for name in archive.namelist() if name.endswith(".dex"))
         manifest = archive.read("AndroidManifest.xml")
         assert ("assets/composeinspect/return-index-v1" in archive.namelist()) == expected
-    initializer = "dev.composeinspect.sdk.InspectorInitProvider"
+    initializer = "dev.composeinspect.sdk.InspectorInitializer"
     present = ("L" + initializer.replace(".", "/") + ";").encode() in dex
     in_manifest = initializer.encode() in manifest or initializer.encode("utf-16le") in manifest
     assert present == expected and in_manifest == expected, f"Unexpected SDK packaging: {path}"
-    index = "dev.composeinspect.sdk.ReturnIndexInitializer"
-    assert (("L" + index.replace(".", "/") + ";").encode() in dex) == expected
-    assert (index.encode() in manifest or index.encode("utf-16le") in manifest) == expected
-    if not expected:
-        assert b"Ldev/composeinspect/collector/" not in dex
-        assert b"Landroidx/compose/ui/tooling/data/" not in dex
+    assert b"Ldev/composeinspect/collector/ComposeCollector;" not in dex
+    assert b"Ldev/composeinspect/payload/DesktopCollector;" not in dex
     return {"initializerInDex": present, "initializerInManifest": in_manifest,
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "bytes": path.stat().st_size}
 

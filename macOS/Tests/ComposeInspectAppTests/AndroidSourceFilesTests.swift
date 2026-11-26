@@ -28,9 +28,8 @@ final class AndroidSourceFilesTests: XCTestCase {
             XCTAssertEqual(index.matches(source), paths)
         }
         try await expect(["Screen.kt"])
-        XCTAssertTrue(index.confirms(source))
-        XCTAssertTrue(index.captureSourceKeys?.contains("577838147:Screen.kt") == true)
-        XCTAssertFalse(index.confirms(SourceAnchor(file: "Screen.kt", packageHash: -1)))
+        XCTAssertEqual(index.uniqueFile(for: source), "Screen.kt")
+        XCTAssertNil(index.uniqueFile(for: SourceAnchor(file: "Screen.kt", packageHash: -1)))
         // Java block comments end at the first closing delimiter.
         try "/* example: /* */ package dev.composeinspect.sample;".write(
             to: root.appendingPathComponent("Screen.java"), atomically: true, encoding: .utf8)
@@ -44,8 +43,7 @@ final class AndroidSourceFilesTests: XCTestCase {
         try fm.createDirectory(at: module, withIntermediateDirectories: true)
         try content.write(to: module.appendingPathComponent("Screen.kt"), atomically: true, encoding: .utf8)
         try await expect(["Screen.kt", "feature/Screen.kt"])
-        XCTAssertFalse(index.confirms(source))
-        XCTAssertFalse(index.captureSourceKeys?.contains("577838147:Screen.kt") == true)
+        XCTAssertNil(index.uniqueFile(for: source))
         try "package different".write(to: file, atomically: true, encoding: .utf8)
         try await expect(["feature/Screen.kt"])
         let moved = root.appendingPathComponent("renamed")

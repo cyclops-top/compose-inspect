@@ -117,9 +117,8 @@ final class WorkspaceStore {
         presentationRevision &+= 1
         let base = searchesAllComponents ? snapshotIndex : filterClickable ? clickableIndex : (hideInternalNodes ? compactIndex : snapshotIndex)
         if onlySourceNodes && !searchesAllComponents {
-            let local = usesProjectSources
             presentationIndex = base.filteringNodes { node in
-                local ? projectSources.confirms(node.source) : LocatorTextBuilder.usableSource(node.source) != nil
+                LocatorTextBuilder.usableSource(node.source) != nil
             }
         } else {
             presentationIndex = base
@@ -195,10 +194,6 @@ final class WorkspaceStore {
         clickableIndex = clickable
         presentationIndex = UserDefaults.standard.bool(forKey: "onlyClickableNodes") ? clickable
             : ((UserDefaults.standard.object(forKey: "hideInternalNodes") as? Bool ?? true) ? compact : full)
-        projectSources.onCatalogChange = { [weak self] in
-            guard let self, self.onlySourceNodes, !self.searchesAllComponents else { return }
-            self.updatePresentationIndex()
-        }
     }
 
     private static func emptySnapshot() -> InspectorSnapshot {
@@ -451,11 +446,10 @@ final class WorkspaceStore {
                     }
                 }
                 let filtered = baseline.document?.root["sdkCapture"]
-                let sourceKeys = filtered?["projectSourcesOnly"]?.boolean == true ? projectSources.captureSourceKeys : nil
                 @MainActor func readSnapshot() async throws -> CapturedSnapshot {
                     try checkTarget()
                     return try await sdk.capture(serial: original.serial, package: original.package, deviceName: device.model,
-                                                 componentDetails: true, onlySourceNodes: filtered?["onlySourceNodes"]?.boolean == true, sourceKeys: sourceKeys)
+                                                 componentDetails: true, onlySourceNodes: filtered?["onlySourceNodes"]?.boolean == true)
                 }
                 let before = try await readSnapshot().snapshot
                 let index = InspectorSnapshotIndex(before)
@@ -554,8 +548,7 @@ final class WorkspaceStore {
             try Task.checkCancellation()
             try await deviceSession.prepareCaptureTarget(settings: settings)
             try Task.checkCancellation()
-            let captured = try await deviceSession.capture(settings: settings, componentDetails: componentDetails, onlySourceNodes: onlySourceNodes,
-                                                           sourceKeys: onlySourceNodes ? projectSources.captureSourceKeys : nil)
+            let captured = try await deviceSession.capture(settings: settings, componentDetails: componentDetails, onlySourceNodes: onlySourceNodes)
             try Task.checkCancellation()
             let source = captured.snapshot
             guard source.captureMetadata?.serial == deviceSession.selectedSerial,

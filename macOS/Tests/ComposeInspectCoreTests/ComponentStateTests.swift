@@ -126,9 +126,23 @@ final class ComponentStateTests: XCTestCase {
         XCTAssertThrowsError(try hierarchy(row.replacingOccurrences(of: "430,181", with: "96,139")).check(target))
     }
 
+    func testCollectorRestartMessageForCurrentAndOlderLaunchers() throws {
+        let responses = [
+            ["errorCode": "collector_restart_required", "error": "restart"],
+            ["error": "java.lang.IllegalArgumentException: 当前采集器 2.0.0-SNAPSHOT，目标 2.0.0-SNAPSHOT。请重启目标应用以切换采集器构建。"],
+            ["error": "java.lang.IllegalArgumentException: 请重启目标应用以切换采集器版本。"],
+        ]
+        for response in responses {
+            let data = try JSONSerialization.data(withJSONObject: response)
+            XCTAssertThrowsError(try SDKInspectorClient.validateResponse(data, package: "dev.sample")) {
+                XCTAssertEqual($0.localizedDescription, "采集器更新了。请把设备上正在调试的 App 完全退出，再打开，然后重新抓取。")
+            }
+        }
+    }
+
     func testHandshakeRequiresExactVersion() throws {
         var hello: [String: InspectorJSON] = ["protocolVersion": .number("1"), "pid": .number("9"), "packageName": .string("dev.sample")]
-        for version in ["0.1.4", "0.1.4-SNAPSHOT", "0.1.5-SNAPSHOT"] {
+        for version in ["0.1.4", "0.1.4-SNAPSHOT", "0.1.5-SNAPSHOT", "2.0.0", "2.0.0-SNAPSHOT"] {
             XCTAssertTrue(SDKInspectorClient.supports(version))
         }
         for version in [nil, "0.1.2", "0.1.5"] as [String?] {

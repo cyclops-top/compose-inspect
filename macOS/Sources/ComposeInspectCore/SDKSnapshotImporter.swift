@@ -191,7 +191,8 @@ public enum SDKSnapshotImporter {
         } else if raw["inlineClass"]?.string == "androidx.compose.ui.graphics.Color", let signed = value["value"]?.int64 {
             let bits = UInt64(bitPattern: signed)
             // sRGB Color packs ARGB in the high 32 bits. Other color spaces need a dedicated decoder.
-            if bits & 0xFFFFFFFF == 0 { result["value"] = .string(String(format: "#%08X", UInt32(bits >> 32))) }
+            if bits == 0x10 { result["value"] = .string("Unspecified") }
+            else if bits & 0xFFFFFFFF == 0 { result["value"] = .string(String(format: "#%08X", UInt32(bits >> 32))) }
         }
         return .object(result)
     }

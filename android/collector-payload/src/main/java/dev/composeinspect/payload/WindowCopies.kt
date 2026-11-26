@@ -1,4 +1,4 @@
-package dev.composeinspect.sdk
+package dev.composeinspect.payload
 
 import android.graphics.Bitmap
 import android.graphics.Point

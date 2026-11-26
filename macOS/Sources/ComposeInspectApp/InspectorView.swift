@@ -87,7 +87,11 @@ struct InspectorView: View {
                                              ? "\(field.group.rawValue) · 关联布局" : field.group.rawValue).font(.caption2).foregroundStyle(.secondary)
                                     }
                                     Spacer()
-                                    Text(field.original?["value"] == .null ? "null" : field.value).textSelection(.enabled)
+                                    if let style = node.inheritedTextStyle(for: field) {
+                                        inheritedValue(style)
+                                    } else {
+                                        Text(field.original?["value"] == .null ? "null" : field.value).textSelection(.enabled)
+                                    }
                                 }
                             }
                             if node.kind == "ComposeNode", !fields.contains(where: { $0.group == .mergedSemantics }) {
@@ -194,7 +198,7 @@ struct InspectorView: View {
                     if $0 { expandedGroups.insert(group) } else { expandedGroups.remove(group) }
                 })) {
                     LazyVStack(spacing: 0) {
-                        ForEach(parameters) { parameter in parameterRow(parameter) }
+                        ForEach(parameters) { parameter in parameterRow(parameter, node: node) }
                     }.padding(.top, 3)
                 } label: {
                     HStack {
@@ -206,18 +210,30 @@ struct InspectorView: View {
         }
     }
 
-    private func parameterRow(_ parameter: NodeParameter) -> some View {
+    private func inheritedValue(_ style: NodeParameter) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(style.value).textSelection(.enabled)
+            Text("来自 \(style.name)").font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func parameterRow(_ parameter: NodeParameter, node: InspectorNode) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Toggle(isOn: Binding(get: { store.selectedParameters.contains(parameter.id) }, set: {
                 store.toggleParameter(parameter.id, enabled: $0)
             })) { Text(parameter.name).font(.system(size: 10, design: .monospaced)).lineLimit(2) }
                 .toggleStyle(.checkbox)
             Spacer(minLength: 2)
-            if let argb = parameter.colorARGB { ParameterColorSwatch(argb: argb) }
-            Text(parameter.value + (parameter.isTruncated ? " …" : ""))
-                .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
-                .lineLimit(2).truncationMode(.middle).frame(maxWidth: 115, alignment: .trailing)
-                .help(parameter.value + (parameter.isTruncated ? "（SDK 已截断）" : ""))
+            let style = node.inheritedTextStyle(for: parameter)
+            if let argb = (style ?? parameter).colorARGB { ParameterColorSwatch(argb: argb) }
+            if let style {
+                inheritedValue(style)
+            } else {
+                Text(parameter.value + (parameter.isTruncated ? " …" : ""))
+                    .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                    .lineLimit(2).truncationMode(.middle).frame(maxWidth: 115, alignment: .trailing)
+                    .help(parameter.value + (parameter.isTruncated ? "（SDK 已截断）" : ""))
+            }
             if parameter.original != nil {
                 Button { store.showRawJSON(parameter: parameter) } label: { Image(systemName: "curlybraces") }
                     .buttonStyle(.plain).help("查看参数原始 JSON")

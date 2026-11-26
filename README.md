@@ -1,6 +1,6 @@
 # CompScope
 
-实时采集只读取组件层级、边界和源码位置，并配对截图。查看参数、样式和语义详情请使用 Android Studio Layout Inspector。
+CompScope 2.0 从运行中的 Compose 调试应用读取组件树、源码位置与窗口截图，可选采集参数、样式和交互详情。Android Gradle 插件接入轻量启动器，首次抓取通过 ADB LocalSocket 加载桌面内置的签名采集器，后续抓取复用。
 
 macOS 工具开发工作区。
 

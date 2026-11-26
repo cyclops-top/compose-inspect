@@ -2,6 +2,28 @@ import XCTest
 @testable import ComposeInspectCore
 
 final class LiveInspectorTests: XCTestCase {
+    func testFirstCaptureLoadsCollectorInRunningApp() async throws {
+        let env = ProcessInfo.processInfo.environment
+        guard let expected = env["COMPSCOPE_EMPTY_CACHE_PID"].flatMap(Int64.init) else {
+            throw XCTSkip("Requires an open 2.0 sample with an empty collector cache")
+        }
+        let tools = try InspectorToolchain(adb: URL(fileURLWithPath: XCTUnwrap(env["COMPOSEINSPECT_ADB"])), environment: env)
+        let client = SDKInspectorClient(tools: tools)
+        let serial = try XCTUnwrap(env["COMPOSEINSPECT_SERIAL"])
+        for state in ["installed", "memory"] {
+            let result = try await client.capture(serial: serial, package: "dev.composeinspect.sample",
+                                                  deviceName: "sample", windowImages: true)
+            let raw = try XCTUnwrap(result.snapshot.document?.root["sdkCapture"])
+            XCTAssertEqual(raw["pid"]?.int64, expected)
+            XCTAssertTrue(result.snapshot.nodes.contains { $0.name == "ParameterCard" })
+            XCTAssertFalse(result.windowImages.isEmpty && result.imageData.isEmpty)
+            let log = try XCTUnwrap(result.snapshot.captureMetadata?.diagnostics.first { $0.contains("采集器：") })
+            print("\(log) nodes=\(result.snapshot.nodes.count)")
+            XCTAssertTrue(log.contains(state))
+            XCTAssertEqual(log.contains("传包 0 字节"), state == "memory")
+        }
+    }
+
     func testCaptureExplainsInstalledNonDebuggableBuild() async throws {
         let env = ProcessInfo.processInfo.environment
         guard env["COMPOSEINSPECT_LIVE"] == "1", let package = env["COMPOSEINSPECT_NONDEBUGGABLE_PACKAGE"] else {
@@ -15,7 +37,7 @@ final class LiveInspectorTests: XCTestCase {
             XCTFail("Expected capture to fail for the non-debuggable build")
         } catch CommandFailure.failed(let message) {
             XCTAssertTrue(message.contains("\(package) 是不可调试版本"), message)
-            XCTAssertTrue(message.contains("debugImplementation"), message)
+            XCTAssertTrue(message.contains("CompScope 插件"), message)
         }
     }
 

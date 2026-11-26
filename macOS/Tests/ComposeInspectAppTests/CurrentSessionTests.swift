@@ -145,9 +145,10 @@ final class CurrentSessionTests: XCTestCase {
         store.onlySourceNodes = true
         XCTAssertNil(store.selectedNodeID)
         XCTAssertNil(store.presentationIndex.byID[wrapper.id])
-        XCTAssertEqual(store.presentationIndex.parentIDs[leaf.id], parent.id)
+        XCTAssertNotNil(store.presentationIndex.byID[child.id])
+        XCTAssertEqual(store.presentationIndex.parentIDs[leaf.id], child.id)
         store.selectImage(at: CGPoint(x: 50, y: 50), mapper: mapper)
-        XCTAssertEqual(Set(store.hitCandidates), [parent.id])
+        XCTAssertEqual(Set(store.hitCandidates), [child.id, parent.id])
         store.searchesAllComponents = true
         XCTAssertNotNil(store.presentationIndex.byID[wrapper.id])
         store.searchesAllComponents = false

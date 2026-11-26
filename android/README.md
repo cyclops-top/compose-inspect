@@ -12,11 +12,11 @@
 | `sample` | 普通业务 Compose 示例；由插件接入调试 SDK 并生成签名索引 |
 | `tools` | SDK 采集、边界与源码位置断言、debug/release 包检查 |
 
-依赖方向：`sample (debug) → inspector-sdk → compose-collector → protocol`。`inspector-sdk` 也直接使用 `protocol`。release 不依赖 SDK。
+依赖方向：`sample (debug) → inspector-sdk → protocol`。采集器和 tooling-data 随桌面应用分发。release 不依赖 SDK。
 
 ## 原理与边界
 
-SDK 的非导出 ContentProvider 随 AAR Manifest 合并，在 Activity 首次组合前启用 `isDebugInspectorInfoEnabled`。Compose 自身记录 `inspection_slot_table_set` 并调用参数信息收集逻辑。SDK 读取 `CompositionData.mapTree`，不替换 `setContent`，不设置预览模式，不要求业务包装 Composable。
+SDK 通过 AndroidX Startup 初始化，在 Activity 首次组合前启用 `isDebugInspectorInfoEnabled`。Compose 自身记录 `inspection_slot_table_set` 并调用参数信息收集逻辑。SDK 读取 `CompositionData.mapTree`，不替换 `setContent`，不设置预览模式，不要求业务包装 Composable。
 
 - Android 29+ 使用 `WindowInspector.getGlobalWindowViews()` 包含 Dialog/Popup；26–28 回退到 Activity decor，并明确返回窗口覆盖限制。
 - Android 14+ 的新版 SDK 支持按窗口配对截图。Mac 端选择窗口时会切换到对应的 PixelCopy 图像，并按窗口屏幕偏移显示。低版本系统或旧版 SDK 使用 ADB 整屏截图，与组件树并行获取。窗口像素复制和树遍历之间可能跨帧。
@@ -24,7 +24,7 @@ SDK 的非导出 ContentProvider 随 AAR Manifest 合并，在 Activity 首次�
 - `source.line` 保留 tooling 原始值。在已测两个版本中它是 1 起算，已用业务源码行和 offset 验证；不能仅根据 tooling 的旧注释再加 1。
 - SDK 默认使用快速采集，并声明 `geometry-only-v1`。支持 `component-details-v1` 时，客户端可通过 `geometryOnly: false` 请求详情，额外读取组件专属参数、布局样式、交互语义和 Lazy 列表视口。快速采集保留树结构、调用位置和工具链测得的边界，跳过参数、交互语义和样式读取。依赖参数判定的内容包装节点可能保留。可与源码过滤及窗口截图组合使用。
 - 声明 `source-only-v1` 的 SDK 支持每次抓取传入 `onlySourceNodes`，在读取参数之前跳过无源码文件名的节点。可选的 `sourceKeys` 限定工程中唯一的文件名与包哈希组合。保留子组件顺序。
-- AndroidX Startup 创建进程级签名索引协程，首个 Activity 绘制后在后台预热。应用插件生成的索引优先从 assets 读取；缺少可用制品时，安装版本相同则读取应用私有 code cache；首次安装、APK/split 变化、缓存缺失或校验失败时重新扫描 DEX。提前到达的采集请求与预热共享同一个结果，等待发生在 SDK socket 线程。
+- Startup 在首帧前开启 Compose 检查并跟踪 Activity。后台 LocalSocket 等待桌面连接。首次抓取按需初始化签名索引，同一进程复用。
 - 签名索引用于提升返回非 Unit 的调用，计数见 `stats.filteredValueCalls`。响应的 `timings.returnIndexWaitMs` 是本次请求等待索引的时间，不计入 UI 线程采集耗时。
 - 原始 Composition 表分别输出，**尚未跨表拼接 Lazy 子组合，也未与 Android View 树合并**。
 - `complete` 只表示这次发现的表没有读取错误，不表示任意应用的所有窗口、所有参数和所有代码路径都完整。
@@ -49,15 +49,21 @@ plugins { id("top.cyclops.compose-inspector") }
 
 `sample/src/main/` 不含 SDK import、初始化代码、SDK 专用 Manifest 或检查用 Composable 包装。
 
+## 2.0 桌面采集器
+
+首次抓取通过已认证的 LocalSocket 完成 hello → prepare → install（缺包时）→ capture-gzip。桌面按发布清单发送采集器版本与摘要。启动器在私有 code cache 校验 SHA-256、ECDSA 发布签名和 JAR 清单的 Implementation-Version，原子替换只读 DEX JAR。相同进程复用已加载实例；新进程重新验证磁盘缓存。已加载其他版本时，重启业务进程后即可切换。抓取诊断记录采集器版本、PID、缓存来源和传包字节数。早期 2.0 启动器由桌面通过发布清单和已确认的 JAR 摘要识别版本。
+
+桌面工程包含已签名的采集器。修改采集实现后，使用 JDK 21 运行 `android/tools/package-collector.sh`，同时提交更新的 JAR 和签名。签名私钥由 `COMPSCOPE_COLLECTOR_KEY` 指定，默认位置为 `~/.config/compscope/collector-v2.pem`。启动器内的公钥必须匹配。
+
 ## 编译期签名索引插件
 
-在应用模块应用插件，CompScope 会从这个 debug 变体的项目字节码和依赖 JAR 中提取 Compose 返回值声明，将结果打入 APK 的 `assets/composeinspect/return-index-v1`。SDK 的 Startup 协程优先加载这个索引。插件与 SDK 可从 Maven 仓库接入：
+在应用模块应用插件，CompScope 会从这个 debug 变体的项目字节码和依赖 JAR 中提取 Compose 返回值声明，将结果打入 APK 的 `assets/composeinspect/return-index-v1`。首次抓取时，采集器在 socket 工作线程优先读取这个索引。插件与 SDK 可从 Maven 仓库接入：
 
 ```kotlin
 // 应用模块 build.gradle.kts
 plugins {
     id("com.android.application")
-    id("top.cyclops.compose-inspector") version "0.1.5-SNAPSHOT"
+    id("top.cyclops.compose-inspector") version "2.0.0-SNAPSHOT"
 }
 ```
 
@@ -96,7 +102,7 @@ COMPOSEINSPECT_INDEX_APK="$PWD/sample/build/outputs/apk/debug/sample-debug.apk" 
 
 这个属性同时选择示例与采集模块的 Compose/tooling 依赖。已测矩阵见 [验证结果](validation/RESULTS.md)。**不代表已经验证一个预编译 SDK 可以兼容所有 Compose 版本**，也不是强制业务升级到 1.12.1。
 
-当前 project 依赖的默认值仍是 1.12.1，直接接入较旧业务项目而不对齐版本可能被 Gradle 升级。发布前应确定支持范围和依赖策略：最低支持版本编译、同版本 tooling 对齐，并验证同一 SDK 二进制在各宿主版本运行。不能简单用 `compileOnly` 删除 tooling 依赖，运行时仍需要它。
+业务 App 提供 Compose UI 与 runtime。桌面采集器单独打包 tooling-data 和签名索引读取依赖。切换 Compose 编译基线后，需要用同一份签名 JAR 在各目标宿主版本上验证。
 
 ## 通过 ADB 采集
 
@@ -123,8 +129,8 @@ python3 tools/validate.py --serial DEVICE_SERIAL --versions 1.12.1
 
 ## Maven 发布
 
-SDK 和 Gradle 插件均发布到 `https://repo.tick-tick.cn`。正式版发布到 `releases`。日常 SNAPSHOT 联调使用上文的 `publishToMavenLocal` 命令。
-版本由 `gradle.properties` 的 `sdkVersion` 统一控制，当前开发版为 `0.1.5-SNAPSHOT`。
+SDK 和 Gradle 插件的发布目标为 `https://repo.tick-tick.cn`。正式版发布到 `releases`。日常 SNAPSHOT 联调使用上文的 `publishToMavenLocal` 命令。
+版本由 `gradle.properties` 的 `sdkVersion` 统一控制，本地版本为 `2.0.0-SNAPSHOT`。
 
 使用已发布的 0.1.4 时，在业务应用的调试依赖中添加：
 
@@ -132,7 +138,7 @@ SDK 和 Gradle 插件均发布到 `https://repo.tick-tick.cn`。正式版发布�
 debugImplementation("top.cyclops:compose-inspector:0.1.4")
 ```
 
-同时发布 `compose-inspector-collector` 和 `compose-inspector-protocol`，均属于 `top.cyclops`；主制品会传递依赖它们。发布的是库的 release 变体，使用方仍须使用 `debugImplementation`，不要加入生产包。
+同时发布 `compose-inspector-collector` 和 `compose-inspector-protocol`，均属于 `top.cyclops`；2.0 启动器只依赖协议制品和 AndroidX Startup。发布的是库的 release 变体，使用方仍须使用 `debugImplementation`，不要加入生产包。
 
 在本机的 `~/.gradle/gradle.properties` 填写 Reposilite 令牌凭据：
 

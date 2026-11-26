@@ -1,9 +1,22 @@
 import Foundation
+import CryptoKit
 
 public struct SDKInspectorClient: Sendable {
-    public static let supportedSDKVersion = "0.1.5-SNAPSHOT"
+    public static let supportedSDKVersion = "2.0.0-SNAPSHOT"
     static func supports(_ reported: String?) -> Bool {
-        reported == supportedSDKVersion || reported == "0.1.4" || reported == "0.1.4-SNAPSHOT" || reported == "0.1.3"
+        reported == "2.0.0" || reported == supportedSDKVersion || reported == "0.1.5-SNAPSHOT" || reported == "0.1.4" || reported == "0.1.4-SNAPSHOT" || reported == "0.1.3"
+    }
+    private struct CollectorMetadata: Decodable { let version: String; let digest: String }
+    private static let collectorBundle = Result { () -> (bytes: Data, digest: String, signature: String, version: String) in
+        guard let dir = Bundle.module.url(forResource: "Collector", withExtension: nil) else {
+            throw CommandFailure.configuration("桌面安装包缺少采集器。")
+        }
+        let bytes = try Data(contentsOf: dir.appendingPathComponent("collector.jar"))
+        let signature = try Data(contentsOf: dir.appendingPathComponent("collector.sig"))
+        let digest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        let metadata = try JSONDecoder().decode(CollectorMetadata.self, from: Data(contentsOf: dir.appendingPathComponent("collector.json")))
+        guard !metadata.version.isEmpty, metadata.digest == digest else { throw CommandFailure.configuration("桌面采集器与版本清单不匹配。") }
+        return (bytes, digest, signature.base64EncodedString(), metadata.version)
     }
     private let adb: InspectorClient
     public init(tools: InspectorToolchain) { adb = InspectorClient(tools: tools) }
@@ -43,10 +56,16 @@ public struct SDKInspectorClient: Sendable {
 
     static func validateResponse(_ data: Data, package: String, expectedPID: Int64? = nil) throws -> InspectorDocument {
         let document = try InspectorDocument(data: data)
-        if let error = document.root["error"]?.string { throw CommandFailure.failed("SDK：\(error)") }
+        if let error = document.root["error"]?.string {
+            if document.root["errorCode"]?.string == "collector_restart_required" ||
+                error.hasSuffix("请重启目标应用以切换采集器构建。") || error.hasSuffix("请重启目标应用以切换采集器版本。") {
+                throw CommandFailure.failed("采集器更新了。请把设备上正在调试的 App 完全退出，再打开，然后重新抓取。")
+            }
+            throw CommandFailure.failed("SDK：\(error)")
+        }
         let reported = document.root["sdkVersion"]?.string
         guard supports(reported), document.root["protocolVersion"]?.int64 == 1 else {
-            throw CommandFailure.failed("当前 CompScope 支持采集 SDK 0.1.3、0.1.4-SNAPSHOT、0.1.4 和 \(supportedSDKVersion)（协议 1）。目标应用报告 SDK \(reported ?? "未知")，协议 \(document.root["protocolVersion"]?.display ?? "未知")。请使用对应 SDK 重新构建调试包。")
+            throw CommandFailure.failed("当前 CompScope 支持采集 SDK 0.1.3、0.1.4-SNAPSHOT、0.1.4、0.1.5-SNAPSHOT 和 \(supportedSDKVersion)（协议 1）。目标应用报告 SDK \(reported ?? "未知")，协议 \(document.root["protocolVersion"]?.display ?? "未知")。请使用对应 SDK 重新构建调试包。")
         }
         guard document.root["packageName"]?.string == package else { throw CommandFailure.failed("SDK 响应包名与目标不一致。") }
         guard let pid = document.root["pid"]?.int64, pid > 0 else { throw CommandFailure.failed("SDK 响应缺少有效进程标识。") }
@@ -66,18 +85,43 @@ public struct SDKInspectorClient: Sendable {
                 _ = try await adb.adb(["-s", serial, "shell", "run-as", package, "true"], timeout: 2)
             } catch CommandFailure.failed(let message) where message.split(whereSeparator: \.isNewline)
                 .contains("run-as: package not debuggable: \(package)") {
-                throw CommandFailure.failed("设备上的 \(package) 是不可调试版本。请安装并打开通过 debugImplementation 接入采集 SDK 的调试包，再重新抓取。")
+                throw CommandFailure.failed("设备上的 \(package) 是不可调试版本。请安装并打开已接入 CompScope 插件的调试包，再重新抓取。")
             } catch {
                 // An unavailable run-as command cannot establish whether the package is debuggable.
             }
             try Task.checkCancellation()
-            throw CommandFailure.failed("无法连接 \(package) 的采集 SDK。请确认已通过 debugImplementation 接入 SDK，并已安装、打开该调试版本。\n\(handshakeError.localizedDescription)")
+            throw CommandFailure.failed("无法连接 \(package) 的采集 SDK。请确认调试包已接入 CompScope 插件，并已安装、打开该版本。\n\(handshakeError.localizedDescription)")
         }
-        let hello = try Self.validateResponse(helloData, package: package)
+        var hello = try Self.validateResponse(helloData, package: package)
+        let pid = hello.root["pid"]!.int64!
+        var collectorLog: String?
+        var collectorOptions: [String: String] = [:]
+        if hello.root["collectorABI"] != nil || [Self.supportedSDKVersion, "2.0.0"].contains(hello.root["sdkVersion"]?.string ?? "") {
+            guard hello.root["collectorABI"]?.int64 == 1 else { throw CommandFailure.failed("不支持的采集器加载接口。") }
+            let bundle = try Self.collectorBundle.get()
+            let checksVersion = hello.root["checksCollectorVersion"]?.boolean == true
+            collectorOptions = ["collectorABI": "1", "pid": String(pid), "digest": bundle.digest,
+                                "signature": bundle.signature, "collectorVersion": bundle.version]
+            func negotiate(_ command: String, body: Data? = nil) async throws -> InspectorDocument {
+                let data = try await SDKTransport.request(port: port, command: command, timeout: 20,
+                                                          maxBytes: 65536, collector: collectorOptions, body: body)
+                return try Self.validateResponse(data, package: package, expectedPID: pid)
+            }
+            hello = try await negotiate("prepare")
+            if hello.root["state"]?.string == "missing" {
+                await progress("传输并加载桌面内置采集器…")
+                hello = try await negotiate("install", body: bundle.bytes)
+            }
+            if checksVersion && hello.root["collectorVersion"]?.string != bundle.version {
+                throw CommandFailure.failed("设备加载的采集器与桌面要求的版本 \(bundle.version) 不一致。")
+            }
+            guard hello.root["digest"]?.string == bundle.digest, let bytes = hello.root["transferredBytes"]?.int64,
+                  let state = hello.root["state"]?.string else { throw CommandFailure.failed("采集器加载确认无效。") }
+            collectorLog = "采集器：\(bundle.version)，\(state)，传包 \(bytes) 字节，PID \(pid)。"
+        }
         guard hello.root["capabilities"]?.array?.contains(.string("composition-tables")) == true else {
             throw CommandFailure.failed("SDK 未声明组件树采集能力。")
         }
-        let pid = hello.root["pid"]!.int64!
         guard hello.root["capabilities"]?.array?.contains(.string("gzip-json-v1")) == true else {
             throw CommandFailure.failed("SDK 缺少压缩采集能力，请使用开发版本 \(Self.supportedSDKVersion)。")
         }
@@ -93,7 +137,7 @@ public struct SDKInspectorClient: Sendable {
         }
         async let screenResult: CommandOutput? = paired ? nil : adb.adb(["-s", serial, "shell", "-T", "screencap", "-p"])
         let payload = try await SDKTransport.request(port: port, command: "capture-gzip",
-                                                  timeout: 20, compressed: true, componentDetails: componentDetails,
+                                                  timeout: 20, collector: collectorOptions, compressed: true, componentDetails: componentDetails,
                                                   windowImages: paired, onlySourceNodes: filterAtSource, sourceKeys: filterAtSource ? sourceKeys : nil)
         let readFinished = Date()
         let separator = paired ? payload.firstIndex(of: 10) : nil
@@ -126,6 +170,7 @@ public struct SDKInspectorClient: Sendable {
                            importFinished.timeIntervalSince(importStarted)),
                     "SDK 原始 Composition 表保留为窗口内的独立分支；尚未拼接 Lazy 子表或采集 Android View 属性。",
                     paired ? "截图来源：SDK 独立窗口。" : "截图来源：ADB 整屏。"]
+        if let collectorLog { logs.append(collectorLog) }
         logs.append(componentDetails ? "采集模式：组件详情（参数、样式与交互）。" : "采集模式：快速采集（结构、源码与边界）。")
         if onlySourceNodes {
             if sourceKeys != nil && filterAtSource && document.root["projectSourcesOnly"]?.boolean != true {

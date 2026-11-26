@@ -42,7 +42,7 @@ final class AutomaticCaptureIntegrationTests: XCTestCase {
             _ = try await session.capture(settings: settings)
             XCTFail("Expected a missing SDK error")
         } catch {
-            XCTAssertTrue(error.localizedDescription.contains("debugImplementation"), error.localizedDescription)
+            XCTAssertTrue(error.localizedDescription.contains("CompScope 插件"), error.localizedDescription)
             XCTAssertFalse(error.localizedDescription.contains("是不可调试版本"), error.localizedDescription)
             XCTAssertTrue(error.localizedDescription.contains(session.packageName))
         }

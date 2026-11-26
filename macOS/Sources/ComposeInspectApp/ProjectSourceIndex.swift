@@ -7,16 +7,6 @@ import ComposeInspectCore
 private struct SourceCatalog: Sendable {
     var files: [String: [String: Int32?]] = [:]
 
-    /// Only file/package pairs that resolve to exactly one local source path may pass the SDK filter.
-    var captureSourceKeys: [String] {
-        files.flatMap { file, paths in
-            let hashes = paths.values.compactMap { $0 }.filter { $0 != -1 }
-            return Dictionary(grouping: hashes, by: { $0 }).compactMap { hash, matches in
-                matches.count == 1 ? "\(hash):\(file.precomposedStringWithCanonicalMapping)" : nil
-            }
-        }
-    }
-
     static func hash(_ name: String) -> Int32 {
         let signed = name.utf16.reduce(Int32.zero) { $0 &* 31 &+ Int32($1) }
         return signed < 0 ? 0 &- signed : signed
@@ -170,9 +160,7 @@ private final class SourceWatcher: @unchecked Sendable {
 final class ProjectSourceIndex {
     private var catalog = SourceCatalog()
     @ObservationIgnored private var watcher: SourceWatcher?
-    @ObservationIgnored var onCatalogChange: (() -> Void)?
     private var generation = UUID()
-    private(set) var captureSourceKeys: [String]?
     private(set) var project = ""
     private(set) var status = ""
 
@@ -184,9 +172,7 @@ final class ProjectSourceIndex {
         watcher = nil
         generation = UUID()
         catalog = SourceCatalog()
-        captureSourceKeys = nil
         project = path
-        onCatalogChange?()
         status = ""
         guard !path.isEmpty else { return }
         // FileManager enumeration and FSEvents both use the physical path (e.g. /private/var).
@@ -198,12 +184,9 @@ final class ProjectSourceIndex {
         let root = URL(fileURLWithPath: String(cString: physicalPath), isDirectory: true)
         let revision = generation
         let watcher = SourceWatcher(root: root) { [weak self] snapshot in
-            let keys = snapshot.captureSourceKeys
             DispatchQueue.main.async {
                 guard let self, self.generation == revision else { return }
                 self.catalog = snapshot
-                self.captureSourceKeys = keys
-                self.onCatalogChange?()
                 self.status = ""
             }
         }
@@ -216,11 +199,6 @@ final class ProjectSourceIndex {
         guard let entries = catalog.files[name] else { return [] }
         guard let hash = source.packageHash, hash != -1 else { return entries.keys.sorted() }
         return entries.compactMap { $0.value == hash ? $0.key : nil }.sorted()
-    }
-
-    func confirms(_ source: SourceAnchor?) -> Bool {
-        guard let source else { return false }
-        return uniqueFile(for: source) != nil
     }
 
     func uniqueFile(for source: SourceAnchor) -> String? {
