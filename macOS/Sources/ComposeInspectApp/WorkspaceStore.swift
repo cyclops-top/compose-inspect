@@ -89,7 +89,7 @@ final class WorkspaceStore {
     var hideInternalNodes = UserDefaults.standard.object(forKey: "onlyClickableNodes") as? Bool == true
         || (UserDefaults.standard.object(forKey: "hideInternalNodes") as? Bool ?? true) {
         didSet {
-            if onlyClickableNodes && !hideInternalNodes { hideInternalNodes = true }
+            if filterClickable && !hideInternalNodes { hideInternalNodes = true }
             UserDefaults.standard.set(hideInternalNodes, forKey: "hideInternalNodes")
             updatePresentationIndex()
         }
@@ -101,6 +101,8 @@ final class WorkspaceStore {
             updatePresentationIndex()
         }
     }
+    var geometrySnapshot: Bool { snapshot.document?.root["sdkCapture"]?["geometryOnly"]?.boolean == true }
+    var filterClickable: Bool { onlyClickableNodes && !geometrySnapshot }
     var onlySourceNodes: Bool {
         didSet {
             filterDefaults.set(onlySourceNodes, forKey: "onlySourceNodes")
@@ -110,7 +112,7 @@ final class WorkspaceStore {
 
     private func updatePresentationIndex() {
         presentationRevision &+= 1
-        let base = searchesAllComponents ? snapshotIndex : onlyClickableNodes ? clickableIndex : (hideInternalNodes ? compactIndex : snapshotIndex)
+        let base = searchesAllComponents ? snapshotIndex : filterClickable ? clickableIndex : (hideInternalNodes ? compactIndex : snapshotIndex)
         if onlySourceNodes && !searchesAllComponents {
             let local = usesProjectSources
             presentationIndex = base.filteringNodes { node in
@@ -616,7 +618,7 @@ final class WorkspaceStore {
         expandedNodes = Set(snapshot.roots.map(\.id))
         windowRootID = snapshot.roots.first?.id
         fitImage()
-        notice = "已获取界面"
+        notice = geometrySnapshot ? "已快速采集结构与边界" : "已获取界面"
     }
 
     func showRawJSON(parameter: NodeParameter? = nil) {

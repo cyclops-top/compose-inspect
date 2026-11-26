@@ -18,7 +18,7 @@ LIMIT = 32 * 1024 * 1024
 
 def request(port, command):
     with socket.create_connection(("127.0.0.1", port), timeout=20) as sock, sock.makefile("rb") as stream:
-        sock.sendall(json.dumps({"command": command}).encode() + b"\n")
+        sock.sendall(json.dumps({"command": command, "geometryOnly": True}).encode() + b"\n")
         if command == "hello":
             return json.loads(stream.readline(65536)), 0
         size, = struct.unpack(">I", stream.read(4))
@@ -38,7 +38,7 @@ def main():
     parser.add_argument("--compose", required=True, help="Resolved Compose version of installed sample build")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    expected_sdk = "0.1.4-SNAPSHOT"
+    expected_sdk = "0.1.5-SNAPSHOT"
 
     def adb(*args_):
         return subprocess.check_output(["adb", "-s", args.serial, *args_], text=True, timeout=30).strip()
@@ -55,8 +55,8 @@ def main():
         try:
             hello, _ = request(port, "hello")
             validate(hello)
-            if "gzip-json-v1" not in hello["capabilities"]:
-                raise ValueError("Missing gzip capability")
+            if not {"gzip-json-v1", "geometry-only-v1"}.issubset(hello["capabilities"]):
+                raise ValueError("Missing geometry capture or gzip capability")
             yield port, hello["pid"]
         finally:
             adb("forward", "--remove", "tcp:" + str(port))
@@ -78,7 +78,7 @@ def main():
             data, size = request(port, "capture-gzip")
         elapsed = (time.perf_counter() - start) * 1000
         validate(data, pid)
-        if not data["complete"] or data["diagnostics"]:
+        if not data["geometryOnly"] or not data["complete"] or data["diagnostics"]:
             raise ValueError("Partial capture")
         windows = json.dumps(data["windows"], sort_keys=True, separators=(",", ":")).encode()
         if b'"PerformanceProbe"' not in windows:

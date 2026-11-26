@@ -44,8 +44,10 @@ struct InspectorView: View {
                         .id(store.selectedKey).id(tools.androidProjectPath)
                 }
                 .padding(.horizontal, 12).padding(.top, 10)
-                Picker("组件属性分组", selection: $selectedTab) {
-                    ForEach(Tab.allCases, id: \.self) { tab in
+                let tabs: [Tab] = store.geometrySnapshot ? [.basic, .location] : Tab.allCases
+                let tab = tabs.contains(selectedTab) ? selectedTab : .basic
+                Picker("组件属性分组", selection: Binding(get: { tab }, set: { selectedTab = $0 })) {
+                    ForEach(tabs, id: \.self) { tab in
                         Text(tab.rawValue).tag(tab)
                     }
                 }
@@ -54,9 +56,9 @@ struct InspectorView: View {
                 Divider()
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
-                        switch selectedTab {
+                        switch tab {
                         case .basic:
-                            PrimaryAttributes(node: node) { selectedTab = .style }
+                            if !store.geometrySnapshot { PrimaryAttributes(node: node) { selectedTab = .style } }
                             layoutBounds(for: node)
                             if let style = node.style {
                                 BoxPreview(style: style)
@@ -106,8 +108,8 @@ struct InspectorView: View {
                         }
                     }.padding(12)
                 }
-                .id(selectedTab)
-                if selectedTab == .parameters || !store.selectedParameters.isEmpty {
+                .id(tab)
+                if tab == .parameters || !store.selectedParameters.isEmpty {
                     HStack(spacing: 7) {
                         Image(systemName: "checklist")
                         Text("已选 \(store.selectedParameters.count) 项 · 当前组件")
@@ -116,7 +118,7 @@ struct InspectorView: View {
                         .background(AppStyle.sidebar).overlay(alignment: .top) { Divider() }
                 }
             } else {
-                EmptyState(icon: "cursorarrow", title: "未选中组件", subtitle: "点击截图或左侧组件树，查看参数。")
+                EmptyState(icon: "cursorarrow", title: "未选中组件", subtitle: "点击截图或左侧组件树，查看组件边界和源码位置。")
             }
         }.background(AppStyle.background)
     }

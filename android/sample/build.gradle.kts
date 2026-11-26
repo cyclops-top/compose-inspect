@@ -1,5 +1,6 @@
 plugins {
     id("com.android.application")
+    id("top.cyclops.compose-inspector")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 android {
@@ -18,10 +19,16 @@ android {
 }
 val composeVersion = providers.gradleProperty("composeVersion").getOrElse("1.12.1")
 
+// Exercise the plugin's published coordinate against the SDK in this checkout.
+configurations.configureEach {
+    resolutionStrategy.dependencySubstitution {
+        substitute(module("top.cyclops:compose-inspector")).using(project(":inspector-sdk"))
+    }
+}
+
 dependencies {
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.foundation:foundation:$composeVersion")
-    debugImplementation(project(":inspector-sdk"))
     androidTestImplementation(project(":compose-collector"))
     androidTestImplementation(project(":protocol"))
 }

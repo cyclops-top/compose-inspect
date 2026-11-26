@@ -25,10 +25,12 @@ struct HierarchyView: View {
                 .padding(.horizontal, 10).padding(.bottom, 8)
             HStack(spacing: 6) {
                 Toggle("精简", isOn: $store.hideInternalNodes)
-                    .disabled(store.onlyClickableNodes)
-                    .help(store.onlyClickableNodes ? "仅可点击模式必须开启精简" : "隐藏内部实现及 Android 宿主容器，保留子组件")
-                Toggle("仅可点击", isOn: $store.onlyClickableNodes)
-                    .help("保留窗口根节点及具有点击动作的组件，并自动开启精简")
+                    .disabled(store.filterClickable)
+                    .help(store.filterClickable ? "仅可点击模式必须开启精简" : "隐藏内部实现及 Android 宿主容器，保留子组件")
+                if !store.geometrySnapshot {
+                    Toggle("仅可点击", isOn: Binding(get: { store.filterClickable }, set: { store.onlyClickableNodes = $0 }))
+                        .help("保留窗口根节点及具有点击动作的组件，并自动开启精简")
+                }
                 Spacer(minLength: 0)
                 Button { showingFilterConfiguration = true } label: {
                     Image(systemName: "gearshape")

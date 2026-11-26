@@ -48,12 +48,13 @@ class SemanticsReadBenchmark : Instrumentation() {
             fun measure(mode: String, warmup: Boolean) {
                 val start = SystemClock.elapsedRealtimeNanos()
                 val elapsed: Double
-                if (mode == "full") {
+                if (mode == "geometry") {
                     val data = onMain { ComposeCollector.capture(listOf(activity)) }
                     elapsed = (SystemClock.elapsedRealtimeNanos() - start) / 1e6
                     check(data.getBoolean("complete"))
                     val json = JsonResponseEncoder.encode(data).decodeToString()
-                    check(expected.all { json.contains("\"value\":\"$it\"") })
+                    check(data.getBoolean("geometryOnly") && data.getJSONObject("stats").getInt("parameters") == 0)
+                    check(json.contains("\"name\":\"PerformanceProbe\""))
                 } else {
                     val received = onMain { mutableSetOf<String>().also { texts(activity.window.decorView, it) } }
                     elapsed = (SystemClock.elapsedRealtimeNanos() - start) / 1e6
@@ -62,9 +63,9 @@ class SemanticsReadBenchmark : Instrumentation() {
                 if (!warmup) samples.put(JSONObject().put("mode", mode).put("ms", elapsed))
             }
             repeat(22) { round ->
-                val first = if (round % 2 == 0) "full" else "text"
+                val first = if (round % 2 == 0) "geometry" else "text"
                 measure(first, round < 2)
-                measure(if (first == "full") "text" else "full", round < 2)
+                measure(if (first == "geometry") "text" else "geometry", round < 2)
             }
             onMain { activity.finish() }
             finish(Activity.RESULT_OK, Bundle().apply {

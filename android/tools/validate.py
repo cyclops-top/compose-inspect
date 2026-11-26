@@ -33,10 +33,14 @@ def apk_check(path, expected):
     with ZipFile(path) as archive:
         dex = b"".join(archive.read(name) for name in archive.namelist() if name.endswith(".dex"))
         manifest = archive.read("AndroidManifest.xml")
+        assert ("assets/composeinspect/return-index-v1" in archive.namelist()) == expected
     initializer = "dev.composeinspect.sdk.InspectorInitProvider"
     present = ("L" + initializer.replace(".", "/") + ";").encode() in dex
     in_manifest = initializer.encode() in manifest or initializer.encode("utf-16le") in manifest
     assert present == expected and in_manifest == expected, f"Unexpected SDK packaging: {path}"
+    index = "dev.composeinspect.sdk.ReturnIndexInitializer"
+    assert (("L" + index.replace(".", "/") + ";").encode() in dex) == expected
+    assert (index.encode() in manifest or index.encode("utf-16le") in manifest) == expected
     if not expected:
         assert b"Ldev/composeinspect/collector/" not in dex
         assert b"Landroidx/compose/ui/tooling/data/" not in dex
@@ -78,6 +82,10 @@ def validate_sdk(directory, source):
         document = json.loads((directory / f"sdk-{scenario}.json").read_text())
         assert document["complete"] and not document["diagnostics"], document["diagnostics"]
         nodes = list(sdk_nodes(document))
+        assert document["geometryOnly"] and document["stats"]["parameters"] == 0
+        assert all(not w["styleCatalogs"] for w in document["windows"])
+        assert all(not n.get("parameters") and "interaction" not in n for n in nodes)
+        assert any(n.get("boundsInWindow") for n in nodes)
         required = {"dialog": {"DialogContent"}, "popup": {"PopupContent"}}.get(
             scenario, FIXTURES - {"DialogContent", "PopupContent"})
         captured = {n["name"] for n in nodes} & FIXTURES
@@ -92,34 +100,9 @@ def validate_sdk(directory, source):
             assert source[location["offset"]:].startswith(node["name"]), location
         if scenario != "main":
             continue
-        assert not any(n["name"] in {"ProbeBoundary", "CompositionLocalProvider", "probeValue"} for n in nodes)
-        assert any(n["name"] == "BasicText" and any(
-            p["value"].get("value") == "ComposeInspect capability probe" for p in n["parameters"]
-        ) for n in nodes), "A lifted content slot must retain its text in the raw SDK payload"
-        assert any(n["name"] == "BasicText" and any(
-            p["value"].get("value") == "value-call-child" for p in n["parameters"]
-        ) for n in nodes), "A value-returning composable must still promote its UI children"
-        card = next(n for n in nodes if n["name"] == "ParameterCard")
-        params = {p["name"]: p for p in card["parameters"]}
-        for name, value in {"title": "explicit-title", "count": 7, "enabled": True, "spacing": 12}.items():
-            assert params[name]["value"]["value"] == value, (name, params[name])
-        profile = {p["name"]: p["value"] for p in params["profile"]["value"]["fields"]}
-        assert profile["name"]["value"] == "Ada" and profile["age"]["value"] == 37
-        assert [p["value"] for p in profile["tags"]["items"]] == ["compose", "debug"]
-        assert params["spacing"]["inlineClass"] == "androidx.compose.ui.unit.Dp"
-        assert params["tint"]["inlineClass"] == "androidx.compose.ui.graphics.Color"
-        defaults = next(n for n in nodes if n["name"] == "DefaultCard")["parameters"]
-        assert {p["name"]: p["value"].get("value") for p in defaults} == {"title": "default-title", "count": 23, "nullable": None}
-        assert all(p["fromDefault"] for p in defaults)
+        assert not any(n["name"] in {"CompositionLocalProvider", "probeValue"} for n in nodes)
         rows = [n for n in nodes if n["name"] == "LazyRowProbe"]
         assert 0 < len(rows) < 100, "Only composed lazy items should be present"
-        for name in ("InlineWrapper", "NonRestartableCard"):
-            assert next(n for n in nodes if n["name"] == name)["parameters"] == [], name
-
-
-def counter_value(document):
-    card = next(node for node in sdk_nodes(document) if node["name"] == "ParameterCard")
-    return next(p for p in card["parameters"] if p["name"] == "count")["value"]["value"]
 
 
 def main():
@@ -157,34 +140,9 @@ def main():
             save(output / f"sdk-{scenario}.json", result)
             print(f"[{version}] SDK {scenario}: {result['stats']}", flush=True)
 
-        # Exercise a real recomposition, locating the action from its captured text and bounds.
-        launch("main")
-        before = capture(args.adb, args.serial, PACKAGE)
-        for window in before["windows"]:
-            nodes = sdk_nodes({"windows": [window]})
-            target = next((node for node in nodes if node["name"] == "BasicText" and
-                           any(p["name"] == "text" and p["value"].get("value") == "Increment: 7" for p in node["parameters"])), None)
-            if target:
-                left, top, right, bottom = target["boundsInWindow"]
-                x, y = window["screenOffset"]
-                run(adb + ["shell", "input", "tap", str(x + (left + right) // 2), str(y + (top + bottom) // 2)])
-                deadline = time.monotonic() + 8
-                while True:
-                    result = capture(args.adb, args.serial, PACKAGE)
-                    count = counter_value(result)
-                    if count == 8:
-                        save(output / "sdk-recomposed.json", result)
-                        break
-                    if count != 7 or time.monotonic() >= deadline:
-                        raise AssertionError(f"Expected count 8 after one tap, received {count}")
-                    time.sleep(.2)
-                break
-        else:
-            raise AssertionError("Increment control missing")
-
         source = ROOT / "sample/src/main/java/dev/composeinspect/sample/MainActivity.kt"
         validate_sdk(output, source.read_text())
-        print(f"[{version}] SDK values, source offsets, windows and recomposition checks passed", flush=True)
+        print(f"[{version}] SDK geometry, source offsets and windows checks passed", flush=True)
 
         save(output / "validation.json", metadata)
         print(f"[{version}] Evidence: {output}", flush=True)

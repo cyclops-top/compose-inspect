@@ -201,7 +201,7 @@ struct PreviewView: View {
                     if !pickingColor {
                         if store.canPickImage && store.showWireframes {
                             ComponentWireframes(snapshotID: store.snapshot.id, rootID: store.visibleRoot?.id,
-                                                hidingInternals: store.hideInternalNodes, onlyClickable: store.onlyClickableNodes,
+                                                hidingInternals: store.hideInternalNodes, onlyClickable: store.filterClickable,
                                                 presentationRevision: store.presentationRevision,
                                                 nodes: store.visibleNodes, imageSize: store.snapshot.pixelSize,
                                                 canvasSize: geometry.size, zoom: viewport.zoom, pan: viewport.pan)

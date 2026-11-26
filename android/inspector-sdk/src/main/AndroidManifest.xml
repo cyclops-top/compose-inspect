@@ -1,6 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
-        <meta-data android:name="dev.composeinspect.SDK_VERSION" android:value="0.1.4-SNAPSHOT" />
+        <provider android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup" android:exported="false">
+            <meta-data android:name="dev.composeinspect.sdk.ReturnIndexInitializer" android:value="androidx.startup" />
+        </provider>
+        <meta-data android:name="dev.composeinspect.SDK_VERSION" android:value="0.1.5-SNAPSHOT" />
         <meta-data android:name="dev.composeinspect.PROTOCOL_VERSION" android:value="1" />
         <provider android:name="dev.composeinspect.sdk.InspectorInitProvider"
             android:authorities="${applicationId}.composeinspect.init"

@@ -7,6 +7,7 @@ enum SDKTransport {
     static func request(port: UInt16, command: String, timeout: TimeInterval, maxBytes: Int = 32 * 1024 * 1024,
                         compressed: Bool = false, windowImages: Bool = false, onlySourceNodes: Bool = false, sourceKeys: [String]? = nil) async throws -> Data {
         var options: [String: Any] = ["command": command, "windowImages": windowImages, "onlySourceNodes": onlySourceNodes]
+        if command == "capture-gzip" { options["geometryOnly"] = true }
         options["sourceKeys"] = sourceKeys
         var request = try JSONSerialization.data(withJSONObject: options)
         if request.count >= 4 * 1024 * 1024 {

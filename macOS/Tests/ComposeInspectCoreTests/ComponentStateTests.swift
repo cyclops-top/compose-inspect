@@ -128,7 +128,10 @@ final class ComponentStateTests: XCTestCase {
 
     func testHandshakeRequiresExactVersion() throws {
         var hello: [String: InspectorJSON] = ["protocolVersion": .number("1"), "pid": .number("9"), "packageName": .string("dev.sample")]
-        for version in [nil, "0.1.2", "0.1.4"] as [String?] {
+        for version in ["0.1.4", "0.1.4-SNAPSHOT", "0.1.5-SNAPSHOT"] {
+            XCTAssertTrue(SDKInspectorClient.supports(version))
+        }
+        for version in [nil, "0.1.2", "0.1.5"] as [String?] {
             hello["sdkVersion"] = version.map(InspectorJSON.string)
             XCTAssertThrowsError(try SDKInspectorClient.validateResponse(Data(InspectorJSON.object(hello).jsonString().utf8), package: "dev.sample")) {
                 XCTAssertTrue($0.localizedDescription.contains("0.1.3"))

@@ -1,0 +1,734 @@
+{
+  "treeHash": "e96926873c3148494451cc355a23dddc8499e4bddd28920040e4ea4919d51fe3",
+  "samples": [
+    {
+      "round": -3,
+      "mode": 5,
+      "responseMs": 4093.663791,
+      "collectMs": 739.621559,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": -3,
+      "mode": 6,
+      "responseMs": 1286.729875,
+      "collectMs": 527.206502,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": -3,
+      "mode": 0,
+      "responseMs": 1872.069625,
+      "collectMs": 480.134522,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": -2,
+      "mode": 6,
+      "responseMs": 1020.035583,
+      "collectMs": 345.204968,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82632
+    },
+    {
+      "round": -2,
+      "mode": 0,
+      "responseMs": 1230.726666,
+      "collectMs": 295.59008,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82634
+    },
+    {
+      "round": -2,
+      "mode": 5,
+      "responseMs": 460.592541,
+      "collectMs": 269.929115,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82632
+    },
+    {
+      "round": -1,
+      "mode": 6,
+      "responseMs": 857.235791,
+      "collectMs": 264.640108,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82634
+    },
+    {
+      "round": -1,
+      "mode": 5,
+      "responseMs": 407.169334,
+      "collectMs": 230.279499,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82634
+    },
+    {
+      "round": -1,
+      "mode": 0,
+      "responseMs": 832.973166,
+      "collectMs": 231.337547,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82634
+    },
+    {
+      "round": 0,
+      "mode": 0,
+      "responseMs": 620.600375,
+      "collectMs": 224.137862,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82635
+    },
+    {
+      "round": 0,
+      "mode": 5,
+      "responseMs": 381.7805,
+      "collectMs": 227.04298,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": 0,
+      "mode": 6,
+      "responseMs": 853.548,
+      "collectMs": 217.77192,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82635
+    },
+    {
+      "round": 1,
+      "mode": 0,
+      "responseMs": 589.888042,
+      "collectMs": 203.557353,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82634
+    },
+    {
+      "round": 1,
+      "mode": 6,
+      "responseMs": 826.366458,
+      "collectMs": 213.547373,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82632
+    },
+    {
+      "round": 1,
+      "mode": 5,
+      "responseMs": 405.292292,
+      "collectMs": 195.608958,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82635
+    },
+    {
+      "round": 2,
+      "mode": 5,
+      "responseMs": 401.276667,
+      "collectMs": 195.03768,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82634
+    },
+    {
+      "round": 2,
+      "mode": 0,
+      "responseMs": 619.807291,
+      "collectMs": 193.934561,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 2,
+      "mode": 6,
+      "responseMs": 741.258125,
+      "collectMs": 206.551701,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": 3,
+      "mode": 5,
+      "responseMs": 387.602875,
+      "collectMs": 192.386508,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82635
+    },
+    {
+      "round": 3,
+      "mode": 6,
+      "responseMs": 669.728958,
+      "collectMs": 176.609458,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": 3,
+      "mode": 0,
+      "responseMs": 563.195875,
+      "collectMs": 184.082249,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82634
+    },
+    {
+      "round": 4,
+      "mode": 6,
+      "responseMs": 631.52425,
+      "collectMs": 181.965519,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82636
+    },
+    {
+      "round": 4,
+      "mode": 0,
+      "responseMs": 593.441709,
+      "collectMs": 197.17771,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82629
+    },
+    {
+      "round": 4,
+      "mode": 5,
+      "responseMs": 387.932792,
+      "collectMs": 177.431376,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": 5,
+      "mode": 6,
+      "responseMs": 640.452292,
+      "collectMs": 177.232258,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82632
+    },
+    {
+      "round": 5,
+      "mode": 5,
+      "responseMs": 385.578333,
+      "collectMs": 183.366792,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82634
+    },
+    {
+      "round": 5,
+      "mode": 0,
+      "responseMs": 582.482,
+      "collectMs": 180.448801,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": 6,
+      "mode": 0,
+      "responseMs": 544.02525,
+      "collectMs": 176.766815,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 6,
+      "mode": 5,
+      "responseMs": 389.271459,
+      "collectMs": 162.110676,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": 6,
+      "mode": 6,
+      "responseMs": 577.886417,
+      "collectMs": 170.537528,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82632
+    },
+    {
+      "round": 7,
+      "mode": 0,
+      "responseMs": 571.07975,
+      "collectMs": 149.858278,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82634
+    },
+    {
+      "round": 7,
+      "mode": 6,
+      "responseMs": 560.153084,
+      "collectMs": 154.436594,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82632
+    },
+    {
+      "round": 7,
+      "mode": 5,
+      "responseMs": 365.604042,
+      "collectMs": 170.634457,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 8,
+      "mode": 5,
+      "responseMs": 402.553333,
+      "collectMs": 151.908901,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82630
+    },
+    {
+      "round": 8,
+      "mode": 0,
+      "responseMs": 595.740375,
+      "collectMs": 154.352343,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": 8,
+      "mode": 6,
+      "responseMs": 570.283625,
+      "collectMs": 153.499627,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": 9,
+      "mode": 5,
+      "responseMs": 382.639417,
+      "collectMs": 166.48197,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 9,
+      "mode": 6,
+      "responseMs": 563.597166,
+      "collectMs": 153.936387,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 9,
+      "mode": 0,
+      "responseMs": 572.430834,
+      "collectMs": 156.987589,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82635
+    },
+    {
+      "round": 10,
+      "mode": 6,
+      "responseMs": 526.699291,
+      "collectMs": 167.340487,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82634
+    },
+    {
+      "round": 10,
+      "mode": 0,
+      "responseMs": 570.234667,
+      "collectMs": 144.131001,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82636
+    },
+    {
+      "round": 10,
+      "mode": 5,
+      "responseMs": 389.791916,
+      "collectMs": 154.841291,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82632
+    },
+    {
+      "round": 11,
+      "mode": 6,
+      "responseMs": 550.741333,
+      "collectMs": 146.749557,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82632
+    },
+    {
+      "round": 11,
+      "mode": 5,
+      "responseMs": 405.984875,
+      "collectMs": 146.135492,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 11,
+      "mode": 0,
+      "responseMs": 561.589958,
+      "collectMs": 143.219509,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82630
+    },
+    {
+      "round": 12,
+      "mode": 0,
+      "responseMs": 549.9345,
+      "collectMs": 145.781453,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82632
+    },
+    {
+      "round": 12,
+      "mode": 5,
+      "responseMs": 384.514792,
+      "collectMs": 160.036521,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82632
+    },
+    {
+      "round": 12,
+      "mode": 6,
+      "responseMs": 552.701416,
+      "collectMs": 150.253212,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": 13,
+      "mode": 0,
+      "responseMs": 540.567166,
+      "collectMs": 160.484406,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82632
+    },
+    {
+      "round": 13,
+      "mode": 6,
+      "responseMs": 514.645333,
+      "collectMs": 156.872645,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": 13,
+      "mode": 5,
+      "responseMs": 391.45225,
+      "collectMs": 145.675834,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": 14,
+      "mode": 5,
+      "responseMs": 395.432333,
+      "collectMs": 142.029808,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82632
+    },
+    {
+      "round": 14,
+      "mode": 0,
+      "responseMs": 531.704708,
+      "collectMs": 144.37251,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 14,
+      "mode": 6,
+      "responseMs": 484.814333,
+      "collectMs": 163.561297,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 15,
+      "mode": 5,
+      "responseMs": 392.469708,
+      "collectMs": 145.709432,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82632
+    },
+    {
+      "round": 15,
+      "mode": 6,
+      "responseMs": 474.788958,
+      "collectMs": 142.734434,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82630
+    },
+    {
+      "round": 15,
+      "mode": 0,
+      "responseMs": 546.41825,
+      "collectMs": 134.024325,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": 16,
+      "mode": 6,
+      "responseMs": 471.749208,
+      "collectMs": 130.975432,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82630
+    },
+    {
+      "round": 16,
+      "mode": 0,
+      "responseMs": 518.350958,
+      "collectMs": 148.333031,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 16,
+      "mode": 5,
+      "responseMs": 383.692,
+      "collectMs": 127.439659,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 17,
+      "mode": 6,
+      "responseMs": 472.047334,
+      "collectMs": 132.578574,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82629
+    },
+    {
+      "round": 17,
+      "mode": 5,
+      "responseMs": 380.000083,
+      "collectMs": 134.167816,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 17,
+      "mode": 0,
+      "responseMs": 523.139542,
+      "collectMs": 128.813387,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82629
+    },
+    {
+      "round": 18,
+      "mode": 0,
+      "responseMs": 525.61925,
+      "collectMs": 140.41817,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 18,
+      "mode": 5,
+      "responseMs": 384.207083,
+      "collectMs": 136.934189,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 18,
+      "mode": 6,
+      "responseMs": 485.68975,
+      "collectMs": 132.49813,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82630
+    },
+    {
+      "round": 19,
+      "mode": 0,
+      "responseMs": 509.0695,
+      "collectMs": 134.744832,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82630
+    },
+    {
+      "round": 19,
+      "mode": 6,
+      "responseMs": 511.987167,
+      "collectMs": 146.484278,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": 19,
+      "mode": 5,
+      "responseMs": 402.832042,
+      "collectMs": 125.25182,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 20,
+      "mode": 5,
+      "responseMs": 376.6315,
+      "collectMs": 129.714491,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 20,
+      "mode": 0,
+      "responseMs": 511.585542,
+      "collectMs": 128.280323,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82633
+    },
+    {
+      "round": 20,
+      "mode": 6,
+      "responseMs": 472.569667,
+      "collectMs": 137.842072,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82634
+    },
+    {
+      "round": 21,
+      "mode": 5,
+      "responseMs": 371.434667,
+      "collectMs": 128.618964,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 21,
+      "mode": 6,
+      "responseMs": 480.222416,
+      "collectMs": 123.348678,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82632
+    },
+    {
+      "round": 21,
+      "mode": 0,
+      "responseMs": 492.956208,
+      "collectMs": 128.083433,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 22,
+      "mode": 6,
+      "responseMs": 464.812583,
+      "collectMs": 125.232629,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82630
+    },
+    {
+      "round": 22,
+      "mode": 0,
+      "responseMs": 468.120583,
+      "collectMs": 117.260782,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82631
+    },
+    {
+      "round": 22,
+      "mode": 5,
+      "responseMs": 366.487709,
+      "collectMs": 134.136806,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82630
+    },
+    {
+      "round": 23,
+      "mode": 6,
+      "responseMs": 477.496125,
+      "collectMs": 111.929709,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82630
+    },
+    {
+      "round": 23,
+      "mode": 5,
+      "responseMs": 363.655834,
+      "collectMs": 114.120972,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82630
+    },
+    {
+      "round": 23,
+      "mode": 0,
+      "responseMs": 459.012208,
+      "collectMs": 139.220446,
+      "groups": 2949,
+      "pid": 15931,
+      "size": 82635
+    }
+  ]
+}

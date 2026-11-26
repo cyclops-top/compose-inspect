@@ -1,5 +1,7 @@
 # CompScope
 
+实时采集只读取组件层级、边界和源码位置，并配对截图。查看参数、样式和语义详情请使用 Android Studio Layout Inspector。
+
 macOS 工具开发工作区。
 
 - [macOS 应用工程](macOS/README.md) 支持从 Android 设备抓取静态页面、检查组件并记录本轮问题。

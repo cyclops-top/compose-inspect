@@ -13,7 +13,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.util.Log
-import dev.composeinspect.collector.ComposableReturns
+import androidx.startup.AppInitializer
+import kotlinx.coroutines.runBlocking
 import dev.composeinspect.collector.ComposeCollector
 import dev.composeinspect.protocol.Protocol
 import dev.composeinspect.protocol.JsonResponseEncoder
@@ -34,27 +35,19 @@ class InspectorInitProvider : ContentProvider() {
         if (android.os.Build.VERSION.SDK_INT >= 28 && Application.getProcessName() != app.packageName) return false
         try {
             ComposeCollector.enable()
+            val index = AppInitializer.getInstance(app).initializeComponent(ReturnIndexInitializer::class.java)
             val activities = Collections.newSetFromMap(WeakHashMap<Activity, Boolean>())
             app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
                 override fun onActivityCreated(activity: Activity, state: Bundle?) { activities.add(activity) }
                 override fun onActivityDestroyed(activity: Activity) { activities.remove(activity) }
                 override fun onActivityStarted(activity: Activity) {}
-                override fun onActivityResumed(activity: Activity) {}
+                override fun onActivityResumed(activity: Activity) { index.afterDraw(activity) }
                 override fun onActivityPaused(activity: Activity) {}
                 override fun onActivityStopped(activity: Activity) {}
                 override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) {}
             })
             thread(name = "ComposeInspect", isDaemon = true) {
                 try {
-                    val returnTypes by lazy {
-                        val info = app.applicationInfo
-                        try {
-                            ComposableReturns.fromApks(listOf(info.sourceDir) + info.splitSourceDirs.orEmpty())
-                        } catch (e: Exception) {
-                            Log.w("ComposeInspect", "Cannot resolve composable return signatures", e)
-                            ComposableReturns.empty
-                        }
-                    }
                     LocalServerSocket(Protocol.socketName(app.packageName)).use { server ->
                         while (!Thread.currentThread().isInterrupted) {
                             server.accept().use { socket ->
@@ -83,20 +76,23 @@ class InspectorInitProvider : ContentProvider() {
                                     val copies = WindowCopies()
                                     val response = when (command) {
                                         "hello" -> JSONObject().put("capabilities", Protocol.array(listOf(
-                                            "composition-tables", "parameters", "call-source-locations", "gzip-json-v1",
-                                            "style-layers-v1", "layout-interactions-v1", "skip-overlays-v1", "source-only-v1") +
+                                            "composition-tables", "call-source-locations", "gzip-json-v1",
+                                            "skip-overlays-v1", "source-only-v1", "geometry-only-v1") +
                                             if (android.os.Build.VERSION.SDK_INT >= 34) listOf("window-images-v1") else emptyList()))
                                         "capture", "capture-gzip" -> {
                                             val sourceKeys = options.optJSONArray("sourceKeys")?.let { keys ->
                                                 (0 until keys.length()).mapTo(HashSet()) { keys.getString(it) }
                                             }
-                                            val signatures = returnTypes
+                                            val waitStarted = android.os.SystemClock.elapsedRealtimeNanos()
+                                            val signatures = runBlocking { index.await() }
+                                            val waitMs = (android.os.SystemClock.elapsedRealtimeNanos() - waitStarted) / 1e6
                                             val queued = android.os.SystemClock.elapsedRealtimeNanos()
                                             val task = FutureTask {
                                                 val started = android.os.SystemClock.elapsedRealtimeNanos()
                                                 ComposeCollector.capture(activities.toList(), options.optBoolean("skipOverlayWindows", false),
                                                     if (windowImages) copies::start else null, signatures, options.optBoolean("onlySourceNodes"), sourceKeys).apply {
                                                     put("timings", (optJSONObject("timings") ?: JSONObject())
+                                                        .put("returnIndexWaitMs", waitMs)
                                                         .put("mainThreadQueueMs", (started - queued) / 1e6)
                                                         .put("collectMs", (android.os.SystemClock.elapsedRealtimeNanos() - started) / 1e6))
                                                 }

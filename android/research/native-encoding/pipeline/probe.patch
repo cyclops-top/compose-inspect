@@ -1,0 +1,507 @@
+--- a/compose-collector/src/main/java/dev/composeinspect/collector/ComposeCollector.kt
++++ b/compose-collector/src/main/java/dev/composeinspect/collector/ComposeCollector.kt
+@@ -19,6 +19,9 @@
+ 
+ /** Reads Compose tooling tables. Does not install an agent or modify business compositions. */
+ object ComposeCollector {
++    private val warmContexts = ContextCache()
++    private var warmReads = 0
++
+     fun enable() {
+         // Must run before the first ComposeView composition, including Activity.onCreate.
+         isDebugInspectorInfoEnabled = true
+@@ -31,7 +34,7 @@
+ 
+     fun capture(activities: Collection<Activity>, skipOverlayWindows: Boolean,
+                 captureWindow: ((View, JSONObject) -> Unit)?, returnTypes: ComposableReturns,
+-                onlySourceNodes: Boolean, sourceKeys: Set<String>? = null): JSONObject {
++                onlySourceNodes: Boolean, sourceKeys: Set<String>? = null, tuneTree: Boolean = false, compactChildren: Boolean = tuneTree): JSONObject {
+         check(Looper.myLooper() == Looper.getMainLooper())
+         val diagnostics = mutableListOf<String>()
+         val warnings = mutableListOf<String>()
+@@ -43,7 +46,10 @@
+         }
+         val seen = Collections.newSetFromMap(IdentityHashMap<CompositionData, Boolean>())
+         // Lazy item tables share source metadata, but never cache captured application values.
+-        val contextCache = ContextCache()
++        val contextCache = if (tuneTree) {
++            if (++warmReads % 32 == 0) warmContexts.clear()
++            warmContexts
++        } else ContextCache()
+         var treeNanos = 0L
+         var groups = 0
+         var named = 0
+@@ -74,7 +80,7 @@
+                             val treeStarted = System.nanoTime()
+                             val tree = table.mapTree<List<NodeDto>>(factory = collect@{ group, context, children ->
+                                 check(++groups <= 30000) { "Group limit exceeded (30000); capture rejected" }
+-                                val descendants = children.flatten()
++                                val descendants = if (compactChildren && children.size <= 1) children.firstOrNull().orEmpty() else children.flatten()
+                                 if (group.node == null && returnTypes.returnsValue(context.name, group.sourceInfo)) {
+                                     filteredValueCalls++
+                                     return@collect descendants
+--- a/compose-collector/src/main/java/dev/composeinspect/collector/ComposableReturns.kt
++++ b/compose-collector/src/main/java/dev/composeinspect/collector/ComposableReturns.kt
+@@ -1,17 +1,7 @@
+ package dev.composeinspect.collector
+ 
+ import org.jf.dexlib2.dexbacked.DexBackedDexFile
+-import android.content.Context
+-import android.util.AtomicFile
+-import android.util.Log
+ import java.io.DataInputStream
+-import java.io.DataOutputStream
+-import java.io.File
+-import java.io.InputStream
+-import java.io.FileNotFoundException
+-import java.util.zip.CRC32
+-import java.util.zip.CheckedInputStream
+-import java.util.zip.CheckedOutputStream
+ import java.util.zip.ZipFile
+ import kotlin.math.abs
+ 
+@@ -33,82 +23,48 @@
+         private val unitReturns = setOf("V", "Lkotlin/Unit;")
+         private val dexEntry = Regex("""classes(?:[0-9]+)?\.dex""")
+ 
+-        internal const val assetName = "composeinspect/return-index-v1"
+-        internal const val assetHeader = "CompScope-returns-v1"
+-
+-        internal fun readIndex(source: InputStream, key: String): ComposableReturns? {
+-            val checksum = CRC32()
+-            val input = DataInputStream(CheckedInputStream(source.buffered(), checksum))
+-            if (input.readUTF() != key) return null
+-            val count = input.readInt()
+-            require(count in 0..200_000)
+-            val entries = HashSet<Declaration>()
+-            repeat(count) { entries.add(Declaration(input.readUTF(), input.readUTF())) }
+-            val calculated = checksum.value
+-            require(input.readLong() == calculated && input.read() == -1)
+-            return ComposableReturns(entries)
++        /** Research cache for this install. Invalid/missing entries fall back to APKs. */
++        fun fromInstalledApks(paths: List<String>, dir: java.io.File, updated: Long): ComposableReturns {
++            val file = java.io.File(dir, "pipeline-return-index-v1")
++            val signature = paths.joinToString("|", prefix = "1|$updated|") {
++                val apk = java.io.File(it)
++                "$it:${apk.length()}:${apk.lastModified()}"
++            }
++            val atomic = android.util.AtomicFile(file)
++            try {
++                DataInputStream(atomic.openRead().buffered()).use { input ->
++                    if (input.readUTF() == signature) {
++                        val count = input.readInt()
++                        require(count in 0..200000)
++                        val entries = HashSet<Declaration>()
++                        repeat(count) { entries.add(Declaration(input.readUTF(), input.readUTF())) }
++                        require(input.read() == -1)
++                        return ComposableReturns(entries)
++                    }
++                }
++            } catch (_: Exception) { /* Rebuild from installed APKs. */ }
++            val result = fromApks(paths)
++            try {
++                val stream = atomic.startWrite()
++                try {
++                    val out = java.io.DataOutputStream(stream.buffered())
++                    out.writeUTF(signature)
++                    out.writeInt(result.returning.size)
++                    for (declaration in result.returning) {
++                        out.writeUTF(declaration.source)
++                        out.writeUTF(declaration.name)
++                    }
++                    out.flush()
++                    atomic.finishWrite(stream)
++                } catch (e: Exception) {
++                    atomic.failWrite(stream)
++                    throw e
++                }
++            } catch (_: Exception) { /* A failed cache write does not affect this tree. */ }
++            return result
+         }
+ 
+-        /** Restore only an index for this exact installation and indexing algorithm. */
+-        fun fromInstalledApks(context: Context, paths: List<String>): ComposableReturns {
+-            // A base-only class index cannot establish coverage of code in other APKs.
+-            if (paths.size == 1) {
+-                try {
+-                    val bundled = context.assets.open(assetName).use { readIndex(it, assetHeader) }
+-                    if (bundled != null) return bundled
+-                } catch (_: FileNotFoundException) {
+-                    // Optional plugin was not applied.
+-                } catch (e: Exception) {
+-                    Log.w("ComposeInspect", "Invalid packaged return index", e)
+-                }
+-            }
+-            val cache: AtomicFile
+-            val key: String
+-            try {
+-                cache = AtomicFile(File(context.codeCacheDir, "composeinspect-return-index-v1"))
+-                val updated = context.packageManager.getPackageInfo(context.packageName, 0).lastUpdateTime
+-                key = paths.joinToString(separator = "\u0000", prefix = "$updated\u0000") {
+-                    val apk = File(it)
+-                    "$it:${apk.length()}:${apk.lastModified()}"
+-                }
+-            } catch (e: Exception) {
+-                Log.w("ComposeInspect", "Index cache unavailable", e)
+-                return fromApks(paths)
+-            }
+-            try {
+-                val cached = cache.openRead().use { readIndex(it, key) }
+-                if (cached != null) return cached
+-            } catch (_: FileNotFoundException) {
+-                // First launch after installation or cache eviction.
+-            } catch (e: Exception) {
+-                Log.w("ComposeInspect", "Rebuilding unreadable return index", e)
+-            }
+-            val index = fromApks(paths)
+-            try {
+-                val stream = cache.startWrite()
+-                try {
+-                    val checksum = CRC32()
+-                    val output = DataOutputStream(CheckedOutputStream(stream.buffered(), checksum))
+-                    output.writeUTF(key)
+-                    output.writeInt(index.returning.size)
+-                    for (entry in index.returning) {
+-                        output.writeUTF(entry.source)
+-                        output.writeUTF(entry.name)
+-                    }
+-                    output.writeLong(checksum.value)
+-                    output.flush()
+-                    cache.finishWrite(stream)
+-                } catch (e: Exception) {
+-                    cache.failWrite(stream)
+-                    throw e
+-                }
+-            } catch (e: Exception) {
+-                Log.w("ComposeInspect", "Could not persist return index", e)
+-            }
+-            return index
+-        }
+-
+-        /** Read one DEX at a time on a background thread. Never load business classes. */
++        /** Read one DEX at a time on the SDK socket thread. Never load business classes. */
+         fun fromApks(paths: List<String>): ComposableReturns {
+             val values = mutableSetOf<Declaration>()
+             val veto = mutableSetOf<Declaration>()
+--- a/protocol/src/main/java/dev/composeinspect/protocol/GzipFrame.kt
++++ b/protocol/src/main/java/dev/composeinspect/protocol/GzipFrame.kt
+@@ -7,7 +7,8 @@
+ 
+ /** Negotiated gzip-json-v1: 4-byte network-order compressed length followed by one gzip member. */
+ object GzipFrame {
+-    fun encode(json: ByteArray, attachments: List<ByteArray> = emptyList()): ByteArray {
++    fun encode(json: ByteArray, attachments: List<ByteArray> = emptyList(), storePng: Boolean = false): ByteArray {
++        if (storePng && attachments.isNotEmpty()) return stored(json, attachments)
+         val buffer = ByteArrayOutputStream()
+         object : GZIPOutputStream(buffer, 65536) {
+             init { def.setLevel(Deflater.BEST_SPEED) }
+@@ -26,4 +27,42 @@
+             }
+         }.toByteArray()
+     }
++
++    // One gzip member. Sync-flush the JSON deflate blocks, then append stored blocks
++    // at the byte boundary. Only the last block sets BFINAL.
++    private fun stored(json: ByteArray, images: List<ByteArray>): ByteArray {
++        val out = ByteArrayOutputStream()
++        out.write(byteArrayOf(31, -117, 8, 0, 0, 0, 0, 0, 0, -1))
++        val compressor = Deflater(Deflater.BEST_SPEED, true)
++        try {
++            compressor.setInput(json)
++            val block = ByteArray(65536)
++            do {
++                val count = compressor.deflate(block, 0, block.size, Deflater.SYNC_FLUSH)
++                out.write(block, 0, count)
++            } while (!compressor.needsInput() || count == block.size)
++        } finally { compressor.end() }
++        val crc = java.util.zip.CRC32()
++        crc.update(json)
++        var total = json.size
++        fun blocks(bytes: ByteArray, final: Boolean) {
++            var offset = 0
++            while (offset < bytes.size) {
++                val n = minOf(65535, bytes.size - offset)
++                out.write(if (final && offset + n == bytes.size) 1 else 0)
++                out.write(n); out.write(n ushr 8)
++                out.write(n.inv()); out.write(n.inv() ushr 8)
++                out.write(bytes, offset, n)
++                offset += n
++            }
++            crc.update(bytes)
++            total += bytes.size
++        }
++        images.forEach { blocks(it, false) }
++        blocks(byteArrayOf(10), true)
++        for (v in listOf(crc.value.toInt(), total)) for (shift in 0..3) out.write(v ushr (8*shift))
++        val result = ByteArrayOutputStream()
++        DataOutputStream(result).use { it.writeInt(out.size()); out.writeTo(it) }
++        return result.toByteArray()
++    }
+ }
+--- a/inspector-sdk/src/main/java/dev/composeinspect/sdk/InspectorInitProvider.kt
++++ b/inspector-sdk/src/main/java/dev/composeinspect/sdk/InspectorInitProvider.kt
+@@ -13,8 +13,7 @@
+ import android.os.Looper
+ import android.os.Process
+ import android.util.Log
+-import androidx.startup.AppInitializer
+-import kotlinx.coroutines.runBlocking
++import dev.composeinspect.collector.ComposableReturns
+ import dev.composeinspect.collector.ComposeCollector
+ import dev.composeinspect.protocol.Protocol
+ import dev.composeinspect.protocol.JsonResponseEncoder
+@@ -35,27 +34,50 @@
+         if (android.os.Build.VERSION.SDK_INT >= 28 && Application.getProcessName() != app.packageName) return false
+         try {
+             ComposeCollector.enable()
+-            val index = AppInitializer.getInstance(app).initializeComponent(ReturnIndexInitializer::class.java)
+             val activities = Collections.newSetFromMap(WeakHashMap<Activity, Boolean>())
+             app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+                 override fun onActivityCreated(activity: Activity, state: Bundle?) { activities.add(activity) }
+                 override fun onActivityDestroyed(activity: Activity) { activities.remove(activity) }
+                 override fun onActivityStarted(activity: Activity) {}
+-                override fun onActivityResumed(activity: Activity) { index.afterDraw(activity) }
++                override fun onActivityResumed(activity: Activity) {}
+                 override fun onActivityPaused(activity: Activity) {}
+                 override fun onActivityStopped(activity: Activity) {}
+                 override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) {}
+             })
+             thread(name = "ComposeInspect", isDaemon = true) {
+                 try {
++                    val returnTypes by lazy {
++                        val info = app.applicationInfo
++                        try {
++                            ComposableReturns.fromApks(listOf(info.sourceDir) + info.splitSourceDirs.orEmpty())
++                        } catch (e: Exception) {
++                            Log.w("ComposeInspect", "Cannot resolve composable return signatures", e)
++                            ComposableReturns.empty
++                        }
++                    }
++                    val cachedReturns by lazy {
++                        val info = app.applicationInfo
++                        ComposableReturns.fromInstalledApks(listOf(info.sourceDir) + info.splitSourceDirs.orEmpty(),
++                            app.codeCacheDir, app.packageManager.getPackageInfo(app.packageName, 0).lastUpdateTime)
++                    }
+                     LocalServerSocket(Protocol.socketName(app.packageName)).use { server ->
+                         while (!Thread.currentThread().isInterrupted) {
+                             server.accept().use { socket ->
+                                 var compressed = false
+                                 var benchmarkMode = 0
++                                var split = false
++                                var storePng = false
++                                var requestID = 0
+                                 fun send(response: JSONObject, attachments: List<ByteArray> = emptyList()) {
+-                                    val json = dev.composeinspect.research.ResearchEncoder.encode(response, benchmarkMode)
+-                                    socket.outputStream.write(if (compressed) GzipFrame.encode(json, attachments) else json)
++                                    val start = System.nanoTime()
++                                    var packed = start
++                                    val json = dev.composeinspect.research.ResearchEncoder.encode(response, benchmarkMode) { packed = System.nanoTime() }
++                                    val encoded = System.nanoTime()
++                                    val frame = if (compressed) GzipFrame.encode(json, if (split) emptyList() else attachments, storePng) else json
++                                    val framed = System.nanoTime()
++                                    socket.outputStream.write(frame)
++                                    if (split) attachments.forEach(socket.outputStream::write)
++                                    Log.i("PipelineBench", "id=$requestID pack=${(packed-start)/1e6} encode=${(encoded-start)/1e6} frame=${(framed-encoded)/1e6} write=${(System.nanoTime()-framed)/1e6}")
+                                 }
+                                 try {
+                                     // ADB forwarding originates from shell/root; other apps are rejected.
+@@ -75,7 +97,10 @@
+                                     benchmarkMode = options.optInt("benchmarkMode", 0)
+                                     compressed = command == "capture-gzip"
+                                     val windowImages = options.optBoolean("windowImages") && compressed && android.os.Build.VERSION.SDK_INT >= 34
+-                                    val copies = WindowCopies()
++                                    split = options.optBoolean("split")
++                                    storePng = options.optBoolean("storePng")
++                                    requestID = options.optInt("requestID")
++                                    val copies = WindowCopies(options.optBoolean("fastPng"), options.optBoolean("verifyPng"))
+                                     val response = when (command) {
+                                         "hello" -> JSONObject().put("capabilities", Protocol.array(listOf(
+                                             "composition-tables", "call-source-locations", "gzip-json-v1",
+@@ -85,16 +110,17 @@
+                                             val sourceKeys = options.optJSONArray("sourceKeys")?.let { keys ->
+                                                 (0 until keys.length()).mapTo(HashSet()) { keys.getString(it) }
+                                             }
+-                                            val waitStarted = android.os.SystemClock.elapsedRealtimeNanos()
+-                                            val signatures = runBlocking { index.await() }
+-                                            val waitMs = (android.os.SystemClock.elapsedRealtimeNanos() - waitStarted) / 1e6
++                                            val signatureStart = System.nanoTime()
++                                            val signatures = if (options.optBoolean("persistIndex")) cachedReturns else returnTypes
++                                            val signatureMs = (System.nanoTime() - signatureStart)/1e6
+                                             val queued = android.os.SystemClock.elapsedRealtimeNanos()
+                                             val task = FutureTask {
+                                                 val started = android.os.SystemClock.elapsedRealtimeNanos()
+                                                 ComposeCollector.capture(activities.toList(), options.optBoolean("skipOverlayWindows", false),
+-                                                    if (windowImages) copies::start else null, signatures, options.optBoolean("onlySourceNodes"), sourceKeys).apply {
++                                                    if (windowImages) copies::start else null, signatures, options.optBoolean("onlySourceNodes"), sourceKeys, options.optBoolean("tuneTree"),
++                                                    options.optBoolean("compactChildren", options.optBoolean("tuneTree"))).apply {
+                                                     put("timings", (optJSONObject("timings") ?: JSONObject())
+-                                                        .put("returnIndexWaitMs", waitMs)
++                                                        .put("signatureMs", signatureMs)
+                                                         .put("mainThreadQueueMs", (started - queued) / 1e6)
+                                                         .put("collectMs", (android.os.SystemClock.elapsedRealtimeNanos() - started) / 1e6))
+                                                 }
+@@ -106,7 +132,11 @@
+                                         }
+                                         else -> Protocol.error("Unknown command: $command")
+                                     }
++                                    val waitStart = System.nanoTime()
+                                     val attachments = if (windowImages) copies.finish(response) else emptyList()
++                                    if (response.has("timings")) response.getJSONObject("timings")
++                                        .put("waitPngMs", (System.nanoTime()-waitStart)/1e6).put("pngMs", copies.pngMs)
++                                        .put("copyMs", copies.copyMs).put("native", copies.usedNative).put("verified", copies.verified)
+                                     response.put("protocolVersion", Protocol.VERSION).put("sdkVersion", Protocol.SDK_VERSION)
+                                         .put("packageName", app.packageName).put("pid", Process.myPid())
+                                     send(response, attachments)
+--- a/inspector-sdk/src/main/java/dev/composeinspect/sdk/WindowCopies.kt
++++ b/inspector-sdk/src/main/java/dev/composeinspect/sdk/WindowCopies.kt
+@@ -13,7 +13,16 @@
+ import java.util.concurrent.Executors
+ import java.util.concurrent.TimeUnit
+ 
+-internal class WindowCopies {
++internal object FastPng {
++    init { System.loadLibrary("pipelinepng") }
++    external fun encode(bitmap: Bitmap): ByteArray?
++}
++
++internal class WindowCopies(private val fast: Boolean, private val comparePixels: Boolean) {
++    @Volatile var pngMs = 0.0
++    @Volatile var copyMs = 0.0
++    @Volatile var usedNative = false
++    @Volatile var verified = false
+     private val pending = mutableListOf<Pair<JSONObject, CompletableFuture<ByteArray>>>()
+     private val size = Point()
+     private var pixels = 0L
+@@ -32,14 +41,42 @@
+             .setSourceRect(Rect(position[0], position[1], position[0] + root.width, position[1] + root.height)).build()
+         val png = CompletableFuture<ByteArray>()
+         pending += window to png
++        val copyStarted = System.nanoTime()
+         PixelCopy.request(request, encoder) { result ->
+             try {
++                val callback = System.nanoTime()
++                copyMs = (callback - copyStarted) / 1e6
+                 check(result.status == PixelCopy.SUCCESS) { "PixelCopy failed: ${result.status}" }
+                 val bitmap = result.bitmap
+                 try {
+-                    val bytes = ByteArrayOutputStream()
+-                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, bytes))
+-                    png.complete(bytes.toByteArray())
++                    fun standard(): ByteArray = ByteArrayOutputStream().use { bytes ->
++                        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, bytes))
++                        bytes.toByteArray()
++                    }
++                    val accelerated = if (fast && bitmap.colorSpace?.isSrgb == true) FastPng.encode(bitmap) else null
++                    usedNative = accelerated != null
++                    val encoded = accelerated ?: standard()
++                    pngMs = (System.nanoTime() - callback) / 1e6
++                    if (comparePixels && accelerated != null) {
++                        fun decode(data: ByteArray) = android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size)
++                        val a = decode(standard())
++                        val b = decode(accelerated)
++                        try {
++                            check(a.width == b.width && a.height == b.height)
++                            val expected = IntArray(a.width)
++                            val actual = IntArray(a.width)
++                            for (y in 0 until a.height) {
++                                a.getPixels(expected, 0, a.width, 0, y, a.width, 1)
++                                b.getPixels(actual, 0, b.width, 0, y, b.width, 1)
++                                check(expected.contentEquals(actual)) {
++                                    val x = expected.indices.first { expected[it] != actual[it] }
++                                    "PNG mismatch at $x,$y: ${expected[x].toUInt().toString(16)} vs ${actual[x].toUInt().toString(16)}"
++                                }
++                            }
++                            verified = true
++                        } finally { a.recycle(); b.recycle() }
++                    }
++                    png.complete(encoded)
+                 } finally { bitmap.recycle() }
+             } catch (e: Exception) { png.completeExceptionally(e) }
+         }
+--- a/sample/src/main/java/dev/composeinspect/sample/MainActivity.kt
++++ b/sample/src/main/java/dev/composeinspect/sample/MainActivity.kt
+@@ -29,6 +29,22 @@
+                 "interactions" -> InteractionProbe()
+                 else -> ProbeScreen(scenario)
+             }
++        }
++        if (intent.getBooleanExtra("texture", false)) {
++            val n = 768
++            val pixels = IntArray(n * n)
++            var seed = 12345
++            for (i in pixels.indices) {
++                seed = 1664525 * seed + 1013904223
++                val x = i % n
++                val y = i / n
++                val noise = seed ushr 27
++                pixels[i] = android.graphics.Color.rgb((x/3 + noise) % 256, (y/3 + noise) % 256, ((x+y)/6 + noise) % 256)
++            }
++            val bmp = android.graphics.Bitmap.createBitmap(pixels, n, n, android.graphics.Bitmap.Config.ARGB_8888)
++            val image = android.widget.ImageView(this)
++            image.setImageBitmap(bmp)
++            addContentView(image, android.view.ViewGroup.LayoutParams(n, n))
+         }
+     }
+ }
+--- a/inspector-sdk/src/main/AndroidManifest.xml
++++ b/inspector-sdk/src/main/AndroidManifest.xml
+@@ -1,9 +1,5 @@
+ <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+     <application>
+-        <provider android:name="androidx.startup.InitializationProvider"
+-            android:authorities="${applicationId}.androidx-startup" android:exported="false">
+-            <meta-data android:name="dev.composeinspect.sdk.ReturnIndexInitializer" android:value="androidx.startup" />
+-        </provider>
+         <meta-data android:name="dev.composeinspect.SDK_VERSION" android:value="0.1.4-SNAPSHOT" />
+         <meta-data android:name="dev.composeinspect.PROTOCOL_VERSION" android:value="1" />
+         <provider android:name="dev.composeinspect.sdk.InspectorInitProvider"
+--- a/inspector-sdk/src/main/java/dev/composeinspect/sdk/ReturnIndexInitializer.kt
++++ /dev/null
+@@ -1,47 +0,0 @@
+-package dev.composeinspect.sdk
+-
+-import android.app.Activity
+-import android.content.Context
+-import android.util.Log
+-import androidx.core.view.OneShotPreDrawListener
+-import androidx.startup.Initializer
+-import dev.composeinspect.collector.ComposableReturns
+-import kotlinx.coroutines.CancellationException
+-import kotlinx.coroutines.CompletableDeferred
+-import kotlinx.coroutines.CoroutineScope
+-import kotlinx.coroutines.Dispatchers
+-import kotlinx.coroutines.async
+-
+-/** AndroidX Startup owns one index per process. The socket and first draw share its deferred result. */
+-internal class ReturnIndexInitializer : Initializer<ReturnIndex> {
+-    override fun create(context: Context) = ReturnIndex(context.applicationContext)
+-    override fun dependencies(): List<Class<out Initializer<*>>> = emptyList()
+-}
+-
+-internal class ReturnIndex(app: Context) {
+-    private val start = CompletableDeferred<Unit>()
+-    private val result = CoroutineScope(Dispatchers.IO).async {
+-        start.await()
+-        try {
+-            val info = app.applicationInfo
+-            val paths = listOf(info.sourceDir) + info.splitSourceDirs.orEmpty()
+-            ComposableReturns.fromInstalledApks(app, paths)
+-        } catch (e: CancellationException) {
+-            throw e
+-        } catch (e: Exception) {
+-            Log.w("ComposeInspect", "Cannot resolve composable return signatures", e)
+-            ComposableReturns.empty
+-        }
+-    }
+-
+-    fun afterDraw(activity: Activity) {
+-        if (start.isCompleted) return
+-        val view = activity.window.decorView
+-        OneShotPreDrawListener.add(view) { view.post { start.complete(Unit) } }
+-    }
+-
+-    suspend fun await(): ComposableReturns {
+-        start.complete(Unit)
+-        return result.await()
+-    }
+-}

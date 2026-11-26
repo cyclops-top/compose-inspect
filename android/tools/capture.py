@@ -9,11 +9,13 @@ import subprocess
 
 
 def capture(adb, serial, package, command="capture"):
+    if command == "capture" and "geometry-only-v1" not in capture(adb, serial, package, "hello").get("capabilities", []):
+        raise RuntimeError("Update the target SDK to a build supporting geometry-only-v1")
     prefix = [adb] + (["-s", serial] if serial else [])
     port = subprocess.check_output(prefix + ["forward", "tcp:0", "localabstract:composeinspect." + package], text=True).strip()
     try:
         with socket.create_connection(("127.0.0.1", int(port)), timeout=20) as connection:
-            connection.sendall((json.dumps({"command": command}) + "\n").encode())
+            connection.sendall((json.dumps({"command": command, "geometryOnly": True}) + "\n").encode())
             with connection.makefile("rb") as stream:
                 data = stream.readline(32 * 1024 * 1024)
                 if not data.endswith(b"\n"):
@@ -21,6 +23,8 @@ def capture(adb, serial, package, command="capture"):
                 result = json.loads(data)
                 if "error" in result:
                     raise RuntimeError(result["error"])
+                if command == "capture" and result.get("geometryOnly") is not True:
+                    raise RuntimeError("SDK returned an unexpected capture mode")
                 return result
     finally:
         subprocess.run(prefix + ["forward", "--remove", "tcp:" + port], check=True)

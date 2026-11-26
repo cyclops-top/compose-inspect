@@ -1,0 +1,12 @@
+{
+  "instance": "https://drop.tick-tick.cn",
+  "repository": "790cf174-6f53-40fb-953b-d351107d1188",
+  "artifact": "cd153434-7da4-485c-bfb4-bf68d51f7bfc",
+  "channel": "f9fc7219-9111-4ce6-a17d-294712a3ad31",
+  "repositoryName": "compose-inspect",
+  "artifactName": "compscope-macos",
+  "channelName": "stable",
+  "version": "b7cbec54-f4e9-4435-833a-bf7ae81a6585",
+  "number": 3,
+  "softwareVersion": "0.1.2"
+}

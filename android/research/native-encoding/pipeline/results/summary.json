@@ -1,0 +1,344 @@
+{
+  "cards": {
+    "base": {
+      "responseMs": 374.65,
+      "collectMs": 132.37,
+      "treeMs": 129.45,
+      "copyMs": 20.06,
+      "pngMs": 303.04,
+      "waitPngMs": 189.5,
+      "packMs": 30.88,
+      "encodeMs": 34.36,
+      "frameMs": 8.57,
+      "writeMs": 0.16,
+      "imageBytes": 65264.0,
+      "wireBytes": 83992.0,
+      "p95Ms": 395.58
+    },
+    "tree": {
+      "responseMs": 374.88,
+      "collectMs": 105.96,
+      "treeMs": 103.72,
+      "copyMs": 19.57,
+      "pngMs": 303.5,
+      "waitPngMs": 216.49,
+      "packMs": 31.39,
+      "encodeMs": 35.25,
+      "frameMs": 8.24,
+      "writeMs": 0.16,
+      "imageBytes": 65264.0,
+      "wireBytes": 83993.0,
+      "p95Ms": 392.13
+    },
+    "treeOnly": {
+      "responseMs": 150.57,
+      "collectMs": 101.99,
+      "treeMs": 100.67,
+      "copyMs": 0.0,
+      "pngMs": 0.0,
+      "waitPngMs": 0.01,
+      "packMs": 32.55,
+      "encodeMs": 35.35,
+      "frameMs": 3.94,
+      "writeMs": 0.12,
+      "imageBytes": 0.0,
+      "wireBytes": 28866.0,
+      "p95Ms": 218.24
+    },
+    "png": {
+      "responseMs": 191.67,
+      "collectMs": 132.55,
+      "treeMs": 130.89,
+      "copyMs": 20.3,
+      "pngMs": 32.78,
+      "waitPngMs": 0.09,
+      "packMs": 31.46,
+      "encodeMs": 35.65,
+      "frameMs": 9.21,
+      "writeMs": 0.16,
+      "imageBytes": 100235.0,
+      "wireBytes": 95003.5,
+      "p95Ms": 275.82
+    },
+    "split": {
+      "responseMs": 160.06,
+      "collectMs": 103.87,
+      "treeMs": 102.84,
+      "copyMs": 20.05,
+      "pngMs": 32.76,
+      "waitPngMs": 0.1,
+      "packMs": 33.17,
+      "encodeMs": 37.57,
+      "frameMs": 3.99,
+      "writeMs": 0.22,
+      "imageBytes": 100235.0,
+      "wireBytes": 129140.0,
+      "p95Ms": 217.32
+    },
+    "both": {
+      "responseMs": 167.38,
+      "collectMs": 107.98,
+      "treeMs": 106.74,
+      "copyMs": 20.12,
+      "pngMs": 32.81,
+      "waitPngMs": 0.1,
+      "packMs": 32.42,
+      "encodeMs": 36.42,
+      "frameMs": 9.48,
+      "writeMs": 0.16,
+      "imageBytes": 100235.0,
+      "wireBytes": 95003.0,
+      "p95Ms": 225.66
+    }
+  },
+  "texture": {
+    "base": {
+      "responseMs": 756.95,
+      "collectMs": 128.52,
+      "treeMs": 127.2,
+      "copyMs": 20.8,
+      "pngMs": 561.3,
+      "waitPngMs": 453.52,
+      "packMs": 30.84,
+      "encodeMs": 34.69,
+      "frameMs": 93.93,
+      "writeMs": 28.47,
+      "imageBytes": 1226379.0,
+      "wireBytes": 1234459.0,
+      "p95Ms": 781.07
+    },
+    "tree": {
+      "responseMs": 758.41,
+      "collectMs": 109.87,
+      "treeMs": 108.59,
+      "copyMs": 20.83,
+      "pngMs": 557.95,
+      "waitPngMs": 472.45,
+      "packMs": 33.43,
+      "encodeMs": 36.85,
+      "frameMs": 95.32,
+      "writeMs": 28.83,
+      "imageBytes": 1226379.0,
+      "wireBytes": 1234456.0,
+      "p95Ms": 781.57
+    },
+    "treeOnly": {
+      "responseMs": 152.4,
+      "collectMs": 101.54,
+      "treeMs": 100.73,
+      "copyMs": 0.0,
+      "pngMs": 0.0,
+      "waitPngMs": 0.01,
+      "packMs": 34.33,
+      "encodeMs": 37.12,
+      "frameMs": 3.85,
+      "writeMs": 0.12,
+      "imageBytes": 0.0,
+      "wireBytes": 28865.0,
+      "p95Ms": 188.0
+    },
+    "png": {
+      "responseMs": 312.18,
+      "collectMs": 134.97,
+      "treeMs": 133.78,
+      "copyMs": 20.53,
+      "pngMs": 100.4,
+      "waitPngMs": 0.28,
+      "packMs": 34.43,
+      "encodeMs": 38.64,
+      "frameMs": 87.63,
+      "writeMs": 29.13,
+      "imageBytes": 1140192.0,
+      "wireBytes": 1146355.0,
+      "p95Ms": 374.78
+    },
+    "split": {
+      "responseMs": 209.58,
+      "collectMs": 104.79,
+      "treeMs": 103.45,
+      "copyMs": 20.76,
+      "pngMs": 100.31,
+      "waitPngMs": 18.58,
+      "packMs": 32.4,
+      "encodeMs": 36.21,
+      "frameMs": 3.71,
+      "writeMs": 29.85,
+      "imageBytes": 1140192.0,
+      "wireBytes": 1169098.0,
+      "p95Ms": 235.57
+    },
+    "both": {
+      "responseMs": 291.83,
+      "collectMs": 105.96,
+      "treeMs": 104.82,
+      "copyMs": 20.86,
+      "pngMs": 100.25,
+      "waitPngMs": 16.0,
+      "packMs": 33.26,
+      "encodeMs": 37.59,
+      "frameMs": 86.7,
+      "writeMs": 29.05,
+      "imageBytes": 1140192.0,
+      "wireBytes": 1146354.5,
+      "p95Ms": 325.75
+    }
+  },
+  "framing/cards": {
+    "both": {
+      "responseMs": 201.64,
+      "collectMs": 135.84,
+      "treeMs": 133.92,
+      "copyMs": 20.06,
+      "pngMs": 33.67,
+      "waitPngMs": 0.1,
+      "packMs": 37.02,
+      "encodeMs": 41.63,
+      "frameMs": 9.32,
+      "writeMs": 0.16,
+      "imageBytes": 100235.0,
+      "wireBytes": 95021.0,
+      "p95Ms": 327.81
+    },
+    "stored": {
+      "responseMs": 192.58,
+      "collectMs": 135.82,
+      "treeMs": 134.19,
+      "copyMs": 19.86,
+      "pngMs": 33.31,
+      "waitPngMs": 0.1,
+      "packMs": 33.66,
+      "encodeMs": 37.52,
+      "frameMs": 4.21,
+      "writeMs": 0.18,
+      "imageBytes": 100235.0,
+      "wireBytes": 129174.0,
+      "p95Ms": 265.73
+    },
+    "split": {
+      "responseMs": 195.1,
+      "collectMs": 132.03,
+      "treeMs": 130.89,
+      "copyMs": 20.35,
+      "pngMs": 34.01,
+      "waitPngMs": 0.1,
+      "packMs": 33.98,
+      "encodeMs": 38.47,
+      "frameMs": 4.03,
+      "writeMs": 0.23,
+      "imageBytes": 100235.0,
+      "wireBytes": 129153.0,
+      "p95Ms": 263.32
+    }
+  },
+  "framing/texture": {
+    "both": {
+      "responseMs": 330.16,
+      "collectMs": 138.09,
+      "treeMs": 136.89,
+      "copyMs": 21.84,
+      "pngMs": 102.22,
+      "waitPngMs": 0.2,
+      "packMs": 41.86,
+      "encodeMs": 46.08,
+      "frameMs": 86.54,
+      "writeMs": 32.06,
+      "imageBytes": 1140192.0,
+      "wireBytes": 1146367.0,
+      "p95Ms": 368.57
+    },
+    "stored": {
+      "responseMs": 245.65,
+      "collectMs": 131.61,
+      "treeMs": 130.4,
+      "copyMs": 21.67,
+      "pngMs": 102.09,
+      "waitPngMs": 0.18,
+      "packMs": 40.94,
+      "encodeMs": 45.37,
+      "frameMs": 11.0,
+      "writeMs": 31.7,
+      "imageBytes": 1140192.0,
+      "wireBytes": 1169213.0,
+      "p95Ms": 288.46
+    },
+    "split": {
+      "responseMs": 236.84,
+      "collectMs": 131.45,
+      "treeMs": 130.21,
+      "copyMs": 21.96,
+      "pngMs": 102.13,
+      "waitPngMs": 0.2,
+      "packMs": 39.33,
+      "encodeMs": 43.51,
+      "frameMs": 3.36,
+      "writeMs": 32.97,
+      "imageBytes": 1140192.0,
+      "wireBytes": 1169112.5,
+      "p95Ms": 269.39
+    }
+  },
+  "tree": {
+    "first/base": {
+      "responseMs": 4025.34,
+      "collectMs": 728.03,
+      "signatureMs": 3097.63
+    },
+    "second/base": {
+      "responseMs": 659.36,
+      "collectMs": 511.8,
+      "signatureMs": 0.01
+    },
+    "warm/base": {
+      "responseMs": 184.67,
+      "collectMs": 134.79,
+      "signatureMs": 0.01
+    },
+    "warm/cache": {
+      "responseMs": 188.67,
+      "collectMs": 138.95,
+      "signatureMs": 0.01
+    },
+    "warm/both": {
+      "responseMs": 162.67,
+      "collectMs": 112.45,
+      "signatureMs": 0.01
+    },
+    "warm/children": {
+      "responseMs": 162.34,
+      "collectMs": 114.09,
+      "signatureMs": 0.01
+    }
+  },
+  "index": {
+    "populate": {
+      "responseMs": 4022.99,
+      "signatureMs": 3080.25,
+      "collectMs": 714.03
+    },
+    "scan": {
+      "responseMs": 3973.33,
+      "signatureMs": 3049.8,
+      "collectMs": 714.91
+    },
+    "hit": {
+      "responseMs": 1049.34,
+      "signatureMs": 44.62,
+      "collectMs": 774.49
+    },
+    "truncated": {
+      "responseMs": 4020.17,
+      "signatureMs": 3084.5,
+      "collectMs": 720.6
+    },
+    "stale": {
+      "responseMs": 3996.59,
+      "signatureMs": 3062.93,
+      "collectMs": 720.36
+    },
+    "restored": {
+      "responseMs": 1032.55,
+      "signatureMs": 49.09,
+      "collectMs": 754.2
+    }
+  }
+}

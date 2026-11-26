@@ -1,0 +1,112 @@
+{
+  "main": {
+    "production": {
+      "n": 28,
+      "medianMs": 49.89,
+      "p95Ms": 119.61
+    },
+    "direct": {
+      "n": 28,
+      "medianMs": 37.01,
+      "p95Ms": 68.56
+    },
+    "generic-kotlin": {
+      "n": 28,
+      "medianMs": 37.39,
+      "p95Ms": 64.15,
+      "packMedianMs": 14.23,
+      "replayMedianMs": 23.97
+    },
+    "generic-native": {
+      "n": 28,
+      "medianMs": 13.99,
+      "p95Ms": 19.51,
+      "packMedianMs": 13.45,
+      "replayMedianMs": 0.53
+    },
+    "fixed-kotlin": {
+      "n": 28,
+      "medianMs": 37.04,
+      "p95Ms": 55.7,
+      "packMedianMs": 12.07,
+      "replayMedianMs": 25.15
+    },
+    "fixed-native": {
+      "n": 28,
+      "medianMs": 12.47,
+      "p95Ms": 15.26,
+      "packMedianMs": 12.09,
+      "replayMedianMs": 0.38
+    },
+    "fixed-direct": {
+      "n": 28,
+      "medianMs": 34.66,
+      "p95Ms": 58.47
+    }
+  },
+  "performance": {
+    "production": {
+      "n": 28,
+      "medianMs": 171.82,
+      "p95Ms": 245.33
+    },
+    "direct": {
+      "n": 28,
+      "medianMs": 100.97,
+      "p95Ms": 131.75
+    },
+    "generic-kotlin": {
+      "n": 28,
+      "medianMs": 98.02,
+      "p95Ms": 128.91,
+      "packMedianMs": 38.94,
+      "replayMedianMs": 58.83
+    },
+    "generic-native": {
+      "n": 28,
+      "medianMs": 42.45,
+      "p95Ms": 57.37,
+      "packMedianMs": 38.58,
+      "replayMedianMs": 3.7
+    },
+    "fixed-kotlin": {
+      "n": 28,
+      "medianMs": 80.08,
+      "p95Ms": 115.17,
+      "packMedianMs": 22.4,
+      "replayMedianMs": 56.84
+    },
+    "fixed-native": {
+      "n": 28,
+      "medianMs": 24.88,
+      "p95Ms": 48.88,
+      "packMedianMs": 22.31,
+      "replayMedianMs": 2.55
+    },
+    "fixed-direct": {
+      "n": 28,
+      "medianMs": 99.31,
+      "p95Ms": 121.77
+    }
+  },
+  "socket": {
+    "production": {
+      "n": 24,
+      "medianMs": 548.18,
+      "p95Ms": 619.81,
+      "collectMedianMs": 147.06
+    },
+    "fixed-native": {
+      "n": 24,
+      "medianMs": 386.59,
+      "p95Ms": 405.29,
+      "collectMedianMs": 149.02
+    },
+    "fixed-direct": {
+      "n": 24,
+      "medianMs": 538.72,
+      "p95Ms": 826.37,
+      "collectMedianMs": 153.72
+    }
+  }
+}

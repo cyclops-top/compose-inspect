@@ -22,12 +22,11 @@ subprojects {
     version = providers.gradleProperty("sdkVersion").get()
     plugins.withId("com.android.library") {
         apply(plugin = "com.vanniktech.maven.publish")
+        apply(from = rootProject.file("gradle/reposilite.gradle.kts"))
         extensions.configure<MavenPublishBaseExtension> {
             configure(AndroidSingleVariantLibrary(
                 variant = "release", sourcesJar = SourcesJar.Sources(), javadocJar = JavadocJar.Empty(),
             ))
-            publishToMavenCentral()
-            signAllPublications()
             coordinates("top.cyclops", artifact, project.version.toString())
             pom {
                 name.set(artifact)
@@ -55,18 +54,6 @@ subprojects {
                         developerConnection.set(repositoryUrl.map { "scm:git:$it.git" })
                     }
                 }
-            }
-        }
-    }
-}
-
-// Local verification needs neither Central credentials nor a repository URL.
-// Remote publication must carry real SCM metadata and signed artifacts.
-subprojects {
-    tasks.matching { it.name.startsWith("publish") && it.name.contains("MavenCentral") }.configureEach {
-        doFirst {
-            require(providers.gradleProperty("sdkScmUrl").orNull?.isNotBlank() == true) {
-                "Set sdkScmUrl to the actual repository URL (the repository may remain private)."
             }
         }
     }

@@ -1,9 +1,9 @@
 import Foundation
 
 public struct SDKInspectorClient: Sendable {
-    public static let supportedSDKVersion = "0.1.4-SNAPSHOT"
+    public static let supportedSDKVersion = "0.1.5-SNAPSHOT"
     static func supports(_ reported: String?) -> Bool {
-        reported == supportedSDKVersion || reported == "0.1.3"
+        reported == supportedSDKVersion || reported == "0.1.4" || reported == "0.1.4-SNAPSHOT" || reported == "0.1.3"
     }
     private let adb: InspectorClient
     public init(tools: InspectorToolchain) { adb = InspectorClient(tools: tools) }
@@ -46,7 +46,7 @@ public struct SDKInspectorClient: Sendable {
         if let error = document.root["error"]?.string { throw CommandFailure.failed("SDK：\(error)") }
         let reported = document.root["sdkVersion"]?.string
         guard supports(reported), document.root["protocolVersion"]?.int64 == 1 else {
-            throw CommandFailure.failed("当前 CompScope 支持采集 SDK 0.1.3 和 \(supportedSDKVersion)（协议 1）。目标应用报告 SDK \(reported ?? "未知")，协议 \(document.root["protocolVersion"]?.display ?? "未知")。请使用对应 SDK 重新构建调试包。")
+            throw CommandFailure.failed("当前 CompScope 支持采集 SDK 0.1.3、0.1.4-SNAPSHOT、0.1.4 和 \(supportedSDKVersion)（协议 1）。目标应用报告 SDK \(reported ?? "未知")，协议 \(document.root["protocolVersion"]?.display ?? "未知")。请使用对应 SDK 重新构建调试包。")
         }
         guard document.root["packageName"]?.string == package else { throw CommandFailure.failed("SDK 响应包名与目标不一致。") }
         guard let pid = document.root["pid"]?.int64, pid > 0 else { throw CommandFailure.failed("SDK 响应缺少有效进程标识。") }
@@ -85,6 +85,9 @@ public struct SDKInspectorClient: Sendable {
         let readStarted = Date()
         let paired = windowImages && hello.root["capabilities"]?.array?.contains(.string("window-images-v1")) == true
         let filterAtSource = onlySourceNodes && hello.root["capabilities"]?.array?.contains(.string("source-only-v1")) == true
+        guard hello.root["capabilities"]?.array?.contains(.string("geometry-only-v1")) == true else {
+            throw CommandFailure.failed("目标应用的 SDK 不支持快速采集。请更新调试依赖并重新构建、安装目标应用。")
+        }
         async let screenResult: CommandOutput? = paired ? nil : adb.adb(["-s", serial, "shell", "-T", "screencap", "-p"])
         let payload = try await SDKTransport.request(port: port, command: "capture-gzip",
                                                   timeout: 20, compressed: true,
@@ -94,6 +97,9 @@ public struct SDKInspectorClient: Sendable {
         let data = separator.map { Data(payload[..<$0]) } ?? payload
         var remaining = separator.map { payload.suffix(from: $0 + 1) } ?? Data()
         let document = try Self.validateResponse(data, package: package, expectedPID: pid)
+        guard document.root["geometryOnly"]?.boolean == true else {
+            throw CommandFailure.failed("目标 SDK 返回的采集模式与请求不符。")
+        }
         let screen = try await screenResult
         let size: CGSize
         if let screen {
@@ -106,7 +112,7 @@ public struct SDKInspectorClient: Sendable {
             }
             size = CGSize(width: Int(w), height: Int(h))
         }
-        await progress("解析 SDK 节点与参数…")
+        await progress("解析组件结构与边界…")
         let importStarted = Date()
         let snapshot = try SDKSnapshotImporter.decode(document, imageSize: size, packageName: package)
         let importFinished = Date()
@@ -117,16 +123,15 @@ public struct SDKInspectorClient: Sendable {
                            importFinished.timeIntervalSince(importStarted)),
                     "SDK 原始 Composition 表保留为窗口内的独立分支；尚未拼接 Lazy 子表或采集 Android View 属性。",
                     paired ? "截图来源：SDK 独立窗口。" : "截图来源：ADB 整屏。"]
+        logs.append("采集模式：快速采集（结构、源码与边界）。")
         if onlySourceNodes {
             if sourceKeys != nil && filterAtSource && document.root["projectSourcesOnly"]?.boolean != true {
                 logs.append("工程索引超过请求上限，SDK 已按源码位置采集，工程匹配由桌面完成。")
             }
-            logs.append(filterAtSource ? "SDK 已按源码位置过滤组件。" : "目标 SDK 缺少源码过滤能力，已在桌面筛选本次完整采集。")
+            logs.append(filterAtSource ? "SDK 已按源码位置过滤组件。" : "目标 SDK 缺少源码过滤能力，已在桌面筛选本次采集。")
         }
         logs.append(contentsOf: document.root["warnings"]?.array?.compactMap(\.string) ?? [])
-        if hello.root["capabilities"]?.array?.contains(.string("layout-interactions-v1")) != true {
-            logs.append("当前 SDK 未声明交互语义采集能力；仅可点击筛选可能为空，请更新 SDK 后重新编译安装应用。")
-        }
+
         if let collect = document.root["timings"]?["collectMs"]?.double {
             logs.append(String(format: "耗时：Android 主线程采集 %.0f 毫秒。", collect))
         }
