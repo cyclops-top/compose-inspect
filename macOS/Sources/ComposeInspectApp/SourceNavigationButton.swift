@@ -42,17 +42,23 @@ struct SourceNavigationButtons: View {
     private static let studio = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.android.studio")
     private static let studioIcon = studio.map { NSWorkspace.shared.icon(forFile: $0.path) }
     private var source: SourceAnchor? { location?.anchor }
-    private var canOpen: Bool { source != nil && !project.isEmpty && !searching }
     private var jumpTitle: String {
         location?.inherited == true ? "跳转到父组件调用处" : "跳转到源码"
     }
-    private var jumpHelp: String {
+    private var unavailableReason: String? {
         guard let source else { return "没有可用的源码位置" }
         guard !project.isEmpty else { return "请先打开 Android 工程" }
-        return "在 Android Studio 中打开 " + source.text
+        guard let index, index.project == project else { return "工程源码索引正在切换" }
+        guard index.status.isEmpty else { return index.status }
+        guard !index.matches(source).isEmpty else { return "工程中未找到 " + source.file }
+        guard Self.launcher != nil else { return "未找到 Android Studio" }
+        return nil
     }
+    private static let launcher = studio.flatMap { Bundle(url: $0)?.executableURL }
 
     var body: some View {
+        let reason = unavailableReason
+        let canOpen = reason == nil && !searching
         HStack(spacing: 0) {
             Button { searching = true } label: {
                 ZStack {
@@ -62,11 +68,13 @@ struct SourceNavigationButtons: View {
                             .aspectRatio(contentMode: .fit).frame(width: 20, height: 20)
                     } else { Image(systemName: "hammer") }
                 }
+                .saturation(canOpen ? 1 : 0)
+                .opacity(canOpen || searching ? 1 : 0.4)
                 .frame(width: 30, height: 26).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(jumpTitle)
-            .help(jumpHelp)
+            .help(reason ?? "在 Android Studio 中打开 " + (source?.text ?? ""))
             .disabled(!canOpen)
 
             Divider().frame(height: 16)
@@ -142,7 +150,7 @@ struct SourceNavigationButtons: View {
             showNotice("未找到 " + file.lastPathComponent + "，文件可能已移动或删除。")
             return
         }
-        guard let studio = Self.studio, let launcher = Bundle(url: studio)?.executableURL else {
+        guard let launcher = Self.launcher else {
             failure = "未找到 Android Studio。"
             return
         }

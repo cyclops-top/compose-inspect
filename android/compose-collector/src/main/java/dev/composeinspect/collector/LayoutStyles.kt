@@ -1,5 +1,6 @@
 package dev.composeinspect.collector
 
+import androidx.compose.ui.platform.InspectableValue
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.unit.Density
@@ -105,7 +106,9 @@ class LayoutStyles internal constructor() {
         val layout = name.startsWith("androidx.compose.foundation.layout.")
         val kind = when {
             layout && (simple == "PaddingElement" || simple == "PaddingValuesElement") -> "padding"
+            name == "androidx.compose.ui.draw.ShadowGraphicsLayerElement" -> "shadow"
             name == "androidx.compose.foundation.BackgroundElement" -> "background"
+            name == "androidx.compose.ui.graphics.GraphicsLayerElement" -> "graphicsLayer"
             name.startsWith("androidx.compose.ui.graphics.") && optionalField(modifier, "clip") == true -> "clip"
             simple.contains("Padding") || name.contains("Draw") || name.contains("GraphicsLayer") -> "unsupported"
             else -> return null
@@ -136,21 +139,67 @@ class LayoutStyles internal constructor() {
                 val brush = optionalField(modifier, "brush")
                 if (brush != null) layer.put("unsupported", "未知的 brush: " + brush.javaClass.name)
                 else {
-                    val packed = (color as Number).toLong()
-                    val colors = argbColors.getOrPut(modifier.javaClass) { mutableMapOf() }
-                    val argb = colors.getOrPut(packed) {
-                        val type = Class.forName("androidx.compose.ui.graphics.ColorKt", false, modifier.javaClass.classLoader)
-                        val value = method(type, "toArgb", 1).invoke(null, packed) as Number
-                        Integer.toHexString(value.toInt()).uppercase().padStart(8, '0')
-                    }
-                    layer.put("argb", argb).put("alpha", number(field(modifier, "alpha")))
+                    layer.put("argb", argb(modifier, color as Number)).put("alpha", number(field(modifier, "alpha")))
                 }
                 layer.put("shape", readShape(field(modifier, "shape")!!, coords, node))
+            }
+            "shadow" -> {
+                val shadow = JSONObject()
+                (optionalField(modifier, "elevation") as? Number)?.toDouble()?.takeIf { it.isFinite() }?.let {
+                    shadow.put("elevationDp", it)
+                }
+                shadow.put("clip", optionalField(modifier, "clip") as? Boolean)
+                for (key in listOf("ambientColor", "spotColor")) {
+                    (optionalField(modifier, key) as? Number)?.let { shadow.put(key, argb(modifier, it)) }
+                }
+                layer.put("shadow", shadow)
+                optionalField(modifier, "shape")?.let { layer.put("shape", readShape(it, coords, node)) }
+            }
+            "graphicsLayer" -> {
+                val parameters = JSONArray()
+                var shape: Shape? = null
+                var clipped = false
+                var elevated = false
+                for ((key, value) in (modifier as InspectableValue).inspectableElements) {
+                    if (value == null) continue
+                    if (key == "shape") {
+                        shape = value as? Shape
+                        continue
+                    }
+                    if (key == "clip") clipped = value == true
+                    if (key == "shadowElevation") elevated = (value as? Number)?.toFloat()?.let { it > 0 } == true
+                    val display = when (value) {
+                        is Color -> "#" + argb(modifier, value.value.toLong())
+                        is TransformOrigin -> "${value.pivotFractionX}, ${value.pivotFractionY}"
+                        is Number, is Boolean, is BlendMode -> value.toString()
+                        is CompositingStrategy -> when (value) {
+                            CompositingStrategy.Auto -> "Auto"
+                            CompositingStrategy.Offscreen -> "Offscreen"
+                            CompositingStrategy.ModulateAlpha -> "ModulateAlpha"
+                            else -> value.toString()
+                        }
+                        else -> if (key == "outsets") value.toString() else value.javaClass.name
+                    }
+                    parameters.put(JSONObject().put("name", key).put("value", display))
+                }
+                layer.put("graphicsParameters", parameters)
+                if (clipped) layer.put("kind", "clip")
+                if (clipped || elevated) shape?.let { layer.put("shape", readShape(it, coords, node)) }
             }
             "clip" -> layer.put("shape", readShape(field(modifier, "shape")!!, coords, node))
             else -> layer.put("unsupported", if (simple.contains("Padding")) "未解析的 padding: $name" else "未解析的绘制: $name")
         }
         return layer
+    }
+
+    private fun argb(modifier: Any, color: Number): String {
+        val packed = color.toLong()
+        val colors = argbColors.getOrPut(modifier.javaClass) { mutableMapOf() }
+        return colors.getOrPut(packed) {
+            val type = Class.forName("androidx.compose.ui.graphics.ColorKt", false, modifier.javaClass.classLoader)
+            val value = method(type, "toArgb", 1).invoke(null, packed) as Number
+            Integer.toHexString(value.toInt()).uppercase().padStart(8, '0')
+        }
     }
 
     private fun readShape(shape: Any, coords: Any, node: Any): JSONObject {

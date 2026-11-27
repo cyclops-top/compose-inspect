@@ -170,6 +170,8 @@ public struct SDKInspectorClient: Sendable {
                            importFinished.timeIntervalSince(importStarted)),
                     "SDK 原始 Composition 表保留为窗口内的独立分支；尚未拼接 Lazy 子表或采集 Android View 属性。",
                     paired ? "截图来源：SDK 独立窗口。" : "截图来源：ADB 整屏。"]
+        logs.append(String(format: "耗时：SDK 握手与采集器准备 %.2f 秒。",
+                           readStarted.timeIntervalSince(started)))
         if let collectorLog { logs.append(collectorLog) }
         logs.append(componentDetails ? "采集模式：组件详情（参数、样式与交互）。" : "采集模式：快速采集（结构、源码与边界）。")
         if onlySourceNodes {
@@ -180,6 +182,9 @@ public struct SDKInspectorClient: Sendable {
         }
         logs.append(contentsOf: document.root["warnings"]?.array?.compactMap(\.string) ?? [])
 
+        if let wait = document.root["timings"]?["returnIndexWaitMs"]?.double {
+            logs.append(String(format: "耗时：等待 Android 声明索引 %.2f 秒（计入读取时间）。", wait / 1000))
+        }
         if let collect = document.root["timings"]?["collectMs"]?.double {
             logs.append(String(format: "耗时：Android 主线程采集 %.0f 毫秒。", collect))
         }

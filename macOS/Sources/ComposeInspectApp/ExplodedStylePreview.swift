@@ -12,14 +12,16 @@ private extension ComponentStyle.Layer {
         switch kind {
         case "padding": "Padding"
         case "background": "背景"
+        case "graphicsLayer": "图形层"
         case "clip": "裁剪"
+        case "shadow": "阴影"
         default: "未解析操作"
         }
     }
     var uncertain: Bool {
         unsupported != nil || shape?.kind == "unknown" ||
             (kind == "background" && argb.flatMap(styleColor) == nil) ||
-            !["clip", "padding", "background"].contains(kind)
+            !["clip", "padding", "background", "shadow", "graphicsLayer"].contains(kind)
     }
 }
 
@@ -152,6 +154,8 @@ struct ExplodedStylePreview: View {
                                 Text("ARGB  " + (layer.argb.map { "#" + $0 } ?? "未知"))
                                 Text("Alpha  " + number(layer.alpha))
                             }
+                            if layer.kind == "shadow" { ShadowParameters(shadow: layer.shadow) }
+                            if let values = layer.graphicsParameters { GraphicsLayerParameters(values: values) }
                             if let shape = layer.shape {
                                 if ["rounded", "cut"].contains(shape.kind) {
                                     CornerRadiiDiagram(shape: shape, density: style.density, bounds: layer.bounds)
@@ -343,5 +347,102 @@ struct StylePreviewSheet: NSViewRepresentable {
             guard let panel, let size = panel.contentView?.bounds.size else { return }
             UserDefaults.standard.set(NSStringFromSize(size), forKey: "StylePreviewContentSize")
         }
+    }
+}
+
+extension ComponentStyle.GraphicsParameter {
+    // Keep unfamiliar properties visible when a newer Compose version adds inspector fields.
+    var presentation: (label: String, standard: String?) {
+        switch name {
+        case "alpha": ("透明度", "1")
+        case "scaleX": ("X 轴缩放", "1")
+        case "scaleY": ("Y 轴缩放", "1")
+        case "translationX": ("X 轴平移", "0")
+        case "translationY": ("Y 轴平移", "0")
+        case "rotationX": ("绕 X 轴旋转", "0")
+        case "rotationY": ("绕 Y 轴旋转", "0")
+        case "rotationZ": ("绕 Z 轴旋转", "0")
+        case "shadowElevation": ("阴影高度", "0")
+        case "cameraDistance": ("相机距离", "8")
+        case "transformOrigin": ("变换中心", "0.5, 0.5")
+        case "clip": ("裁剪", "false")
+        case "ambientShadowColor": ("环境光阴影色", "#FF000000")
+        case "spotShadowColor": ("点光源阴影色", "#FF000000")
+        case "compositingStrategy": ("合成策略", "Auto")
+        case "blendMode": ("混合模式", "SrcOver")
+        case "renderEffect": ("渲染效果", nil)
+        case "colorFilter": ("颜色滤镜", nil)
+        case "outsets": ("图层外扩", "LayerOutsets(left=0.0.dp, top=0.0.dp, right=0.0.dp, bottom=0.0.dp)")
+        default: (name, nil)
+        }
+    }
+
+    var isStandard: Bool {
+        guard let standard = presentation.standard else { return false }
+        if let expected = Double(standard), let actual = Double(value) { return actual == expected }
+        return value == standard
+    }
+
+    var formattedValue: String {
+        if name == "clip" && value == "true" { return "开启" }
+        if name == "clip" && value == "false" { return "关闭" }
+        if name == "outsets" && isStandard { return "0 dp" }
+        guard let numeric = Double(value), numeric.isFinite else { return value }
+        let format = FloatingPointFormatStyle<Double>.number.precision(.significantDigits(1...8))
+        switch name {
+        case "alpha": return (numeric * 100).formatted(format) + "%"
+        case "scaleX", "scaleY": return numeric.formatted(format) + "×"
+        case "rotationX", "rotationY", "rotationZ": return numeric.formatted(format) + "°"
+        case "translationX", "translationY", "shadowElevation": return numeric.formatted(format) + " px"
+        case "cameraDistance": return numeric.formatted(format)
+        default: return value
+        }
+    }
+}
+
+struct GraphicsLayerParameters: View {
+    let values: [ComponentStyle.GraphicsParameter]
+
+    var body: some View {
+        DisclosureGroup("图形层参数") {
+            let active = values.filter { !$0.isStandard }
+            let defaults = values.filter(\.isStandard)
+            VStack(alignment: .leading, spacing: 8) {
+                if values.isEmpty {
+                    Text("未采集到参数").font(.caption).foregroundStyle(.secondary)
+                } else if active.isEmpty {
+                    Text("均为默认值").font(.caption).foregroundStyle(.secondary)
+                    rows(defaults)
+                } else {
+                    rows(active)
+                    if !defaults.isEmpty {
+                        DisclosureGroup("默认值（\(defaults.count)）") { rows(defaults) }
+                            .font(.caption)
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func rows(_ parameters: [ComponentStyle.GraphicsParameter]) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 5) {
+            ForEach(parameters, id: \.name) { item in
+                GridRow(alignment: .firstTextBaseline) {
+                    Text(item.presentation.label).foregroundStyle(.secondary)
+                    HStack(spacing: 5) {
+                        if ["ambientShadowColor", "spotShadowColor"].contains(item.name),
+                           item.value.hasPrefix("#"), item.value.count == 9 {
+                            ParameterColorSwatch(argb: String(item.value.dropFirst()), side: 12)
+                        }
+                        Text(item.formattedValue).monospacedDigit().textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .help("\(item.name) = \(item.value)")
+            }
+        }
+        .font(.caption)
     }
 }

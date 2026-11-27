@@ -13,7 +13,12 @@ final class ComponentStyleTests: XCTestCase {
                 ["name": "BackgroundElement", "kind": "background", "bounds": ["x": 10, "y": 10, "width": 80, "height": 60],
                  "argb": "FFFFFFFF", "shape": ["kind": "rectangle", "name": "RectangleShape"]],
                 ["name": "PaddingElement", "kind": "padding", "bounds": ["x": 10, "y": 10, "width": 80, "height": 60],
-                 "padding": ["left": 10, "top": 10, "right": 10, "bottom": 10]]]]
+                 "padding": ["left": 10, "top": 10, "right": 10, "bottom": 10]],
+                ["name": "GraphicsLayerElement", "kind": "graphicsLayer", "bounds": ["x": 30, "y": 30, "width": 40, "height": 20],
+                 "graphicsParameters": [["name": "alpha", "value": "0.6"], ["name": "clip", "value": "false"]]],
+                ["name": "ShadowGraphicsLayerElement", "kind": "shadow", "bounds": ["x": 30, "y": 30, "width": 40, "height": 20],
+                 "shape": ["kind": "rectangle"], "shadow": ["elevationDp": 3.5, "clip": false,
+                     "ambientColor": "80001122", "spotColor": "FF334455"]]]]
         var records = [record]
         if ambiguous {
             var duplicate = record
@@ -35,7 +40,15 @@ final class ComponentStyleTests: XCTestCase {
         let style = try XCTUnwrap(node.style)
         XCTAssertEqual(node.bounds, CGRect(x: 0, y: 0, width: 100, height: 80))
         XCTAssertEqual(style.contentBounds, CGRect(x: 30, y: 30, width: 40, height: 20))
-        XCTAssertEqual(style.layers.map(\.kind), ["background", "padding", "background", "padding"])
+        XCTAssertEqual(style.layers.map(\.kind), ["background", "padding", "background", "padding", "graphicsLayer", "shadow"])
+        XCTAssertEqual(style.layers[4].graphicsParameters?.map(\.value), ["0.6", "false"])
+        XCTAssertNil(style.layers[4].unsupported)
+        let shadowLayer = try XCTUnwrap(style.layers.last)
+        XCTAssertEqual(shadowLayer.shadow?.elevationDp, 3.5)
+        XCTAssertEqual(shadowLayer.shadow?.clip, false)
+        XCTAssertEqual(shadowLayer.shadow?.ambientColor, "80001122")
+        XCTAssertEqual(shadowLayer.shadow?.spotColor, "FF334455")
+        XCTAssertEqual(shadowLayer.shape?.kind, "rectangle")
         XCTAssertEqual(style.totalPadding.left, 15)
         XCTAssertEqual(style.layers[0].shape?.name, "example.WaveShape")
         XCTAssertEqual(style.layers[0].shape?.kind, "unknown")

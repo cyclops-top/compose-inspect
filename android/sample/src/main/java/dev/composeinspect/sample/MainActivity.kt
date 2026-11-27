@@ -45,11 +45,46 @@ private inline fun <reified T> probeValue(): T {
 private fun ProbeBoundary(body: @Composable () -> Unit) { body() }
 
 @Composable
+private fun ConditionalSlot(enabled: Boolean, content: @Composable () -> Unit) {
+    val color by probeColor.collectAsState()
+    val fallback by probeFallback.collectAsState()
+    val active by probeActive.collectAsState()
+    val label by probeLabel.collectAsState("")
+    if (enabled && color != null && fallback != null) {
+        val value = remember(color, fallback, active, label) {
+            if (active && label.isEmpty()) color!! else fallback!!
+        }
+        CompositionLocalProvider(LocalContentColorProbe provides value, content = content)
+    }
+}
+
+private val probeColor = kotlinx.coroutines.flow.MutableStateFlow<Color?>(Color.Red)
+private val probeFallback = kotlinx.coroutines.flow.MutableStateFlow<Color?>(Color.Black)
+private val probeActive = kotlinx.coroutines.flow.MutableStateFlow(true)
+private val probeLabel: kotlinx.coroutines.flow.Flow<String> = kotlinx.coroutines.flow.flowOf("")
+private val LocalContentColorProbe = compositionLocalOf { Color.Black }
+
+@Composable
+private fun NestedSlot(enabled: Boolean, content: @Composable () -> Unit) {
+    ConditionalSlot(enabled, content)
+}
+
+@Composable
+private fun ConditionalUi(enabled: Boolean, content: @Composable () -> Unit) {
+    if (enabled) content() else BasicText("loading")
+}
+
+@Composable
+private fun ReplacedSlot(content: @Composable () -> Unit) {
+    ConditionalSlot(true) { BasicText("owned"); content() }
+}
+
+@Composable
 fun ProbeScreen(scenario: String) {
     var count by remember { mutableIntStateOf(7) }
     Column(Modifier.fillMaxSize().background(Color.White).padding(24.dp)) {
         val title = probeValue<String>()
-        ProbeBoundary { BasicText(title) }
+        NestedSlot(true) { ProbeBoundary { BasicText(title) } }
         ParameterCard("explicit-title", count, true, Profile("Ada", 37, listOf("compose", "debug")), 12.dp, Color.Red) { count++ }
         DefaultCard()
         InlineWrapper("inline-marker") { BasicText("inline-child") }

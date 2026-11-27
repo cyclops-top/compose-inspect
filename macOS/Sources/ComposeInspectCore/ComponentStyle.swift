@@ -37,6 +37,16 @@ public struct ComponentStyle: Codable, Equatable, Sendable {
             return "圆角"
         }
     }
+    public struct Shadow: Codable, Equatable, Sendable {
+        public let elevationDp: Double?
+        public let clip: Bool?
+        public let ambientColor: String?
+        public let spotColor: String?
+    }
+    public struct GraphicsParameter: Codable, Equatable, Sendable {
+        public let name: String
+        public let value: String
+    }
     public struct Layer: Codable, Equatable, Identifiable, Sendable {
         public let id: Int
         public let name: String
@@ -47,6 +57,8 @@ public struct ComponentStyle: Codable, Equatable, Sendable {
         public let alpha: Double
         public let shape: Shape?
         public let unsupported: String?
+        public var shadow: Shadow? = nil
+        public var graphicsParameters: [GraphicsParameter]? = nil
     }
     public let density: Double
     public let contentBounds: CGRect
@@ -128,7 +140,13 @@ struct ComponentStyleCatalog {
                 }
                 return ComponentStyle.Layer(id: index, name: name, kind: kind, bounds: bounds, padding: padding,
                     argb: raw["argb"]?.string, alpha: raw["alpha"]?.double ?? 1, shape: shape,
-                    unsupported: raw["unsupported"]?.string)
+                    unsupported: raw["unsupported"]?.string, shadow: raw["shadow"].map {
+                        ComponentStyle.Shadow(elevationDp: $0["elevationDp"]?.double, clip: $0["clip"]?.boolean,
+                                              ambientColor: $0["ambientColor"]?.string, spotColor: $0["spotColor"]?.string)
+                    }, graphicsParameters: raw["graphicsParameters"]?.array?.compactMap { item in
+                        guard let key = item["name"]?.string, let value = item["value"]?.string else { return nil }
+                        return .init(name: key, value: value)
+                    })
             }
             // Reject partial decoding: a missing layer must not look like an absent background.
             guard layers.count == rawLayers.count else { return nil }

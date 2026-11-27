@@ -113,10 +113,16 @@ object ComposeCollector {
                         try {
                             table.mapTree<Branch>(factory = collect@{ group, context, children ->
                                 check(++groups <= 30000) { "Group limit exceeded (30000); capture rejected" }
-                                val descendants = children.flatMap { it.nodes }
+                                val descendants = when (children.size) {
+                                    0 -> emptyList()
+                                    1 -> children[0].nodes
+                                    else -> children.flatMap { it.nodes }
+                                }
                                 val boundaries = when {
                                     included == null -> emptyList()
                                     group.node != null -> listOf(Boundary(group.node!!, context.bounds))
+                                    children.isEmpty() -> emptyList()
+                                    children.size == 1 -> children[0].boundaries
                                     else -> children.asSequence().flatMap { it.boundaries }.take(2).toList()
                                 }
                                 // Attach subcompositions before source filtering lifts this context group.
@@ -129,7 +135,8 @@ object ComposeCollector {
                                     filteredValueCalls++
                                     return@collect Branch(allChildren, boundaries)
                                 }
-                                if (NonVisualCalls.shouldFlatten(context.name, group.node != null)) {
+                                if (NonVisualCalls.shouldFlatten(context.name, group.node != null) ||
+                                    (group.node == null && returnTypes.forwardsSlot(context.name, group.sourceInfo))) {
                                     filteredCalls++
                                     return@collect Branch(allChildren, boundaries)
                                 }

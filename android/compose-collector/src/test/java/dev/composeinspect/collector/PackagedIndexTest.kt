@@ -15,6 +15,13 @@ class PackagedIndexTest {
             }
         }
         val device = ComposableReturns.fromApks(listOf(apk))
+        val source = "C:MainActivity.kt#" + kotlin.math.abs("dev.composeinspect.sample".hashCode()).toString(36)
+        for (name in listOf("ProbeBoundary", "ConditionalSlot", "NestedSlot")) {
+            assertTrue("Expected slot forwarding: $name", device.forwardsSlot(name, source))
+        }
+        for (name in listOf("NoLayoutWrapper", "ConditionalUi", "InlineWrapper", "ReplacedSlot")) {
+            assertTrue("Must retain visual component: $name", !device.forwardsSlot(name, source))
+        }
         val field = ComposableReturns::class.java.getDeclaredField("returning").apply { isAccessible = true }
         val expected = field.get(device) as Set<*>
         val actual = field.get(packaged) as Set<*>

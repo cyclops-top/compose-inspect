@@ -207,16 +207,22 @@ private struct JSONParser {
 }
 
 public struct InspectorDocument: Codable, Equatable, Sendable {
-    public let originalJSON: Data
+    private let inputBytes: Data?
+    public var originalJSON: Data { inputBytes ?? Data(root.jsonString().utf8) }
     public let root: InspectorJSON
     public init(data: Data) throws {
-        originalJSON = data; root = try InspectorJSON.parse(data)
+        inputBytes = data; root = try InspectorJSON.parse(data)
         guard root.object != nil else { throw SnapshotImportError.schema("根节点必须为对象") }
     }
-    /// Reuse an already validated tree without a second serialization/parser round trip.
+    /// SDK imports already have a tree. Materialize its bytes only for export or archiving.
     init(root: InspectorJSON) {
         self.root = root
-        originalJSON = Data(root.jsonString().utf8)
+        inputBytes = nil
+    }
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        guard lhs.root == rhs.root else { return false }
+        if lhs.inputBytes == nil && rhs.inputBytes == nil { return true }
+        return lhs.originalJSON == rhs.originalJSON
     }
     public var windows: [InspectorJSON] { root["windows"]?.array ?? [] }
     public func window(for pointer: String) -> InspectorJSON? {

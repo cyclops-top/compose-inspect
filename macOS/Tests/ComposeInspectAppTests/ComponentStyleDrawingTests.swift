@@ -5,6 +5,17 @@ import SceneKit
 @testable import ComposeInspectCore
 
 final class ComponentStyleDrawingTests: XCTestCase {
+    func testGraphicsParametersPrioritizeNonDefaultAndUnknownValues() {
+        let parameters: [ComponentStyle.GraphicsParameter] = [
+            .init(name: "scaleX", value: "1.0"), .init(name: "alpha", value: "0.6"),
+            .init(name: "rotationZ", value: "12.0"), .init(name: "translationX", value: "5.0"),
+            .init(name: "clip", value: "false"), .init(name: "newProperty", value: "0")
+        ]
+        let visible = parameters.filter { !$0.isStandard }
+        XCTAssertEqual(visible.map(\.formattedValue), ["60%", "12°", "5 px", "0"])
+        XCTAssertEqual(visible.last?.presentation.label, "newProperty")
+    }
+
     func testCustomPathScalesToLayerAndKeepsEvenOddHole() {
         var shape = ComponentStyle.Shape(name: "Ring", kind: "path",
             topLeft: 0, topRight: 0, bottomLeft: 0, bottomRight: 0)

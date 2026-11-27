@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -66,6 +67,7 @@ fun StyleProbe() {
         Box(Modifier.size(60.dp).background(Color.Yellow,
             RoundedCornerShape(CornerSize(10.dp), CornerSize(20), CornerSize(8f), CornerSize(6.dp))))
         Box(Modifier.size(50.dp).background(Brush.horizontalGradient(listOf(Color.Red, Color.Blue))))
+        BasicText("style-graphics-layer", Modifier.graphicsLayer(alpha = 0.6f, rotationZ = 12f, translationX = 5f))
         Spacer(Modifier.height(16.dp))
         Box(Modifier.width(180.dp).height(52.dp).clip(TicketShape)
             .background(Color(0xFF245C60), TicketShape), contentAlignment = Alignment.Center) {

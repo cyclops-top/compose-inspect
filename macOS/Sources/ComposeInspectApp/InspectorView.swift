@@ -290,7 +290,7 @@ private struct ComponentStylePreview: View {
             if child.isClickable && (child.clickTargetID == nil || child.clickTargetID != node.clickTargetID) { continue }
             let identity = child.clickTargetID ?? child.id
             if let style = child.style,
-               style.layers.contains(where: { $0.kind == "background" || $0.kind == "clip" }),
+               style.layers.contains(where: { ["background", "clip", "shadow"].contains($0.kind) }),
                seen.insert(identity).inserted {
                 result.append(child)
             }
@@ -364,7 +364,12 @@ private struct ComponentStylePreview: View {
                                         Text("背景 · \(layer.argb.map { "#" + $0 } ?? "未解析")")
                                     }
                                     if layer.alpha != 1 { Text("Alpha \(number(layer.alpha))").foregroundStyle(.secondary) }
+                                } else if layer.kind == "shadow" {
+                                    Text("阴影")
+                                    ShadowParameters(shadow: layer.shadow)
                                 } else if layer.kind == "clip" { Text("裁剪") }
+                                else if layer.kind == "graphicsLayer" { Text("图形层") }
+                                if let values = layer.graphicsParameters { GraphicsLayerParameters(values: values) }
                                 if let shape = layer.shape {
                                     if shape.kind == "unknown" {
                                         Text("未知的 shape").foregroundStyle(.orange)
@@ -555,7 +560,28 @@ private struct CornerRadiusGlyph: Shape {
     }
 }
 
-private struct ParameterColorSwatch: View {
+struct ShadowParameters: View {
+    let shadow: ComponentStyle.Shadow?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("高度  " + (shadow?.elevationDp.map { $0.formatted() + " dp" } ?? "未知"))
+            Text("裁剪  " + (shadow?.clip.map { $0 ? "开启" : "关闭" } ?? "未知"))
+            colorRow("环境光颜色", shadow?.ambientColor)
+            colorRow("投射光颜色", shadow?.spotColor)
+        }.textSelection(.enabled)
+    }
+
+    private func colorRow(_ label: String, _ argb: String?) -> some View {
+        HStack(spacing: 5) {
+            Text(label)
+            if let argb { ParameterColorSwatch(argb: argb, alpha: 1) }
+            Text(argb.map { "#" + $0 } ?? "未知")
+        }
+    }
+}
+
+struct ParameterColorSwatch: View {
     let argb: String
     var alpha: Double = 1
     var side: CGFloat = 16

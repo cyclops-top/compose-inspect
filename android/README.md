@@ -24,6 +24,7 @@ SDK 通过 AndroidX Startup 初始化，在 Activity 首次组合前启用 `isDe
 - `source.line` 保留 tooling 原始值。在已测两个版本中它是 1 起算，已用业务源码行和 offset 验证；不能仅根据 tooling 的旧注释再加 1。
 - SDK 默认使用快速采集，并声明 `geometry-only-v1`。支持 `component-details-v1` 时，客户端可通过 `geometryOnly: false` 请求详情，额外读取组件专属参数、布局样式、交互语义和 Lazy 列表视口。快速采集保留树结构、调用位置和工具链测得的边界，跳过参数、交互语义和样式读取。依赖参数判定的内容包装节点可能保留。可与源码过滤及窗口截图组合使用。
 - 声明 `source-only-v1` 的 SDK 支持每次抓取传入 `onlySourceNodes`，在读取参数之前跳过无源码文件名的节点。可选的 `sourceKeys` 限定工程中唯一的文件名与包哈希组合。保留子组件顺序。
+- 采集器检查已安装 APK 的 Compose 方法。无布局调用若仅执行状态读取、缓存并直接调用或逐层传递同一个无参内容插槽，会提升其子节点。所有分支都参与判定；含自有 UI、插槽来源不明确或同名声明有歧义时保留该层。
 - Startup 在首帧前开启 Compose 检查并跟踪 Activity。后台 LocalSocket 等待桌面连接。首次抓取按需初始化签名索引，同一进程复用。
 - 签名索引用于提升返回非 Unit 的调用，计数见 `stats.filteredValueCalls`。响应的 `timings.returnIndexWaitMs` 是本次请求等待索引的时间，不计入 UI 线程采集耗时。
 - 原始 Composition 表分别输出，**尚未跨表拼接 Lazy 子组合，也未与 Android View 树合并**。

@@ -98,7 +98,10 @@ def validate_sdk(directory, source):
             assert source[location["offset"]:].startswith(node["name"]), location
         if scenario != "main":
             continue
-        assert not any(n["name"] in {"CompositionLocalProvider", "probeValue"} for n in nodes)
+        assert not any(n["name"] in {"CompositionLocalProvider", "probeValue", "ProbeBoundary", "ConditionalSlot", "NestedSlot"} for n in nodes)
+        assert any(n["name"] == "BasicText" and
+                   source[n["source"]["offset"]:].startswith("BasicText(title)")
+                   for n in nodes if (n.get("source") or {}).get("file") == "MainActivity.kt")
         rows = [n for n in nodes if n["name"] == "LazyRowProbe"]
         assert 0 < len(rows) < 100, "Only composed lazy items should be present"
         lazy_column, = (n for n in nodes if n["name"] == "LazyColumn")
