@@ -205,6 +205,7 @@ public struct InspectorSnapshotIndex: Sendable {
     public let depths: [String: Int]
     public let rootIDs: [String: String]
     public let nodesByRoot: [String: [InspectorNode]]
+    fileprivate var lazyClipByID: [String: CGRect] = [:]
     public let boundsByRoot: [String: [CGRect]]
 
     public init(_ snapshot: InspectorSnapshot, hidingInternals: Bool = false, onlyClickable: Bool = false,
@@ -240,6 +241,15 @@ public struct InspectorSnapshotIndex: Sendable {
                 bounds[root, default: []].append(rect)
             }
             pending.append(contentsOf: node.children.reversed().map { ($0, node.id, root, depth + 1) })
+        }
+        for node in nodes {
+            guard let parentID = parents[node.id], let parent = byID[parentID] else { continue }
+            let inherited = lazyClipByID[parentID]
+            if LazyViewport.componentNames.contains(parent.shortName) {
+                lazyClipByID[node.id] = inherited?.intersection(parent.bounds) ?? parent.bounds
+            } else if let inherited {
+                lazyClipByID[node.id] = inherited
+            }
         }
         self.roots = presentedRoots
         self.nodes = nodes; self.byID = byID; parentIDs = parents; rootIDs = roots
@@ -582,22 +592,29 @@ public struct CoordinateMapper: Sendable {
     public func candidates(at point: CGPoint, in snapshot: InspectorSnapshot) -> [InspectorNode] {
         candidates(at: point, in: InspectorSnapshotIndex(snapshot), imageSize: snapshot.pixelSize)
     }
-    public func candidates(at point: CGPoint, in index: InspectorSnapshotIndex, imageSize: CGSize, rootID: String? = nil) -> [InspectorNode] {
+    public func candidates(at point: CGPoint, in index: InspectorSnapshotIndex, imageSize: CGSize,
+                           rootID: String? = nil, geometryIndex: InspectorSnapshotIndex? = nil) -> [InspectorNode] {
         let imagePoint = imagePoint(point)
-        guard CGRect(origin: .zero, size: imageSize).contains(imagePoint) else { return [] }
-        // Roots are ordered front to back. Keep each window’s hit stack together.
-        if rootID == nil, index.roots.count > 1 {
-            return index.roots.flatMap { candidates(at: point, in: index, imageSize: imageSize, rootID: $0.id) }
-        }
+        let screen = CGRect(origin: .zero, size: imageSize)
+        guard screen.contains(imagePoint) else { return [] }
+        let clips = (geometryIndex ?? index).lazyClipByID
         let nodes = rootID.flatMap { index.nodesByRoot[$0] } ?? index.nodes
-        return nodes.enumerated().filter { !$0.element.bounds.isEmpty && $0.element.bounds.contains(imagePoint) }.sorted {
-            let a = $0.element.bounds.width * $0.element.bounds.height
-            let b = $1.element.bounds.width * $1.element.bounds.height
-            if a != b { return a < b }
-            let depthA = index.depths[$0.element.id] ?? 0, depthB = index.depths[$1.element.id] ?? 0
-            if depthA != depthB { return depthA > depthB }
-            return $0.offset < $1.offset
-        }.map(\.element)
+        let windowOrder = Dictionary(uniqueKeysWithValues: index.roots.enumerated().map { ($0.element.id, $0.offset) })
+        let hits = nodes.compactMap { node -> (node: InspectorNode, area: CGFloat)? in
+            guard node.bounds.contains(imagePoint) else { return nil }
+            var visible = node.bounds.intersection(screen)
+            if let clip = clips[node.id] { visible = visible.intersection(clip) }
+            guard !visible.isEmpty, visible.contains(imagePoint) else { return nil }
+            return (node, visible.width * visible.height)
+        }
+        return hits.sorted { lhs, rhs in
+            if lhs.area != rhs.area { return lhs.area < rhs.area }
+            let leftRoot = index.rootIDs[lhs.node.id], rightRoot = index.rootIDs[rhs.node.id]
+            if leftRoot != rightRoot {
+                return (leftRoot.flatMap { windowOrder[$0] } ?? 0) < (rightRoot.flatMap { windowOrder[$0] } ?? 0)
+            }
+            return (index.depths[lhs.node.id] ?? 0) > (index.depths[rhs.node.id] ?? 0)
+        }.map(\.node)
     }
 }
 
@@ -605,8 +622,13 @@ public struct CoordinateMapper: Sendable {
 public struct ImageHitCycle: Sendable {
     private var previous: [String] = []
     public init() {}
-    public mutating func reset() { previous = [] }
-    public mutating func next(in candidates: [String], selected: String?) -> String? {
+    private var anchor: CGPoint?
+    public mutating func reset() { previous = []; anchor = nil }
+    public mutating func next(in candidates: [String], selected: String?, at point: CGPoint? = nil) -> String? {
+        if let point, anchor.map({ hypot(point.x - $0.x, point.y - $0.y) > 3 }) ?? true {
+            previous = []
+            anchor = point
+        }
         defer { previous = candidates }
         guard !candidates.isEmpty else { return nil }
         if candidates == previous, let selected, let index = candidates.firstIndex(of: selected) {

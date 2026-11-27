@@ -64,11 +64,11 @@ plugins { id("top.cyclops.compose-inspector") }
 // 应用模块 build.gradle.kts
 plugins {
     id("com.android.application")
-    id("top.cyclops.compose-inspector") version "2.0.0-SNAPSHOT"
+    id("top.cyclops.compose-inspector") version "2.0.0"
 }
 ```
 
-开发版插件按 build type 自动添加同版本 SDK。默认开启 `debug`，关闭 `release` 和其他自定义类型。已发布的 `0.1.4` 插件仍需显式添加下文所列 SDK 依赖。
+2.0.0 插件按 build type 自动添加同版本 SDK。默认开启 `debug`，关闭 `release` 和其他自定义类型。已发布的 `0.1.4` 插件仍需显式添加下文所列 SDK 依赖。
 
 在业务工程的 `settings.gradle.kts` 中，将 `maven("https://repo.tick-tick.cn/releases")` 加入 `pluginManagement.repositories` 和 `dependencyResolutionManagement.repositories`，保留原有 Google 和 Maven Central 仓库。本地联调时，在这两处使用 `mavenLocal()`，并在本仓库的 `android/` 执行 `./gradlew :signature-plugin:publishToMavenLocal publishToMavenLocal` 发布本地插件标记、插件实现及 SDK。仓库内的 sample 通过 included build 直接应用插件。
 
@@ -131,7 +131,7 @@ python3 tools/validate.py --serial DEVICE_SERIAL --versions 1.12.1
 ## Maven 发布
 
 SDK 和 Gradle 插件的发布目标为 `https://repo.tick-tick.cn`。正式版发布到 `releases`。日常 SNAPSHOT 联调使用上文的 `publishToMavenLocal` 命令。
-版本由 `gradle.properties` 的 `sdkVersion` 统一控制，本地版本为 `2.0.0-SNAPSHOT`。
+版本由 `gradle.properties` 的 `sdkVersion` 统一控制，当前正式版本为 `2.0.0`。
 
 使用已发布的 0.1.4 时，在业务应用的调试依赖中添加：
 

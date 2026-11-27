@@ -150,6 +150,12 @@ final class WorkspaceStore {
         didSet { UserDefaults.standard.set(showWireframes, forKey: "showWireframes") }
     }
     var pickingColor = false
+    var skipsDuplicateHitBounds = false {
+        didSet {
+            imageHitCycle.reset()
+            hitCandidates = []
+        }
+    }
     var selectionEnabled = true
     var zoom: CGFloat = 1
     var imagePan: CGSize = .zero
@@ -315,10 +321,21 @@ final class WorkspaceStore {
             return
         }
         guard selectionEnabled else { return }
-        let candidates = mapper.candidates(at: point, in: presentationIndex, imageSize: snapshot.pixelSize,
-                                           rootID: windowRootID).map(\.id)
+        let hits = mapper.candidates(at: point, in: presentationIndex, imageSize: snapshot.pixelSize,
+                                     rootID: windowRootID, geometryIndex: snapshotIndex)
+        var redundant = Set<String>()
+        if skipsDuplicateHitBounds {
+            for hit in hits {
+                var parent = presentationIndex.parentIDs[hit.id]
+                while let id = parent {
+                    if presentationIndex.byID[id]?.bounds == hit.bounds { redundant.insert(id) }
+                    parent = presentationIndex.parentIDs[id]
+                }
+            }
+        }
+        let candidates = hits.map(\.id).filter { !redundant.contains($0) }
         var cycle = imageHitCycle
-        guard let next = cycle.next(in: candidates, selected: selectedNodeID) else {
+        guard let next = cycle.next(in: candidates, selected: selectedNodeID, at: point) else {
             imageHitCycle = cycle; hitCandidates = []; return
         }
         select(next)

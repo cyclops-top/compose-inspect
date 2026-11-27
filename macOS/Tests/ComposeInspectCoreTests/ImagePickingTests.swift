@@ -16,12 +16,31 @@ final class ImagePickingTests: XCTestCase {
         let point = mapper.display(CGRect(x: 10, y: 10, width: 0, height: 0)).origin
         let hits = mapper.candidates(at: point, in: InspectorSnapshotIndex(snapshot), imageSize: snapshot.pixelSize, rootID: root.id)
         XCTAssertEqual(hits.map(\.id), ["equal-child", "small", "equal-sibling", "deep-large", "branch", "root"])
+        XCTAssertEqual(mapper.candidates(at: point, in: snapshot).map(\.id),
+                       ["equal-child", "small", "equal-sibling", "other", "deep-large", "branch", "root"])
         XCTAssertTrue(mapper.candidates(at: CGPoint(x: -1, y: -1), in: snapshot).isEmpty)
+    }
+
+    func testTallImageIsPickedBeforeItsLazyViewportOnlyInsideVisiblePortion() {
+        let image = InspectorNode(id: "image", rawID: 60, name: "AsyncImage",
+            bounds: CGRect(x: 84, y: 276, width: 1200, height: 1365))
+        let list = InspectorNode(id: "list", rawID: 244, name: "LazyColumn",
+            bounds: CGRect(x: 32, y: 128, width: 1304, height: 920), children: [image])
+        let size = CGSize(width: 1920, height: 1080)
+        let snapshot = InspectorSnapshot(packageName: "test", deviceName: "test", pixelSize: size, roots: [list])
+        let mapper = CoordinateMapper(imageSize: size, canvasSize: size)
+        XCTAssertEqual(mapper.candidates(at: CGPoint(x: 600, y: 500), in: snapshot).map(\.id), ["image", "list"])
+        XCTAssertEqual(mapper.candidates(at: CGPoint(x: 600, y: 200), in: snapshot).map(\.id), ["list"])
+        XCTAssertTrue(mapper.candidates(at: CGPoint(x: 600, y: 1060), in: snapshot).isEmpty)
     }
 
     func testRepeatedClickBubblesThroughEveryCandidateAndWraps() {
         let hits = ["text", "button", "column", "window"]
         var cycle = ImageHitCycle()
+        XCTAssertEqual(cycle.next(in: hits, selected: nil, at: .zero), "text")
+        XCTAssertEqual(cycle.next(in: hits, selected: "text", at: CGPoint(x: 1, y: 1)), "button")
+        XCTAssertEqual(cycle.next(in: hits, selected: "button", at: CGPoint(x: 10, y: 10)), "text")
+        cycle.reset()
         var selected: String? = "column" // A tree selection must not change the first image hit.
         var actual: [String] = []
         for _ in 0..<6 {

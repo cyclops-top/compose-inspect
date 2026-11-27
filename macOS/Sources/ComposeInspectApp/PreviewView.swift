@@ -37,6 +37,15 @@ struct PreviewView: View {
                 }.pickerStyle(.segmented).labelsHidden().fixedSize()
                     .help("切换截图与整页立体预览")
                     .disabled(store.isCapturing || (!showing3D && (store.image == nil || store.snapshot.roots.isEmpty)))
+                if !showing3D {
+                    Toggle(isOn: $store.skipsDuplicateHitBounds) {
+                        Label("跳过重复选框", systemImage: "square.on.square")
+                    }
+                    .labelStyle(.iconOnly)
+                    .toggleStyle(.button)
+                    .fixedSize()
+                    .help("跳过重复选框：父子选框重合时只选最内层")
+                }
                 Spacer()
                 if !pickingColor && store.snapshot.roots.count > 1 {
                     Picker("预览层级", selection: $store.windowRootID) {
@@ -186,7 +195,7 @@ struct PreviewView: View {
             let mapper = CoordinateMapper(imageSize: store.snapshot.pixelSize, canvasSize: geometry.size, zoom: viewport.zoom, pan: viewport.pan)
             let hovered = !pickingColor && !panning && store.canPickImage ? hoverPoint.flatMap {
                 mapper.candidates(at: $0, in: store.presentationIndex, imageSize: store.snapshot.pixelSize,
-                                  rootID: store.windowRootID).first
+                                  rootID: store.windowRootID, geometryIndex: store.snapshotIndex).first
             } : nil
             let measurement = measurement(to: hovered)
             ZStack(alignment: .topLeading) {

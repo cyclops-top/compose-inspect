@@ -28,7 +28,7 @@ def main():
 
     def read():
         data = capture("adb", args.serial, args.package)
-        assert data["sdkVersion"] == "2.0.0-SNAPSHOT" and data["complete"] and not data["diagnostics"]
+        assert data["sdkVersion"] == "2.0.0" and data["complete"] and not data["diagnostics"]
         return data
 
     def tap(text):
@@ -81,7 +81,7 @@ def main():
     for viewport in viewports.values():
         assert viewport["count"] > 0 and viewport["end"] > viewport["start"]
         assert len({i["index"] for i in viewport["items"]}) == len(viewport["items"])
-    result = dict(compose=args.compose, sdk="2.0.0-SNAPSHOT", beforeAndAfter=before, unregistered=unregistered,
+    result = dict(compose=args.compose, sdk="2.0.0", beforeAndAfter=before, unregistered=unregistered,
                   registered=readings, viewports=viewports)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n")

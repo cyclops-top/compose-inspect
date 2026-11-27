@@ -2,9 +2,9 @@ import Foundation
 import CryptoKit
 
 public struct SDKInspectorClient: Sendable {
-    public static let supportedSDKVersion = "2.0.0-SNAPSHOT"
+    public static let supportedSDKVersion = "2.0.0"
     static func supports(_ reported: String?) -> Bool {
-        reported == "2.0.0" || reported == supportedSDKVersion || reported == "0.1.5-SNAPSHOT" || reported == "0.1.4" || reported == "0.1.4-SNAPSHOT" || reported == "0.1.3"
+        reported == "2.0.0-SNAPSHOT" || reported == supportedSDKVersion || reported == "0.1.5-SNAPSHOT" || reported == "0.1.4" || reported == "0.1.4-SNAPSHOT" || reported == "0.1.3"
     }
     private struct CollectorMetadata: Decodable { let version: String; let digest: String }
     private static let collectorBundle = Result { () -> (bytes: Data, digest: String, signature: String, version: String) in
@@ -65,7 +65,7 @@ public struct SDKInspectorClient: Sendable {
         }
         let reported = document.root["sdkVersion"]?.string
         guard supports(reported), document.root["protocolVersion"]?.int64 == 1 else {
-            throw CommandFailure.failed("当前 CompScope 支持采集 SDK 0.1.3、0.1.4-SNAPSHOT、0.1.4、0.1.5-SNAPSHOT 和 \(supportedSDKVersion)（协议 1）。目标应用报告 SDK \(reported ?? "未知")，协议 \(document.root["protocolVersion"]?.display ?? "未知")。请使用对应 SDK 重新构建调试包。")
+            throw CommandFailure.failed("当前 CompScope 支持采集 SDK 0.1.3、0.1.4-SNAPSHOT、0.1.4、0.1.5-SNAPSHOT、2.0.0-SNAPSHOT 和 \(supportedSDKVersion)（协议 1）。目标应用报告 SDK \(reported ?? "未知")，协议 \(document.root["protocolVersion"]?.display ?? "未知")。请使用对应 SDK 重新构建调试包。")
         }
         guard document.root["packageName"]?.string == package else { throw CommandFailure.failed("SDK 响应包名与目标不一致。") }
         guard let pid = document.root["pid"]?.int64, pid > 0 else { throw CommandFailure.failed("SDK 响应缺少有效进程标识。") }
@@ -96,7 +96,7 @@ public struct SDKInspectorClient: Sendable {
         let pid = hello.root["pid"]!.int64!
         var collectorLog: String?
         var collectorOptions: [String: String] = [:]
-        if hello.root["collectorABI"] != nil || [Self.supportedSDKVersion, "2.0.0"].contains(hello.root["sdkVersion"]?.string ?? "") {
+        if hello.root["collectorABI"] != nil || [Self.supportedSDKVersion, "2.0.0-SNAPSHOT"].contains(hello.root["sdkVersion"]?.string ?? "") {
             guard hello.root["collectorABI"]?.int64 == 1 else { throw CommandFailure.failed("不支持的采集器加载接口。") }
             let bundle = try Self.collectorBundle.get()
             let checksVersion = hello.root["checksCollectorVersion"]?.boolean == true
@@ -123,7 +123,7 @@ public struct SDKInspectorClient: Sendable {
             throw CommandFailure.failed("SDK 未声明组件树采集能力。")
         }
         guard hello.root["capabilities"]?.array?.contains(.string("gzip-json-v1")) == true else {
-            throw CommandFailure.failed("SDK 缺少压缩采集能力，请使用开发版本 \(Self.supportedSDKVersion)。")
+            throw CommandFailure.failed("SDK 缺少压缩采集能力，请使用 SDK \(Self.supportedSDKVersion)。")
         }
         await progress("通过 SDK 读取组件树…")
         let readStarted = Date()

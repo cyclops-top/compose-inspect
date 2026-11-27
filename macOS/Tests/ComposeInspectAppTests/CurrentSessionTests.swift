@@ -488,6 +488,29 @@ final class CurrentSessionTests: XCTestCase {
         XCTAssertEqual(board.string(forType: .string), copied, "No selection must not erase the clipboard")
     }
 
+    @MainActor func testDuplicateHitBoundsKeepSiblingsAndOtherWindows() async throws {
+        _ = NSApplication.shared
+        let rect = CGRect(x: 0, y: 0, width: 20, height: 20)
+        func node(_ id: String, _ children: [InspectorNode] = []) -> InspectorNode {
+            InspectorNode(id: id, rawID: 1, name: id, bounds: rect, children: children)
+        }
+        let roots = [node("wrapper", [node("first"), node("second")]), node("otherWindow")]
+        let snapshot = InspectorSnapshot(packageName: "test", deviceName: "test", pixelSize: rect.size, roots: roots)
+        let store = WorkspaceStore()
+        try await store.applyCapture(CapturedSnapshot(snapshot: snapshot, imageData: captured().imageData))
+        let mapper = CoordinateMapper(imageSize: rect.size, canvasSize: rect.size)
+        let point = CGPoint(x: 10, y: 10)
+        store.skipsDuplicateHitBounds = true
+        store.selectImage(at: point, mapper: mapper)
+        XCTAssertEqual(store.hitCandidates, ["first", "second", "otherWindow"])
+        store.selectImage(at: point, mapper: mapper)
+        XCTAssertEqual(store.selectedNodeID, "second")
+        store.skipsDuplicateHitBounds = false
+        XCTAssertTrue(store.hitCandidates.isEmpty)
+        store.selectImage(at: point, mapper: mapper)
+        XCTAssertEqual(store.hitCandidates, ["first", "second", "wrapper", "otherWindow"])
+    }
+
     @MainActor func testOverlapNavigationPreservesCandidatesAndOrdinarySelectionClearsThem() async throws {
         _ = NSApplication.shared
         let store = WorkspaceStore()
