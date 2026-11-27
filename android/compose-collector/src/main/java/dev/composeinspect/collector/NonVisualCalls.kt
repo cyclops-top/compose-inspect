@@ -9,6 +9,13 @@ internal object NonVisualCalls {
     )
     private val effects = setOf("SideEffect", "DisposableEffect", "LaunchedEffect", "produceState", "derivedStateOf")
 
+    // Match the declaration file and package hash. The call-site file can belong to the caller.
+    fun isKnownNonVisualLeaf(name: String?, sourceInfo: String?): Boolean = when (name) {
+        "collectInto" -> sourceInfo?.endsWith(":SnapshotFlow.kt#9igjgp") == true
+        "BackgroundTextMeasurement" -> sourceInfo?.endsWith(":BasicText.android.kt#423gt5") == true
+        else -> false
+    }
+
     fun shouldFlatten(name: String?, hasLayoutNode: Boolean): Boolean {
         if (hasLayoutNode || name == null) return false
         return name in compositionWrappers || name == "remember" ||

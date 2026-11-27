@@ -20,7 +20,12 @@ class InspectorInitializer : androidx.startup.Initializer<Boolean> {
     override fun dependencies(): List<Class<out androidx.startup.Initializer<*>>> = emptyList()
     override fun create(context: android.content.Context): Boolean {
         val app = context.applicationContext as? Application ?: return false
-        if (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) return false
+        if (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) {
+            val optedIn = try {
+                app.assets.open("composeinspect/explicit-opt-in").use { it.read() == '1'.code }
+            } catch (_: java.io.IOException) { false }
+            if (!optedIn) return false
+        }
         // This probe supports the main process only; never create a competing socket in :remote.
         if (android.os.Build.VERSION.SDK_INT >= 28 && Application.getProcessName() != app.packageName) return false
         try {

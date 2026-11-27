@@ -1,3 +1,5 @@
+import dev.composeinspect.gradle.composeInspect
+
 plugins {
     id("com.android.application")
     id("top.cyclops.compose-inspector")
@@ -13,6 +15,13 @@ android {
         testInstrumentationRunner = "dev.composeinspect.sample.SemanticsReadBenchmark"
         versionCode = 1
         versionName = "0.1"
+    }
+    if (providers.gradleProperty("inspectSampleRelease").orNull == "true") {
+        buildTypes.named("release") {
+            composeInspect = true
+            applicationIdSuffix = ".inspectrelease"
+            signingConfig = signingConfigs.getByName("debug")
+        }
     }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

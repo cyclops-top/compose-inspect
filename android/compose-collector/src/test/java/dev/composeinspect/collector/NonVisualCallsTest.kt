@@ -4,6 +4,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NonVisualCallsTest {
+    @Test fun identifiesNonVisualLeavesByDeclaration() {
+        assertTrue(NonVisualCalls.isKnownNonVisualLeaf("collectInto", "C(collectInto):SnapshotFlow.kt#9igjgp"))
+        assertTrue(NonVisualCalls.isKnownNonVisualLeaf("BackgroundTextMeasurement", "C:BasicText.android.kt#423gt5"))
+        assertFalse(NonVisualCalls.isKnownNonVisualLeaf("collectInto", "C:SnapshotFlow.kt#business"))
+        assertFalse(NonVisualCalls.isKnownNonVisualLeaf("QuickActionsHost", "C:SnapshotFlow.kt#9igjgp"))
+        assertFalse(NonVisualCalls.isKnownNonVisualLeaf("collectInto", null))
+    }
+
     @Test fun recognizesBookkeepingBeforeParameterExtraction() {
         for (name in listOf("remember", "rememberSaveable", "rememberAppState", "LaunchedEffect", "SideEffect", "produceState", "<get-current>", "<get-colors>")) {
             assertTrue(NonVisualCalls.shouldFlatten(name, false))

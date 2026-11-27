@@ -64,11 +64,11 @@ plugins { id("top.cyclops.compose-inspector") }
 // 应用模块 build.gradle.kts
 plugins {
     id("com.android.application")
-    id("top.cyclops.compose-inspector") version "2.0.0"
+    id("top.cyclops.compose-inspector") version "2.0.1"
 }
 ```
 
-2.0.0 插件按 build type 自动添加同版本 SDK。默认开启 `debug`，关闭 `release` 和其他自定义类型。已发布的 `0.1.4` 插件仍需显式添加下文所列 SDK 依赖。
+2.0.1 插件按 build type 自动添加同版本 SDK。默认开启 `debug`，关闭 `release` 和其他自定义类型。已发布的 `0.1.4` 插件仍需显式添加下文所列 SDK 依赖。
 
 在业务工程的 `settings.gradle.kts` 中，将 `maven("https://repo.tick-tick.cn/releases")` 加入 `pluginManagement.repositories` 和 `dependencyResolutionManagement.repositories`，保留原有 Google 和 Maven Central 仓库。本地联调时，在这两处使用 `mavenLocal()`，并在本仓库的 `android/` 执行 `./gradlew :signature-plugin:publishToMavenLocal publishToMavenLocal` 发布本地插件标记、插件实现及 SDK。仓库内的 sample 通过 included build 直接应用插件。
 
@@ -80,11 +80,12 @@ import dev.composeinspect.gradle.composeInspect
 android {
     buildTypes {
         debug { composeInspect = false }
+        release { composeInspect = true } // 保持 isDebuggable = false
     }
 }
 ```
 
-开关作用于该 build type 的所有产品风味，同时控制插件添加的 SDK 依赖和签名索引任务。显式开启的构建类型只有在未混淆且应用无动态特性模块时生成索引。SDK 仅在可调试 APK 中启动采集。插件在 AGP 9.2.1 上验证。安装了多个 APK 的应用保守地使用设备端现有路径，缺少或损坏的随包索引也会回退。Gradle 按输入复用任务结果；任务重跑时按 JAR 内容哈希复用签名分析，并重新合并全局的同名冲突。
+开关作用于该 build type 的所有产品风味，同时控制插件添加的 SDK 依赖和签名索引任务。显式开启的构建类型只有在未混淆且应用无动态特性模块时生成索引。不可调试 APK 需要显式开启开关，并使用含此功能的插件和 SDK 重新构建、安装，才能通过 ADB 抓取。插件在 AGP 9.2.1 上验证。安装了多个 APK 的应用保守地使用设备端现有路径，缺少或损坏的随包索引也会回退。Gradle 按输入复用任务结果；任务重跑时按 JAR 内容哈希复用签名分析，并重新合并全局的同名冲突。
 
 验证同一 APK 的 DEX 与随包索引时，先生成 APK，再运行比对：
 
@@ -131,7 +132,7 @@ python3 tools/validate.py --serial DEVICE_SERIAL --versions 1.12.1
 ## Maven 发布
 
 SDK 和 Gradle 插件的发布目标为 `https://repo.tick-tick.cn`。正式版发布到 `releases`。日常 SNAPSHOT 联调使用上文的 `publishToMavenLocal` 命令。
-版本由 `gradle.properties` 的 `sdkVersion` 统一控制，当前正式版本为 `2.0.0`。
+版本由 `gradle.properties` 的 `sdkVersion` 统一控制，当前正式版本为 `2.0.1`。
 
 使用已发布的 0.1.4 时，在业务应用的调试依赖中添加：
 

@@ -13,3 +13,6 @@ var ApplicationBuildType.composeInspect: Boolean
     set(value) {
         (this as ExtensionAware).extensions.extraProperties.set(enabledKey, value)
     }
+
+fun ApplicationBuildType.explicitlyEnablesInspection(): Boolean =
+    (this as ExtensionAware).extensions.extraProperties.properties[enabledKey] == true

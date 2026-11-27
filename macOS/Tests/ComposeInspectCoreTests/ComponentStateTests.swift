@@ -142,7 +142,7 @@ final class ComponentStateTests: XCTestCase {
 
     func testHandshakeRequiresExactVersion() throws {
         var hello: [String: InspectorJSON] = ["protocolVersion": .number("1"), "pid": .number("9"), "packageName": .string("dev.sample")]
-        for version in ["0.1.4", "0.1.4-SNAPSHOT", "0.1.5-SNAPSHOT", "2.0.0", "2.0.0-SNAPSHOT"] {
+        for version in ["0.1.4", "0.1.4-SNAPSHOT", "0.1.5-SNAPSHOT", "2.0.0", "2.0.0-SNAPSHOT", "2.0.1"] {
             XCTAssertTrue(SDKInspectorClient.supports(version))
         }
         for version in [nil, "0.1.2", "0.1.5"] as [String?] {

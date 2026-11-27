@@ -42,6 +42,7 @@ final class ComponentStyleTests: XCTestCase {
         XCTAssertEqual(style.contentBounds, CGRect(x: 30, y: 30, width: 40, height: 20))
         XCTAssertEqual(style.layers.map(\.kind), ["background", "padding", "background", "padding", "graphicsLayer", "shadow"])
         XCTAssertEqual(style.layers[4].graphicsParameters?.map(\.value), ["0.6", "false"])
+        XCTAssertEqual(style.graphicsOpacity, 0.6)
         XCTAssertNil(style.layers[4].unsupported)
         let shadowLayer = try XCTUnwrap(style.layers.last)
         XCTAssertEqual(shadowLayer.shadow?.elevationDp, 3.5)

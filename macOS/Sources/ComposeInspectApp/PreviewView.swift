@@ -5,7 +5,6 @@ import SwiftUI
 struct PreviewView: View {
     private struct PageSource: Hashable {
         let snapshot: UUID
-        let root: String?
         let image: ObjectIdentifier
     }
     @State private var showing3D = false
@@ -47,16 +46,6 @@ struct PreviewView: View {
                     .help("跳过重复选框：父子选框重合时只选最内层")
                 }
                 Spacer()
-                if !pickingColor && store.snapshot.roots.count > 1 {
-                    Picker("预览层级", selection: $store.windowRootID) {
-                        Text("全部").tag(nil as String?)
-                        ForEach(Array(store.snapshot.roots.reversed().enumerated()), id: \.element.id) { index, root in
-                            Text("窗口 \(index + 1) · \(root.shortName)").tag(Optional(root.id))
-                        }
-                    }.pickerStyle(.menu).labelsHidden()
-                    .help("查看全部层级或单个窗口")
-                    .fixedSize().font(.system(size: 11))
-                }
             }.padding(.horizontal, 10).padding(.vertical, 6)
             Divider()
             ZStack {
@@ -65,7 +54,9 @@ struct PreviewView: View {
                        let image = store.image {
                         InlinePagePreview(store: store, active: showing3D)
                             .opacity(showing3D ? 1 : 0).allowsHitTesting(showing3D).accessibilityHidden(!showing3D)
-                            .id(PageSource(snapshot: store.snapshot.id, root: store.windowRootID, image: ObjectIdentifier(image)))
+                            .id(PageSource(snapshot: store.snapshot.id, image: ObjectIdentifier(image)))
+                    } else if showing3D && !store.hiddenWindowIDs.isEmpty {
+                        Text("所有图层均已隐藏").foregroundStyle(.secondary)
                     } else if showing3D {
                         EmptyState(icon: "view.3d", title: "尚无 3D 预览", subtitle: "获取界面后可查看当前窗口的组件层级。")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -194,8 +185,7 @@ struct PreviewView: View {
             let viewport = pinchedViewport(pinch, in: geometry.size)
             let mapper = CoordinateMapper(imageSize: store.snapshot.pixelSize, canvasSize: geometry.size, zoom: viewport.zoom, pan: viewport.pan)
             let hovered = !pickingColor && !panning && store.canPickImage ? hoverPoint.flatMap {
-                mapper.candidates(at: $0, in: store.presentationIndex, imageSize: store.snapshot.pixelSize,
-                                  rootID: store.windowRootID, geometryIndex: store.snapshotIndex).first
+                store.visibleCandidates(at: $0, mapper: mapper).first
             } : nil
             let measurement = measurement(to: hovered)
             ZStack(alignment: .topLeading) {
@@ -210,7 +200,7 @@ struct PreviewView: View {
                         .accessibilityLabel("\(store.snapshot.packageName) 的界面截图")
                     if !pickingColor {
                         if store.canPickImage && store.showWireframes {
-                            ComponentWireframes(snapshotID: store.snapshot.id, rootID: store.windowRootID,
+                            ComponentWireframes(snapshotID: store.snapshot.id, hiddenWindowIDs: store.hiddenWindowIDs,
                                                 hidingInternals: store.hideInternalNodes, onlyClickable: store.filterClickable,
                                                 presentationRevision: store.presentationRevision,
                                                 nodes: store.visibleNodes, imageSize: store.snapshot.pixelSize,
@@ -242,6 +232,8 @@ struct PreviewView: View {
                             measurement?.draw(in: context, size: size, mapper: mapper)
                         }.allowsHitTesting(false)
                     }
+                } else if !store.hiddenWindowIDs.isEmpty {
+                    Text("所有图层均已隐藏").foregroundStyle(.secondary)
                 } else {
                     EmptyState(icon: "camera", title: "尚未获取界面", subtitle: "选择设备，待页面稳定后点击右上角相机。")
                 }
@@ -549,7 +541,7 @@ struct ComponentWireframeOutline: Hashable {
 /// the lightweight highlight above this layer, not every rectangle on the screen.
 private struct ComponentWireframes: View, Equatable {
     let snapshotID: UUID
-    let rootID: String?
+    let hiddenWindowIDs: Set<String>
     let hidingInternals: Bool
     let onlyClickable: Bool
     let presentationRevision: UInt
@@ -560,7 +552,7 @@ private struct ComponentWireframes: View, Equatable {
     let pan: CGSize
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.snapshotID == rhs.snapshotID && lhs.rootID == rhs.rootID && lhs.hidingInternals == rhs.hidingInternals && lhs.onlyClickable == rhs.onlyClickable && lhs.presentationRevision == rhs.presentationRevision && lhs.imageSize == rhs.imageSize
+        lhs.snapshotID == rhs.snapshotID && lhs.hiddenWindowIDs == rhs.hiddenWindowIDs && lhs.hidingInternals == rhs.hidingInternals && lhs.onlyClickable == rhs.onlyClickable && lhs.presentationRevision == rhs.presentationRevision && lhs.imageSize == rhs.imageSize
             && lhs.canvasSize == rhs.canvasSize && lhs.zoom == rhs.zoom && lhs.pan == rhs.pan
     }
 

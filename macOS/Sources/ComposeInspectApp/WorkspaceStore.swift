@@ -161,23 +161,36 @@ final class WorkspaceStore {
     var imagePan: CGSize = .zero
     func fitImage() { zoom = 1; imagePan = .zero }
     var hitCandidates: [String] = []
-    var windowRootID: String? {
-        didSet {
-            guard oldValue != windowRootID else { return }
-            updateSearchMatches()
-            imageHitCycle.reset()
-            hitCandidates = []
-            if let selectedNodeID, !isInVisibleWindow(selectedNodeID) { clearSelection() }
+    private(set) var hiddenWindowIDs: Set<String> = []
+
+    func setWindow(_ id: String, visible: Bool) {
+        guard windowImages[id] != nil, hiddenWindowIDs.contains(id) == visible else { return }
+        var hidden = hiddenWindowIDs
+        if visible { hidden.remove(id) } else { hidden.insert(id) }
+        let roots = snapshot.roots.filter { !hidden.contains($0.id) }
+        do {
+            image = hidden.isEmpty ? screenImage : try Self.composite(roots, images: windowImages, size: snapshot.pixelSize)
+        } catch {
+            errorMessage = error.localizedDescription
+            return
         }
+        hiddenWindowIDs = hidden
+        updateSearchMatches()
+        imageHitCycle.reset()
+        hitCandidates = []
+        if let selectedNodeID, !isInVisibleWindow(selectedNodeID) { clearSelection() }
+        if image == nil { pickingColor = false }
     }
     @ObservationIgnored private var imageHitCycle = ImageHitCycle()
     var errorMessage: String?
     var notice = "等待获取界面"
     private var screenImage: NSImage?
     private var windowImages: [String: NSImage] = [:]
-    var image: NSImage? { windowRootID.flatMap { windowImages[$0] } ?? screenImage }
+    private(set) var image: NSImage?
 
+    func windowImage(for root: InspectorNode) -> NSImage? { windowImages[root.id] }
     func image(for root: InspectorNode) -> NSImage? { windowImages[root.id] ?? screenImage }
+
     private var transientParameters: [ComponentKey: Set<String>] = [:]
     let deviceSession = DeviceSession()
     var rawPresentation: RawJSONPresentation?
@@ -223,16 +236,15 @@ final class WorkspaceStore {
         image != nil
     }
     var visibleRoots: [InspectorNode] {
-        guard let windowRootID else { return presentationIndex.roots }
-        return presentationIndex.byID[windowRootID].map { [$0] } ?? []
+        presentationIndex.roots.filter { !hiddenWindowIDs.contains($0.id) }
     }
     var visibleNodes: [InspectorNode] {
-        windowRootID.flatMap { presentationIndex.nodesByRoot[$0] } ?? presentationIndex.nodes
+        hiddenWindowIDs.isEmpty ? presentationIndex.nodes : visibleRoots.flatMap { presentationIndex.nodesByRoot[$0.id] ?? [] }
     }
     var visibleBounds: [CGRect] { visibleRoots.flatMap { presentationIndex.boundsByRoot[$0.id] ?? [] } }
     func isInVisibleWindow(_ nodeID: String) -> Bool {
         guard let root = snapshotIndex.rootIDs[nodeID] else { return false }
-        return windowRootID == nil || root == windowRootID
+        return !hiddenWindowIDs.contains(root)
     }
     var issues: [ComponentIssue] { ledger.issues }
     var currentText: String {
@@ -292,7 +304,7 @@ final class WorkspaceStore {
         NSApp.keyWindow?.makeFirstResponder(nil)
         issueEditRevision &+= 1
         selectedNodeID = nodeID
-        if windowRootID != nil { windowRootID = snapshotIndex.rootIDs[nodeID] }
+        if let root = snapshotIndex.rootIDs[nodeID], hiddenWindowIDs.contains(root) { setWindow(root, visible: true) }
         for node in presentationIndex.path(to: nodeID).dropLast() { expandedNodes.insert(node.id) }
     }
 
@@ -314,6 +326,11 @@ final class WorkspaceStore {
         hitCandidates = []
     }
 
+    func visibleCandidates(at point: CGPoint, mapper: CoordinateMapper) -> [InspectorNode] {
+        let hits = mapper.candidates(at: point, in: presentationIndex, imageSize: snapshot.pixelSize, geometryIndex: snapshotIndex)
+        return hiddenWindowIDs.isEmpty ? hits : hits.filter { isInVisibleWindow($0.id) }
+    }
+
     func selectImage(at point: CGPoint, mapper: CoordinateMapper) {
         guard canPickImage else { return }
         if !mapper.display(CGRect(origin: .zero, size: snapshot.pixelSize)).contains(point) {
@@ -321,8 +338,7 @@ final class WorkspaceStore {
             return
         }
         guard selectionEnabled else { return }
-        let hits = mapper.candidates(at: point, in: presentationIndex, imageSize: snapshot.pixelSize,
-                                     rootID: windowRootID, geometryIndex: snapshotIndex)
+        let hits = visibleCandidates(at: point, mapper: mapper)
         var redundant = Set<String>()
         if skipsDuplicateHitBounds {
             for hit in hits {
@@ -631,20 +647,8 @@ final class WorkspaceStore {
             guard let result = canvas.makeImage() else { throw CocoaError(.fileReadCorruptFile) }
             return NSImage(cgImage: result, size: size)
         }
-        if pairedImages.count == 1 {
-            newImage = pairedImages.values.first
-        } else if !pairedImages.isEmpty {
-            guard let canvas = CGContext(data: nil, width: Int(size.width), height: Int(size.height),
-                                         bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
-                                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-                throw CocoaError(.fileReadCorruptFile)
-            }
-            for root in captured.snapshot.roots.reversed() {
-                guard let pixels = pairedImages[root.id]?.cgImage(forProposedRect: nil, context: nil, hints: nil)
-                else { throw CocoaError(.fileReadCorruptFile) }
-                canvas.draw(pixels, in: CGRect(origin: .zero, size: size))
-            }
-            newImage = canvas.makeImage().map { NSImage(cgImage: $0, size: size) }
+        if !pairedImages.isEmpty {
+            newImage = try Self.composite(captured.snapshot.roots, images: pairedImages, size: size)
         }
         guard newImage != nil else { throw CocoaError(.fileReadCorruptFile) }
         discardCaptureIssues()
@@ -656,9 +660,29 @@ final class WorkspaceStore {
         search = ""
         installIndexes(indexes)
         expandedNodes = Set(snapshot.roots.map(\.id))
-        windowRootID = nil
+        hiddenWindowIDs = []
+        image = newImage
+        updateSearchMatches()
         fitImage()
         notice = geometrySnapshot ? "已快速采集结构与边界" : "已获取界面"
+    }
+
+    private static func composite(_ roots: [InspectorNode], images: [String: NSImage], size: CGSize) throws -> NSImage? {
+        guard !roots.isEmpty else { return nil }
+        if roots.count == 1 { return images[roots[0].id] }
+        guard let canvas = CGContext(data: nil, width: Int(size.width), height: Int(size.height),
+                                     bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                     bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        for root in roots.reversed() {
+            guard let pixels = images[root.id]?.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            else { throw CocoaError(.fileReadCorruptFile) }
+            canvas.draw(pixels, in: CGRect(origin: .zero, size: size))
+        }
+
+        guard let result = canvas.makeImage() else { throw CocoaError(.fileReadCorruptFile) }
+        return NSImage(cgImage: result, size: size)
     }
 
     func showRawJSON(parameter: NodeParameter? = nil) {

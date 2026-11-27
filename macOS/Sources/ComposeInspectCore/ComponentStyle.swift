@@ -64,6 +64,18 @@ public struct ComponentStyle: Codable, Equatable, Sendable {
     public let contentBounds: CGRect
     public let outerBounds: CGRect
     public let layers: [Layer]
+    /// Combined alpha of the component's captured graphics layers.
+    public var graphicsOpacity: Double? {
+        let values = layers.flatMap { $0.graphicsParameters ?? [] }.filter { $0.name == "alpha" }
+        guard !values.isEmpty else { return nil }
+        var opacity = 1.0
+        for parameter in values {
+            guard let alpha = Double(parameter.value), (0...1).contains(alpha) else { return nil }
+            opacity *= alpha
+        }
+        return opacity
+    }
+
     /// A custom layout can place its own modifier layers outside its reported outer box.
     /// These rectangles are already measured in screen pixels, including padding and offsets.
     /// The outer coordinator is a layout allocation, which offset can leave behind at the

@@ -4,7 +4,7 @@
             android:authorities="${applicationId}.androidx-startup" android:exported="false">
             <meta-data android:name="dev.composeinspect.sdk.InspectorInitializer" android:value="androidx.startup" />
         </provider>
-        <meta-data android:name="dev.composeinspect.SDK_VERSION" android:value="2.0.0" />
+        <meta-data android:name="dev.composeinspect.SDK_VERSION" android:value="2.0.1" />
         <meta-data android:name="dev.composeinspect.PROTOCOL_VERSION" android:value="1" />
     </application>
 </manifest>

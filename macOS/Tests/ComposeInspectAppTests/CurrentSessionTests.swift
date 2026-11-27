@@ -25,7 +25,7 @@ final class CurrentSessionTests: XCTestCase {
         XCTAssertEqual(store.snapshotIndex.rootIDs[marker.id], roots[0].id)
         let point = CGPoint(x: marker.bounds.minX + 4, y: marker.bounds.minY + 4)
         XCTAssertEqual(pixels.hex(at: point, imageSize: image.size), scenario == "popup" ? "#FFFF00" : "#FFFFFF")
-        store.windowRootID = roots[1].id
+        store.setWindow(roots[0].id, visible: false)
         XCTAssertNotNil(store.image)
         XCTAssertFalse(store.image === image)
     }
@@ -60,14 +60,34 @@ final class CurrentSessionTests: XCTestCase {
         let mapper = CoordinateMapper(imageSize: size, canvasSize: size)
         store.selectImage(at: CGPoint(x: 1.5, y: 2.5), mapper: mapper)
         XCTAssertEqual(store.hitCandidates, [front.id, back.id])
-        XCTAssertNil(store.windowRootID)
-        store.windowRootID = back.id
+        XCTAssertTrue(store.hiddenWindowIDs.isEmpty)
+        store.setWindow(front.id, visible: false)
         XCTAssertEqual(try color(1, 2), "#0000FF")
         XCTAssertEqual(store.visibleNodes.map(\.id), [back.id])
         XCTAssertNil(store.selectedNodeID)
+        store.selectImage(at: CGPoint(x: 1.5, y: 2.5), mapper: mapper)
+        XCTAssertEqual(store.hitCandidates, [back.id])
+        store.setWindow(back.id, visible: false)
+        XCTAssertNil(store.image)
+        XCTAssertTrue(store.visibleRoots.isEmpty)
+        store.setWindow(front.id, visible: true)
+        XCTAssertEqual(try color(1, 2), "#FF0000")
+        XCTAssertEqual(store.visibleRoots.map(\.id), [front.id])
         try await store.applyCapture(capture)
-        XCTAssertNil(store.windowRootID)
+        XCTAssertTrue(store.hiddenWindowIDs.isEmpty)
         XCTAssertEqual(store.visibleRoots.map(\.id), [front.id, back.id])
+
+        let middle = InspectorNode(id: "middle", rawID: 3, name: "Dialog", bounds: back.bounds)
+        let threeLayers = InspectorSnapshot(packageName: "test", deviceName: "test", pixelSize: size, roots: [front, middle, back])
+        var images = capture.windowImages
+        images[middle.id] = .init(png: try png(width: 4, color: .green), origin: .zero)
+        try await store.applyCapture(CapturedSnapshot(snapshot: threeLayers, imageData: Data(), windowImages: images))
+        XCTAssertEqual(try color(1, 1), "#00FF00")
+        store.setWindow(middle.id, visible: false)
+        XCTAssertEqual(try color(1, 2), "#FF0000")
+        XCTAssertEqual(try color(1, 1), "#0000FF")
+        store.selectImage(at: CGPoint(x: 1.5, y: 2.5), mapper: mapper)
+        XCTAssertEqual(store.hitCandidates, [front.id, back.id])
     }
 
     @MainActor func testPreviewPanStopsAtEdgesAndCentersLetterboxedAxes() {
@@ -289,11 +309,12 @@ final class CurrentSessionTests: XCTestCase {
         let dialog = InspectorNode(id: "dialog", rawID: 100, name: "Dialog", bounds: .zero)
         let snapshot = InspectorSnapshot(packageName: "test.app", deviceName: "test", pixelSize: sample.snapshot.pixelSize,
                                          roots: sample.snapshot.roots + [dialog])
-        try await store.applyCapture(CapturedSnapshot(snapshot: snapshot, imageData: sample.imageData))
+        let images = Dictionary(uniqueKeysWithValues: snapshot.roots.map { ($0.id, CapturedSnapshot.WindowImage(png: sample.imageData, origin: .zero)) })
+        try await store.applyCapture(CapturedSnapshot(snapshot: snapshot, imageData: sample.imageData, windowImages: images))
         store.select("login")
         store.edit("修改按钮", for: try XCTUnwrap(store.selectedKey), revision: store.issueEditRevision)
         let issue = try XCTUnwrap(store.currentIssue)
-        store.windowRootID = dialog.id
+        store.setWindow(try XCTUnwrap(store.snapshotIndex.rootIDs["login"]), visible: false)
         XCTAssertNil(store.selectedKey)
         XCTAssertTrue(store.currentText.isEmpty)
         store.selectIssue(issue)

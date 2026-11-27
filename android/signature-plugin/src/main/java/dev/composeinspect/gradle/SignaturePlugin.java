@@ -18,12 +18,14 @@ public class SignaturePlugin implements Plugin<Project> {
     @Override public void apply(Project project) {
         project.getPluginManager().withPlugin("com.android.application", ignored -> {
             var android = project.getExtensions().getByType(ApplicationAndroidComponentsExtension.class);
+            var explicitTypes = new HashSet<String>();
             var enabledTypes = new HashSet<String>();
             android.finalizeDsl((Action<ApplicationExtension>) app -> {
                 for (var buildType : app.getBuildTypes()) {
                     if (!ComposeInspectBuildTypeKt.getComposeInspect(buildType)) continue;
                     String type = buildType.getName();
                     enabledTypes.add(type);
+                    if (ComposeInspectBuildTypeKt.explicitlyEnablesInspection(buildType)) explicitTypes.add(type);
                     String configuration = type + "Implementation";
                     project.getConfigurations().named(name -> name.equals(configuration)).configureEach(config ->
                             project.getDependencies().add(config.getName(), "top.cyclops:compose-inspector:" + sdkVersion()));
@@ -31,11 +33,15 @@ public class SignaturePlugin implements Plugin<Project> {
             });
             android.onVariants(android.selector().all(), (Action<ApplicationVariant>) variant -> {
                 if (!enabledTypes.contains(variant.getBuildType())) return;
+                String name = variant.getName();
+                String suffix = Character.toUpperCase(name.charAt(0)) + name.substring(1);
+                if (explicitTypes.contains(variant.getBuildType())) {
+                    var marker = project.getTasks().register("generate" + suffix + "ComposeInspectOptIn", GenerateInspectOptIn.class);
+                    variant.getSources().getAssets().addGeneratedSourceDirectory(marker, GenerateInspectOptIn::getAssets);
+                }
                 var app = project.getExtensions().getByType(ApplicationExtension.class);
                 if (variant.isMinifyEnabled() || !app.getDynamicFeatures().isEmpty()) return;
-                String name = variant.getName();
-                var task = project.getTasks().register("generate" + Character.toUpperCase(name.charAt(0))
-                        + name.substring(1) + "ComposeReturnIndex", GenerateReturnIndex.class, index ->
+                var task = project.getTasks().register("generate" + suffix + "ComposeReturnIndex", GenerateReturnIndex.class, index ->
                     index.getJarCache().set(project.getLayout().getBuildDirectory().dir("intermediates/composeReturnIndex/" + name)));
                 variant.getArtifacts().forScope(ScopedArtifacts.Scope.ALL).use(task)
                         .toGet(ScopedArtifact.CLASSES.INSTANCE, GenerateReturnIndex::getJars, GenerateReturnIndex::getDirs);

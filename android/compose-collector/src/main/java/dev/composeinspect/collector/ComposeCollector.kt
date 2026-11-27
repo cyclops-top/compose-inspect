@@ -119,7 +119,7 @@ object ComposeCollector {
                                     else -> children.flatMap { it.nodes }
                                 }
                                 val boundaries = when {
-                                    included == null -> emptyList()
+                                    !onlySourceNodes -> emptyList()
                                     group.node != null -> listOf(Boundary(group.node!!, context.bounds))
                                     children.isEmpty() -> emptyList()
                                     children.size == 1 -> children[0].boundaries
@@ -154,6 +154,12 @@ object ComposeCollector {
                                     }
                                 }
                                 val bounds = context.bounds
+                                if (group.node == null && allChildren.isEmpty() && boundaries.isEmpty() &&
+                                    bounds.width == 0 && bounds.height == 0 &&
+                                    NonVisualCalls.isKnownNonVisualLeaf(name, group.sourceInfo)) {
+                                    filteredCalls++
+                                    return@collect Branch(allChildren, boundaries)
+                                }
                                 val box = listOf(bounds.left, bounds.top, bounds.right, bounds.bottom)
                                 if (name != null) named++
                                 if (location != null) located++

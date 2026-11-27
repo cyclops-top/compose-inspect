@@ -6,62 +6,120 @@ import SwiftUI
 struct HierarchyView: View {
     @Bindable var store: WorkspaceStore
     @State private var showingFilterConfiguration = false
+    @State private var showingLayers = false
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                SectionCaption(text: "组件树")
+                if store.snapshot.roots.count > 1 {
+                    Picker("侧栏", selection: $showingLayers) {
+                        Text("组件树").tag(false)
+                        Text("图层").tag(true)
+                    }.pickerStyle(.segmented).labelsHidden()
+                } else {
+                    SectionCaption(text: "组件树")
+                }
                 Spacer()
             }.padding(.horizontal, 14).frame(height: 35)
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("查找组件", text: $store.search).textFieldStyle(.plain)
-                if !store.search.isEmpty {
-                    Button { store.search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }
-                        .buttonStyle(.plain).help("清除搜索")
-                }
-            }.font(.system(size: 12)).padding(7)
-                .background(.background, in: RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(AppStyle.divider.opacity(0.5)))
-                .padding(.horizontal, 10).padding(.bottom, 8)
-            HStack(spacing: 6) {
-                Toggle("精简", isOn: $store.hideInternalNodes)
-                    .disabled(store.filterClickable)
-                    .help(store.filterClickable ? "仅可点击模式必须开启精简" : "隐藏内部实现及 Android 宿主容器，保留子组件")
-                if !store.geometrySnapshot {
-                    Toggle("仅可点击", isOn: Binding(get: { store.filterClickable }, set: { store.onlyClickableNodes = $0 }))
-                        .help("保留窗口根节点及具有点击动作的组件，并自动开启精简")
-                }
-                Spacer(minLength: 0)
-                Button { showingFilterConfiguration = true } label: {
-                    Image(systemName: "gearshape")
-                }.buttonStyle(.plain).help("配置精简规则").accessibilityLabel("配置精简规则")
-            }.toggleStyle(.checkbox).font(.system(size: 11))
-                .padding(.horizontal, 10).padding(.bottom, 12)
-            if store.snapshot.roots.count > 1 {
-                Text("多个窗口 · 在预览中选择窗口")
-                    .font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 6)
+            if showingLayers && store.snapshot.roots.count > 1 {
+                layerList
+            } else {
+                componentTree
             }
-            if store.searchesAllComponents {
-                Button("正在搜索本次采集 · 恢复筛选") { store.searchesAllComponents = false }
-                    .font(.caption)
-            }
-            NativeHierarchyView(store: store)
-                .overlay {
-                    if store.searchMatches?.isEmpty == true {
-                        VStack(spacing: 8) {
-                            Text("未找到“\(store.search)”").lineLimit(3)
-                            if (store.hideInternalNodes || store.onlySourceNodes) && !store.searchesAllComponents {
-                                Button("在本次采集的全部组件中搜索") { store.searchesAllComponents = true }
-                            }
-                        }.font(.callout).padding().multilineTextAlignment(.center)
-                    }
-                }
-            HStack(spacing: 5) {
-                Text("数字表示层级 · 根节点为 0").font(.system(size: 10))
-                Spacer()
-            }.foregroundStyle(.tertiary).padding(12)
         }.background(AppStyle.sidebar)
             .sheet(isPresented: $showingFilterConfiguration) { NodeFilterSettingsView(store: store) }
+    }
+
+    private var layerList: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(Array(store.snapshot.roots.reversed().enumerated()), id: \.element.id) { index, root in
+                    let visible = !store.hiddenWindowIDs.contains(root.id)
+                    let thumbnail = store.windowImage(for: root)
+                    HStack {
+                        Button {
+                            store.select(root.id)
+                        } label: {
+                            HStack {
+                                let frame = RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                frame.fill(AppStyle.canvas)
+                                    .frame(width: 66, height: 54)
+                                    .overlay {
+                                        if let thumbnail {
+                                            Image(nsImage: thumbnail).resizable().scaledToFit()
+                                        }
+                                    }
+                                    .clipShape(frame)
+                                    .overlay { frame.strokeBorder(AppStyle.divider, lineWidth: 0.5) }
+                                VStack(alignment: .leading) {
+                                    Text("图层 \(index + 1)")
+                                    Text(root.shortName).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                }
+                                Spacer()
+                            }.contentShape(Rectangle())
+                        }.buttonStyle(.plain).disabled(!visible)
+                        Button {
+                            store.setWindow(root.id, visible: !visible)
+                        } label: {
+                            Image(systemName: visible ? "eye" : "eye.slash")
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                            .accessibilityLabel(visible ? "隐藏图层 \(index + 1)" : "显示图层 \(index + 1)")
+                            .disabled(thumbnail == nil)
+                            .help(thumbnail == nil ? "此次采集缺少独立窗口截图" : (visible ? "隐藏这一层" : "显示这一层"))
+                    }.padding(8)
+                        .background(store.selectedNodeID == root.id ? Color.accentColor.opacity(0.12) : .clear)
+                    Divider()
+                }
+            }
+        }.disabled(store.isCapturing)
+    }
+
+    @ViewBuilder private var componentTree: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("查找组件", text: $store.search).textFieldStyle(.plain)
+            if !store.search.isEmpty {
+                Button { store.search = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }
+                    .buttonStyle(.plain).help("清除搜索")
+            }
+        }.font(.system(size: 12)).padding(7)
+            .background(.background, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(AppStyle.divider.opacity(0.5)))
+            .padding(.horizontal, 10).padding(.bottom, 8)
+        HStack(spacing: 6) {
+            Toggle("精简", isOn: $store.hideInternalNodes)
+                .disabled(store.filterClickable)
+                .help(store.filterClickable ? "仅可点击模式必须开启精简" : "隐藏内部实现及 Android 宿主容器，保留子组件")
+            if !store.geometrySnapshot {
+                Toggle("仅可点击", isOn: Binding(get: { store.filterClickable }, set: { store.onlyClickableNodes = $0 }))
+                    .help("保留窗口根节点及具有点击动作的组件，并自动开启精简")
+            }
+            Spacer(minLength: 0)
+            Button { showingFilterConfiguration = true } label: {
+                Image(systemName: "gearshape")
+            }.buttonStyle(.plain).help("配置精简规则").accessibilityLabel("配置精简规则")
+        }.toggleStyle(.checkbox).font(.system(size: 11))
+            .padding(.horizontal, 10).padding(.bottom, 12)
+        if store.searchesAllComponents {
+            Button("正在搜索本次采集 · 恢复筛选") { store.searchesAllComponents = false }
+                .font(.caption)
+        }
+        NativeHierarchyView(store: store)
+            .overlay {
+                if store.searchMatches?.isEmpty == true {
+                    VStack(spacing: 8) {
+                        Text("未找到“\(store.search)”").lineLimit(3)
+                        if (store.hideInternalNodes || store.onlySourceNodes) && !store.searchesAllComponents {
+                            Button("在本次采集的全部组件中搜索") { store.searchesAllComponents = true }
+                        }
+                    }.font(.callout).padding().multilineTextAlignment(.center)
+                }
+            }
+        HStack(spacing: 5) {
+            Text("数字表示层级 · 根节点为 0").font(.system(size: 10))
+            Spacer()
+        }.foregroundStyle(.tertiary).padding(12)
     }
 }
 
@@ -129,7 +187,7 @@ struct NativeHierarchyView: NSViewRepresentable {
         var store: WorkspaceStore
         weak var outline: NSOutlineView?
         private var snapshotID: UUID?
-        private var windowRootID: String?
+        private var hiddenWindowIDs: Set<String> = []
         private var query = ""
         private var presentationRevision: UInt?
         private var roots: [Item] = []
@@ -148,13 +206,13 @@ struct NativeHierarchyView: NSViewRepresentable {
             synchronizing = true
             defer { synchronizing = false }
             let treeChanged = snapshotID != store.snapshot.id || presentationRevision != store.presentationRevision
-            let rebuilt = treeChanged || query != store.search || windowRootID != store.windowRootID
+            let rebuilt = treeChanged || query != store.search || hiddenWindowIDs != store.hiddenWindowIDs
             let issues = Set(store.issues.filter { $0.component.snapshotID == store.snapshot.id }.map(\.component.nodeID))
             let issuesChanged = issues != issueNodeIDs
             issueNodeIDs = issues
             if rebuilt {
                 snapshotID = store.snapshot.id
-                windowRootID = store.windowRootID
+                hiddenWindowIDs = store.hiddenWindowIDs
                 query = store.search
                 presentationRevision = store.presentationRevision
                 collapsedSearchItems.removeAll()

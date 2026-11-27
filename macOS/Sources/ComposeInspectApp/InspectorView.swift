@@ -630,6 +630,9 @@ private struct PrimaryAttributes: View {
             } else if !node.isVirtualLayoutGroup {
                 if isSurface { surface } else { layout }
             }
+            if let opacity = node.style?.graphicsOpacity {
+                field("透明度", opacity.formatted(.percent.precision(.fractionLength(0...2))))
+            }
         }.font(.callout).textSelection(.enabled)
     }
 
